@@ -1,6 +1,7 @@
 import './site.css';
 import './report-bug.js';
 import './ui/auth.js';
+import { initPermissionsModal, openPermissions } from './ui/permissions-modal.js';
 import { inject } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
 
@@ -132,6 +133,20 @@ document.querySelectorAll('.site-links a').forEach((a) => {
     a.setAttribute('aria-current', 'page');
   }
 });
+
+// ---------------------------------------------------------------- Permisos de la web
+// El reproductor ("/") ya trae su propia copia más rica del modal (main.js —
+// liga Wake Lock/Media Session al estado real de reproducción); en
+// cualquier otra página se inyecta esta versión autocontenida, así el
+// dropdown de cuenta (ver ui/auth.js) puede abrirlo ahí mismo en vez de
+// navegar a "/".
+if (here !== '/') {
+  initPermissionsModal();
+  if (location.hash === '#permisos') {
+    history.replaceState(null, '', location.pathname + location.search);
+    openPermissions();
+  }
+}
 
 // ---------------------------------------------------------------- Scrollspy
 // En la home, resalta en la nav el enlace de la sección visible

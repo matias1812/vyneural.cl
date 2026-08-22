@@ -952,13 +952,17 @@ function selectState(state) {
 
 // ---------------------------------------------------------------- Audio
 function currentParams() {
-  // El estado Personalizado usa su propio slider SIEMPRE, sin pasar por la
-  // portadora (misma prioridad que antes); el resto delega en carrierBaseFor
-  // (core/carrier.js), que hace el mismo escalado proporcional para las
-  // familias fijas (solfeggio/solfeggio963/ancestral) y los casos literales
-  // (schumann/estandar220/personalizado).
+  // El estado Personalizado también pasa por carrierBaseFor (core/carrier.js):
+  // la propia base dialada es su "base propia" a escalar, así que elegir una
+  // familia de portadora (Solfeggio/Ancestral/Schumann/Estándar 220) SÍ
+  // retona lo que armaste a mano, igual que con cualquier preset — antes el
+  // slider era la única fuente de verdad y los chips de portadora quedaban
+  // muertos (marcaban "activo" pero no afectaban el sonido) en este estado.
+  // El resto delega igual en carrierBaseFor, que hace el mismo escalado
+  // proporcional para las familias fijas (solfeggio/solfeggio963/ancestral)
+  // y los casos literales (schumann/estandar220/personalizado).
   const base = selected.custom
-    ? parseFloat(customBase.value)
+    ? carrierBaseFor(carrier, parseFloat(customBase.value), parseFloat(customBase.value))
     : carrierBaseFor(carrier, selected.base, parseFloat(customBase.value));
   const beat = selected.custom ? parseFloat(customBeat.value) : (selected.stimulus ? selected.stimulus.beat : 10);
   const wave = selectedWave;
@@ -3164,6 +3168,10 @@ function openPermissions() {
 function closePermissions() {
   if (permissionsModal) permissionsModal.classList.add('hidden');
 }
+// Acceso directo desde el navbar de cualquier página (⋯ → Permisos, ver
+// src/ui/auth.js): si ya estamos acá, llama esto in situ; si no, auth.js
+// navega a /#permisos y el bloque de abajo lo abre solo al cargar.
+window.__vyneural.openPermissions = openPermissions;
 
 function permissionStateText() {
   return notifStateText({
@@ -4750,9 +4758,24 @@ async function checkPendingReminder() {
   if (!pending && getAccessToken()) {
     try {
       const serverAlarms = await listServerAlarms();
+      // Render free duerme el proceso con inactividad: send_due_reminders()
+      // corre recién cuando algo lo despierta, y en ese mismo tick YA
+      // reprograma scheduled_at al próximo turno (haya llegado el push o
+      // no) — para cuando abrís la app, "vencida" (scheduled_at <= now) ya
+      // no es cierto aunque nunca hayas visto el aviso. last_fired_at (el
+      // momento real del último intento) es la única pista que queda; se le
+      // da una ventana de gracia generosa porque el dyno puede tardar horas
+      // en despertar si estuvo mucho tiempo inactivo.
+      const GRACE_MS = 24 * 60 * 60 * 1000;
+      const dueAt = (a) => {
+        const sch = a.scheduled_at ? new Date(a.scheduled_at).getTime() : null;
+        if (sch !== null && sch <= now) return sch;
+        const fired = a.last_fired_at ? new Date(a.last_fired_at).getTime() : null;
+        return fired !== null && now - fired <= GRACE_MS ? fired : null;
+      };
       const due = (serverAlarms || [])
-        .filter((a) => a.enabled && a.scheduled_at && new Date(a.scheduled_at).getTime() <= now)
-        .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))[0];
+        .filter((a) => a.enabled && dueAt(a) !== null)
+        .sort((a, b) => dueAt(a) - dueAt(b))[0];
       if (due && due.config && due.config.freq > 0) {
         pending = { name: due.name, freq: due.config.freq, beat: due.config.beat, wave: due.config.wave };
       }
@@ -4774,6 +4797,14 @@ async function checkPendingReminder() {
 }
 if (!isFinite(deepFreq) && !deepSeq) {
   checkPendingReminder();
+}
+
+// Permisos: acceso directo desde el navbar de otra página (⋯ → Permisos, ver
+// src/ui/auth.js) — llega acá con #permisos y se abre el mismo modal que el
+// menú ⋯ del reproductor, en vez de un destino separado.
+if (location.hash === '#permisos') {
+  history.replaceState(null, '', location.pathname + location.search);
+  openPermissions();
 }
 
 // Deep link de alarma (?autostart=true): P5.6 (C1) — NO arranca audio en la
@@ -4805,10 +4836,27 @@ if (
   });
 }
 
-// Backend opcional (FASE 17): no bloquea, no lanza, no cambia el
-// comportamiento offline. Solo actúa si hay backend configurado.
+// Solo para el arranque: un cold start de Render (20-50s) hacía que el
+// ÚNICO intento de initBackendIfConfigured() (push + sync de favoritos/
+// frecuencias/alarmas/itinerarios) fallara con un error de red — sin
+// reintentos, la sincronización quedaba rota hasta el próximo reload,
+// aunque el backend respondiera segundos después. Mismo bug y mismo fix
+// que refreshProfileOnBoot() (ui/auth.js), loadCommentsOnBoot()
+// (comments.js), loadAllOnBoot() (cuenta.js) y loadItinerariesOnBoot()
+// (rutina.js). Sin backend configurado (modo 100% offline),
+// initBackendIfConfigured() ya devuelve false al instante sin tocar la red
+// (ver backendEnabled() en api/integration.js) — reintentarlo unas veces
+// más ahí es inofensivo (solo llamadas síncronas, sin fetch de más).
+async function initBackendOnBoot() {
+  const RETRY_DELAYS_MS = [3000, 6000, 12000, 20000]; // ~41s de cobertura
+  for (let attempt = 0; ; attempt++) {
+    const ok = await initBackendIfConfigured().catch(() => false);
+    if (ok || attempt >= RETRY_DELAYS_MS.length) return;
+    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+  }
+}
 window.addEventListener('load', () => {
-  initBackendIfConfigured()
+  initBackendOnBoot()
     .then(() => {
       // La consulta real de push puede terminar después de abrir el modal:
       // actualizar el texto honesto y las capacidades cuando llegue.

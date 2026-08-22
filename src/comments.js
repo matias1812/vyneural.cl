@@ -117,18 +117,50 @@ function fmtDate(iso) {
 
 // ── Carga (caché TTL + dedup, aditiva) ──────────────────────────────────────
 
+async function fetchComments() {
+  const data = await cachedGet('/api/v1/comments?per_page=10', 8000);
+  renderRanking(data && data.summary);
+  renderList(data && data.items);
+}
+
+function showCommentsUnavailable() {
+  // Sin backend: ocultar el ranking y dejar el formulario con el aviso.
+  renderRanking(null);
+  renderList([]);
+  const hint = $('comments-auth-hint');
+  if (hint && !isLoggedIn()) {
+    hint.textContent = 'Comentarios no disponibles sin conexión al servidor.';
+  }
+}
+
 async function loadComments() {
   try {
-    const data = await cachedGet('/api/v1/comments?per_page=10', 8000);
-    renderRanking(data && data.summary);
-    renderList(data && data.items);
+    await fetchComments();
   } catch (_) {
-    // Sin backend: ocultar el ranking y dejar el formulario con el aviso.
-    renderRanking(null);
-    renderList([]);
-    const hint = $('comments-auth-hint');
-    if (hint && !isLoggedIn()) {
-      hint.textContent = 'Comentarios no disponibles sin conexión al servidor.';
+    showCommentsUnavailable();
+  }
+}
+
+// Solo para el arranque (init()): un cold start de Render (20-50s) hacía
+// que el ÚNICO intento de loadComments() de la carga de página fallara con
+// un error de red — transitorio, no "no hay comentarios". Sin reintentos,
+// la sección quedaba vacía (o con el aviso "sin conexión") para siempre en
+// esa carga de página, aunque el backend respondiera segundos después —
+// mismo bug y mismo fix que refreshProfileOnBoot() en ui/auth.js. Recién
+// se muestra el aviso de "no disponible" si se agotan los reintentos, para
+// no mostrar un mensaje alarmante de más durante un cold start normal.
+async function loadCommentsOnBoot() {
+  const RETRY_DELAYS_MS = [3000, 6000, 12000, 20000]; // ~41s de cobertura
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fetchComments();
+      return;
+    } catch (_) {
+      if (attempt >= RETRY_DELAYS_MS.length) {
+        showCommentsUnavailable();
+        return;
+      }
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
     }
   }
 }
@@ -229,7 +261,7 @@ function wireForm() {
 function init() {
   listEl = $('comments-list');
   wireForm();
-  loadComments();
+  loadCommentsOnBoot();
   document.addEventListener('vyneural:auth', () => {
     renderAuthHint();
     loadComments();

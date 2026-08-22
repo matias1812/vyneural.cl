@@ -54,13 +54,16 @@ function openAuth(mode) {
 
 // ── Estado de sesión / puerta ───────────────────────────────────────────────
 
-function renderGate() {
+function renderGate({ retryOnBoot = false } = {}) {
   const gate = $('cuenta-gate');
   const content = $('cuenta-content');
   const loggedIn = !!getAccessToken();
   if (gate) gate.classList.toggle('hidden', loggedIn);
   if (content) content.classList.toggle('hidden', !loggedIn);
-  if (loggedIn) loadAll();
+  if (loggedIn) {
+    if (retryOnBoot) loadAllOnBoot();
+    else loadAll();
+  }
 }
 
 // ── Perfil ──────────────────────────────────────────────────────────────────
@@ -641,6 +644,31 @@ async function loadAll() {
   if (hint) hint.textContent = failed === 0
     ? 'Todo sincronizado: perfil, favoritos, frecuencias, alarmas, itinerarios y push viven en la nube y en este dispositivo.'
     : 'La sincronización es aditiva: si el servidor no está disponible, todo sigue guardado en este dispositivo.';
+
+  // Señal para loadAllOnBoot(): ¿alguno de los 7 pedidos falló por un
+  // motivo transitorio (red/servidor caído, típico de un cold start de
+  // Render) en vez de un error real (401, 404, etc.)? Si es así, vale la
+  // pena reintentar todo el lote — casi seguro fallaron todos por la MISMA
+  // razón (el backend estaba dormido), no por 7 causas distintas.
+  return results.some((r) => r.status === 'rejected' && r.reason && (r.reason.status === 0 || r.reason.status >= 500));
+}
+
+// Solo para el arranque (init()): un cold start de Render (20-50s) hacía
+// que el ÚNICO intento de loadAll() de la carga de página fallara para los
+// 7 recursos a la vez con un error de red — transitorio, no "no hay
+// datos". Sin reintentos, la tarjeta de perfil quedaba en "Sin conexión con
+// el servidor" (con un botón "Reintentar" manual) y favoritos/frecuencias/
+// alarmas/itinerarios vacíos hasta que el usuario tocara ese botón — mismo
+// bug y mismo fix que refreshProfileOnBoot() (ui/auth.js) y
+// loadCommentsOnBoot() (comments.js). El botón "Reintentar" sigue andando
+// igual (showSessionRecovery) para quien no quiera esperar.
+async function loadAllOnBoot() {
+  const RETRY_DELAYS_MS = [3000, 6000, 12000, 20000]; // ~41s de cobertura
+  for (let attempt = 0; ; attempt++) {
+    const needsRetry = await loadAll();
+    if (!needsRetry || attempt >= RETRY_DELAYS_MS.length) return;
+    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+  }
 }
 
 // Recuperación de sesión: botones en la tarjeta de perfil cuando /me falla.
@@ -1181,14 +1209,7 @@ function wirePasswordForm() {
 // ── Arranque ────────────────────────────────────────────────────────────────
 
 function init() {
-  renderGate();
-
-  // Enlace directo desde el menú de cuenta (⋯ → Permisos, ver src/ui/auth.js):
-  // sin esto, "Permisos" y "Mi cuenta" llevaban exactamente al mismo lugar
-  // sin indicar dónde mirar.
-  if (window.location.hash === '#push') {
-    document.getElementById('cuenta-push-status')?.closest('.page-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
+  renderGate({ retryOnBoot: true });
 
   const recoverLogin = $('cuenta-recover-login');
   if (recoverLogin) {

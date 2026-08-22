@@ -2281,6 +2281,159 @@ html:not(.in-app) .in-app-only {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* Modal de permisos (ui/permissions-modal.js) — reusa el chrome de
+   .auth-modal/.auth-card/.auth-submit (autocontenido, funciona en todas
+   las páginas); estas son las clases propias de su contenido, que no
+   tienen equivalente en el resto del sitio. */
+.perm-card {
+  max-width: 480px;
+}
+
+.perm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.perm-head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.perm-intro {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.perm-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.perm-state {
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+}
+
+.perm-state.ok {
+  color: #4ade80;
+}
+
+.perm-state.bad {
+  color: #fb7185;
+}
+
+.perm-state.warn {
+  color: #fbbf24;
+}
+
+.perm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.perm-actions .auth-submit {
+  flex: 1 1 140px;
+}
+
+.perm-diff-box {
+  background: rgba(167, 139, 250, 0.05);
+  border: 1px solid rgba(167, 139, 250, 0.15);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 12px 0;
+}
+
+.pdb-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+  letter-spacing: 0.05em;
+}
+
+.pdb-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.pdb-item {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pdb-item b {
+  display: block;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.pdb-item span {
+  color: var(--text-dim);
+}
+
+.perm-off {
+  flex: 1 1 140px;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.perm-off:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.perm-test {
+  flex: 1 1 140px;
+  appearance: none;
+  background: rgba(167, 139, 250, 0.1);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.perm-test:hover {
+  background: rgba(167, 139, 250, 0.2);
+}
+
+.perm-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 14px;
+  line-height: 1.5;
+}
+
 .auth-tabs {
   display: flex;
   gap: 6px;

@@ -161,12 +161,17 @@ function renderNav() {
   permisos.innerHTML = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><span>Permisos</span>`;
   permisos.addEventListener('click', () => {
     closeMenu();
-    const here = window.location.pathname.replace(/\/+$/, '');
-    if (here.endsWith('/cuenta')) {
-      document.getElementById('cuenta-push-status')?.closest('.page-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // El modal abre in situ en CUALQUIER página: el reproductor trae su
+    // propia copia (main.js, ligada al estado real de reproducción) y el
+    // resto de las páginas la reciben de site.js (ui/permissions-modal.js,
+    // autocontenida) — las dos se registran bajo el mismo nombre, así que
+    // esto nunca necesita saber cuál hay. El navigate a #permisos queda
+    // como red de seguridad si alguna página futura no cargara site.js.
+    if (typeof window.__vyneural?.openPermissions === 'function') {
+      window.__vyneural.openPermissions();
       return;
     }
-    window.location.href = '/cuenta#push';
+    window.location.href = '/#permisos';
   });
   menu.appendChild(permisos);
 
@@ -685,6 +690,28 @@ async function refreshProfile() {
   }
 }
 
+// Solo para el arranque (init()): un cold start de Render (20-50s) hace que
+// el ÚNICO intento de refreshProfile() de la carga de página falle con un
+// error de red — transitorio, no una sesión inválida (esa la maneja
+// handleSessionExpired vía vyneural:session-expired, que ya deja
+// isLoggedIn()=false antes de que volvamos acá). Sin reintentos, el chip de
+// la nav quedaba trabado mostrando "Cuenta" (el nombre nunca cargó) en vez
+// de resolver a logueado o deslogueado — el bug reportado en vivo: "dejo la
+// sesión, vuelvo y hago reload, no sale ni logeado ni deslogeado". Los
+// flujos de login/registro (onSubmitAuth) siguen llamando a refreshProfile()
+// directo, sin reintentos: ahí el backend acaba de responder al login, así
+// que un cold start a mitad de flujo es mucho menos probable, y bloquear el
+// modal reintentando de más sería peor UX que mostrar el nombre genérico
+// una vez.
+async function refreshProfileOnBoot() {
+  const RETRY_DELAYS_MS = [3000, 6000, 12000, 20000]; // ~41s de cobertura
+  for (let attempt = 0; ; attempt++) {
+    await refreshProfile();
+    if (profile || !isLoggedIn() || attempt >= RETRY_DELAYS_MS.length) return;
+    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+  }
+}
+
 // Tras autenticarse: traer favoritos de la nube, arrancar la sincronización
 // y ofrecer notificaciones push (nunca las activa sola, ver syncPushState).
 // Todo best-effort.
@@ -828,7 +855,7 @@ function init() {
   notify();
 
   if (isLoggedIn()) {
-    refreshProfile().finally(() => {
+    refreshProfileOnBoot().finally(() => {
       renderNav();
       notify();
       pullCloudFavoritesToLocal().catch(() => {});

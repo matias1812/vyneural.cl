@@ -1427,6 +1427,10 @@ async function loadItineraries() {
     const authErr = itErr || freqErr;
     const isExpired = authErr && authErr.status === 401;
     const isNetwork = authErr && authErr.status === 0;
+    // Señal para loadItinerariesOnBoot(): un fallo de red/servidor (no una
+    // sesión vencida) casi siempre es el mismo cold start de Render — vale
+    // la pena reintentar en vez de dejarlo así hasta el próximo reload.
+    const needsRetry = !!authErr && !isExpired && (authErr.status === 0 || authErr.status >= 500);
     if (isExpired) {
       // Sesión realmente inválida: sincronizar el chip de la nav (evita el
       // estado "logueado" fantasma), igual que /cuenta.
@@ -1448,12 +1452,14 @@ async function loadItineraries() {
       sync.textContent = 'Itinerarios sincronizados con tu cuenta ✓';
       sync.classList.remove('hidden');
     }
+    return needsRetry;
   } catch (_) {
     if (sync) {
       sync.textContent = 'El backend no está disponible: los itinerarios de la nube no se pudieron cargar. Los recordatorios locales siguen funcionando.';
       sync.classList.remove('hidden');
     }
     renderItineraries([]);
+    return true; // error inesperado: puede ser el mismo cold start, vale la pena reintentar
   } finally {
     itinerariesLoaded = true;
     // "Próximas sesiones" (y el resumen que arma) se pinta ANTES de que
@@ -1467,6 +1473,25 @@ async function loadItineraries() {
     // resuelve async, arriba) — sin repoblarlo acá, "Mis frecuencias" nunca
     // mostraba nada guardado en sesiones anteriores, aunque existiera.
     populateStepFreqs();
+  }
+}
+
+// Solo para el arranque (refreshState(), llamada una única vez al cargar la
+// página): un cold start de Render (20-50s) hacía que el ÚNICO intento de
+// loadItineraries() fallara con un error de red — transitorio, no "no hay
+// itinerarios". Sin reintentos, la lista quedaba vacía con el aviso "sin
+// conexión" hasta el próximo reload manual — mismo bug y mismo fix que
+// refreshProfileOnBoot() (ui/auth.js), loadCommentsOnBoot() (comments.js) y
+// loadAllOnBoot() (cuenta.js). Los demás llamadores de loadItineraries()
+// (tras crear/editar/borrar algo, o el evento vyneural:auth) siguen con un
+// solo intento: ahí el backend acaba de responder, así que un cold start a
+// mitad de flujo es mucho menos probable.
+async function loadItinerariesOnBoot() {
+  const RETRY_DELAYS_MS = [3000, 6000, 12000, 20000]; // ~41s de cobertura
+  for (let attempt = 0; ; attempt++) {
+    const needsRetry = await loadItineraries();
+    if (!needsRetry || attempt >= RETRY_DELAYS_MS.length) return;
+    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
   }
 }
 
@@ -1570,7 +1595,7 @@ function refreshState() {
   const gate = document.getElementById('rutina-apk-gate');
   if (gate) gate.classList.toggle('hidden', IN_APK);
   render();
-  loadItineraries();
+  loadItinerariesOnBoot();
   const note = document.getElementById('rutina-platform-note');
   if (note) {
     note.textContent = IN_APK
