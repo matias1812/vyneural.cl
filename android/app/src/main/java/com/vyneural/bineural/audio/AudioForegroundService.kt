@@ -280,6 +280,8 @@ class AudioForegroundService : Service() {
                 lastVolume = level
                 persistSession()
             }
+            ACTION_SKIP_NEXT -> stepFrequency(+FREQ_STEP_HZ)
+            ACTION_SKIP_PREV -> stepFrequency(-FREQ_STEP_HZ)
             ACTION_STOP -> {
                 shouldPlay = false
                 cancelFocusReacquire()
@@ -391,17 +393,37 @@ class AudioForegroundService : Service() {
         s.setPlaybackState(
             PlaybackState.Builder()
                 .setActions(
-                    PlaybackState.ACTION_PLAY or
+                    // REGLA DE ORO: en pausa, la sesión queda INACTIVA (ver
+                    // isActive más abajo) — solo se declara ACTION_PLAY, sin
+                    // SKIP/SEEK/PAUSE, para que ningún control externo (auriculares
+                    // Bluetooth reconectando, botón físico de manos libres, Android
+                    // Auto) tenga nada que invocar sobre una sesión inactiva.
+                    if (playing) {
                         PlaybackState.ACTION_PAUSE or
-                        PlaybackState.ACTION_STOP or
-                        PlaybackState.ACTION_SKIP_TO_NEXT or
-                        PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                        PlaybackState.ACTION_SEEK_TO,
+                            PlaybackState.ACTION_STOP or
+                            PlaybackState.ACTION_SKIP_TO_NEXT or
+                            PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                            PlaybackState.ACTION_SEEK_TO
+                    } else {
+                        PlaybackState.ACTION_PLAY
+                    },
                 )
                 .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, now, 1f)
                 .build(),
         )
-        s.isActive = true
+        // REGLA DE ORO — bug real encontrado en vivo: acá SIEMPRE quedaba
+        // `isActive = true`, incluso en pausa. Una sesión "activa" (aunque
+        // pausada) queda disponible para CUALQUIER control de medios externo
+        // — reconectar auriculares Bluetooth manda un evento PLAY sintético en
+        // varios Android/fabricantes, y eso llamaba a onPlay() → arrancaba
+        // audio sin que el usuario tocara nada de Vyneural ("se puso a sonar
+        // sola", "ningún botón de play activo", reportado en vivo). Solo
+        // reproduciendo de verdad la sesión queda activa para el sistema; en
+        // pausa se desactiva — el botón "Reproducir" de la notificación de
+        // ESTA app sigue andando igual (usa un PendingIntent directo al
+        // servicio, no pasa por la MediaSession), lo único que se pierde es
+        // que un control externo la retome sin pasar por acá.
+        s.isActive = playing
         Diagnostics.mediaSessionActive = playing
         Diagnostics.mediaSessionPlaybackState = if (playing) "playing" else "paused"
         // P2 — la interrupción por focus (LOSS) NO debe tumbar la sesión web:
@@ -561,6 +583,12 @@ class AudioForegroundService : Service() {
         const val ACTION_RESUME = "com.vyneural.bineural.action.RESUME"
         const val ACTION_PLAY = "com.vyneural.bineural.action.PLAY"
         const val ACTION_STOP = "com.vyneural.bineural.action.STOP"
+        // Botones ⏮/⏭ de la notificación (mediaNotification, NotificationHelper):
+        // mismo paso de frecuencia que onSkipToNext/Previous de la MediaSession
+        // (stepFrequency) — la notificación los invoca vía PendingIntent directo
+        // al servicio, no pasa por la MediaSession (misma razón que ACTION_PLAY).
+        const val ACTION_SKIP_NEXT = "com.vyneural.bineural.action.SKIP_NEXT"
+        const val ACTION_SKIP_PREV = "com.vyneural.bineural.action.SKIP_PREV"
         const val ACTION_FREQ = "com.vyneural.bineural.action.FREQ"
         const val ACTION_WAVE = "com.vyneural.bineural.action.WAVE"
         const val ACTION_VOLUME = "com.vyneural.bineural.action.VOLUME"

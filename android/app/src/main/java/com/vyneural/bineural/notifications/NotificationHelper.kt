@@ -29,7 +29,15 @@ object NotificationHelper {
     // (USAGE_ALARM), no con el sonido de notificación genérico: es una alarma
     // real, no un aviso pasivo. Nuevo ID para que las instalaciones existentes
     // reciban el canal con sonido de alarma.
-    const val CHANNEL_ALARMS = "bineural_alarms_v3"
+    // v4: reportado que una alarma disparó SOLO la notificación, sin sonido
+    // ni vibración — un teléfono que ya tenía "bineural_alarms_v3" creado
+    // (de una build de prueba anterior de esta sesión, antes o después de
+    // que este archivo cambiara) sigue con la config VIEJA de ese canal para
+    // siempre: createNotificationChannel() es un no-op si el ID ya existe,
+    // Android no permite reconfigurar sonido/vibración de un canal existente
+    // por código. Nuevo ID otra vez para que TODAS las instalaciones (nuevas
+    // y viejas) reciban el canal con la config actual desde cero.
+    const val CHANNEL_ALARMS = "bineural_alarms_v4"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.
@@ -113,6 +121,22 @@ object NotificationHelper {
             Intent(context, AudioForegroundService::class.java).setAction(AudioForegroundService.ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        // ⏮/⏭ mueven la PORTADORA ±10 Hz (AudioForegroundService.stepFrequency),
+        // no cambian de sesión — antes el callback nativo (onSkipToNext/Previous)
+        // ya existía pero esta notificación nunca mostraba los botones para
+        // llegar a él. Solo se muestran reproduciendo (mismo criterio que la
+        // MediaSession — ver setSessionPlaying: en pausa la sesión queda
+        // deliberadamente sin acciones de skip, REGLA DE ORO).
+        val next = PendingIntent.getService(
+            context, 4,
+            Intent(context, AudioForegroundService::class.java).setAction(AudioForegroundService.ACTION_SKIP_NEXT),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val prev = PendingIntent.getService(
+            context, 5,
+            Intent(context, AudioForegroundService::class.java).setAction(AudioForegroundService.ACTION_SKIP_PREV),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         // minSdk 26: API de plataforma para MediaStyle sin dependencias extra.
         val builder = Notification.Builder(context, CHANNEL_PLAYER)
             .setSmallIcon(R.drawable.ic_stat_bineural)
@@ -123,17 +147,24 @@ object NotificationHelper {
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
+        val compactIndices: IntArray
         if (isPlaying) {
+            // Orden clásico de reproductor: anterior / pausar / siguiente en la
+            // vista compacta, detener como cuarta acción (solo en la expandida).
+            builder.addAction(0, "Anterior", prev)
             builder.addAction(0, "Pausar", pause)
+            builder.addAction(0, "Siguiente", next)
             builder.addAction(0, "Detener", stop)
+            compactIndices = intArrayOf(0, 1, 2)
         } else {
             builder.addAction(0, "Reproducir", play)
             builder.addAction(0, "Detener", stop)
+            compactIndices = intArrayOf(0, 1)
         }
         builder.setStyle(
             Notification.MediaStyle()
                 .setMediaSession(sessionToken)
-                .setShowActionsInCompactView(0, 1),
+                .setShowActionsInCompactView(*compactIndices),
         )
         return builder.build()
     }
