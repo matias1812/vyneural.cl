@@ -49,12 +49,12 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/cuenta-Cw8N67-U.js"></script>
-    <link rel="modulepreload" href="./assets/site-BSHlE2hf.js">
+    <script type="module" src="./assets/cuenta-DGvt2pJA.js"></script>
+    <link rel="modulepreload" href="./assets/site-DxFrnodm.js">
     <link rel="modulepreload" href="./assets/preload-helper-Dp1pzeXC.js">
-    <link rel="modulepreload" href="./assets/alarms-C55F_xW5.js">
-    <link rel="modulepreload" href="./assets/freq-cover-BdKipY53.js">
-    <link rel="stylesheet" href="./assets/site-DUQJLbyg.css">
+    <link rel="modulepreload" href="./assets/alarms-B69Fa2jM.js">
+    <link rel="modulepreload" href="./assets/freq-cover-DllggEcz.js">
+    <link rel="stylesheet" href="./assets/site-CWoJ-nuZ.css">
   </head>
   <body>
     <header class="site-nav">
@@ -162,99 +162,17 @@
             </p>
           </div>
 
-          <!-- Full width, no en card-grid: con el día de la semana + el
-               formulario de pasos, esta tarjeta es mucho más alta que su
-               antigua pareja ("Mis alarmas") — en una grilla de 2 columnas
-               dejaba un hueco enorme al lado (el bug reportado). -->
+          <!-- La gestión de itinerarios (crear/pausar/eliminar/personalizar
+               pasos) vive solo en /rutina — acá antes había una segunda copia
+               completa del mismo formulario, que ya había divergido de la de
+               /rutina (le faltaba ambiente, no podía cargar una guardada para
+               editarla). Una sola implementación real. -->
           <div class="page-card">
-            <h3>🗺️ Mis itinerarios</h3>
-            <ul class="cuenta-list" id="cuenta-itineraries"></ul>
-            <p class="cuenta-empty" id="cuenta-itineraries-empty">Sin itinerarios creados.</p>
-            <details class="cuenta-create">
-              <summary>＋ Crear itinerario</summary>
-              <form id="itinerary-form" class="cuenta-form">
-                <label>Día de la semana
-                  <select id="itinerary-day">
-                    <option value="">Sin día fijo (secuencia suelta)</option>
-                    <option value="1">Lunes</option>
-                    <option value="2">Martes</option>
-                    <option value="3">Miércoles</option>
-                    <option value="4">Jueves</option>
-                    <option value="5">Viernes</option>
-                    <option value="6">Sábado</option>
-                    <option value="0">Domingo</option>
-                  </select>
-                </label>
-                <p class="cuenta-empty" id="itinerary-day-hint">
-                  Un itinerario ES un día: adentro van los recordatorios de sesión de ese día (cada uno
-                  con su horario). No podés repetir el mismo día en dos itinerarios.
-                </p>
-                <label>Nombre <em>(opcional)</em>
-                  <input id="itinerary-name" type="text" maxlength="120" placeholder="Ej: Arranque del día — si lo dejás vacío, usamos el día" />
-                </label>
-                <label>Descripción <em>(opcional)</em>
-                  <input id="itinerary-desc" type="text" maxlength="500" placeholder="Para qué es esta secuencia" />
-                </label>
-                <fieldset class="cuenta-steps">
-                  <legend>Pasos — recordatorios de sesión de ese día <em>(opcional)</em></legend>
-                  <div class="cuenta-form-row">
-                    <label>Frecuencia
-                      <span class="it-step-freq-row">
-                        <select id="it-step-freq"></select>
-                        <button type="button" class="cuenta-btn cuenta-btn-ghost it-step-custom-btn" id="it-step-custom" aria-expanded="false">🎨 Personalizar</button>
-                      </span>
-                    </label>
-                    <label>Duración (min)
-                      <input id="it-step-duration" type="number" min="1" max="1440" step="1" value="10" />
-                    </label>
-                  </div>
-
-                  <!-- Mismos ajustes que el panel del generador (portadora/ritmo/onda):
-                       "Personalizar" acá arma una frecuencia a medida con la misma
-                       experiencia, no un formulario aparte con campos numéricos. -->
-                  <div class="custom hidden" id="it-custom-panel">
-                    <span class="ctrl-label"><span>Portadora</span></span>
-                    <div id="it-custom-carrier-options" class="wave-options" role="group" aria-label="Portadora"></div>
-                    <span class="ctrl-label"><span id="it-custom-base-label">Portada: 220 Hz</span></span>
-                    <label class="slider-row">
-                      <span class="ctrl-label"><span id="it-custom-beat-label">Ritmo binaural: 10 Hz</span></span>
-                      <input id="it-custom-beat" type="range" min="0.5" max="40" step="0.5" value="10" />
-                    </label>
-                    <span class="ctrl-label"><span>Forma de onda</span></span>
-                    <div id="it-custom-wave-options" class="wave-options" role="radiogroup" aria-label="Forma de onda"></div>
-                    <span class="ctrl-label"><span>Condición experimental</span></span>
-                    <div id="it-custom-cond-options" class="wave-options" role="radiogroup" aria-label="Condición del estímulo"></div>
-                    <div class="custom-save-wrap">
-                      <label class="custom-save-name-label" for="it-custom-save-name">Nombre para guardarla <em>(opcional)</em></label>
-                      <div class="custom-save-row">
-                        <input type="text" id="it-custom-save-name" maxlength="120" placeholder="Ej: Mi sesión de estudio" />
-                        <button type="button" class="cuenta-btn" id="it-custom-save">Usar esta frecuencia</button>
-                      </div>
-                      <p class="custom-save-note hidden" id="it-custom-save-note" role="status"></p>
-                    </div>
-                  </div>
-                  <label>Horario
-                    <input id="it-step-time" type="time" />
-                  </label>
-                  <label class="it-step-notify-wrap hidden" id="it-step-notify-wrap">
-                    <input type="checkbox" id="it-step-notify" checked />
-                    🔔 Avisarme con notificación a esa hora
-                  </label>
-                  <p class="cuenta-empty" id="it-step-time-hint">
-                    Todo paso necesita un horario (desmarcá el aviso de arriba si preferís que quede
-                    solo agendado, sin notificación). Se repite cada semana en el día del itinerario;
-                    si el itinerario no tiene día, es de una sola vez.
-                  </p>
-                  <button type="button" class="cuenta-btn cuenta-btn-ghost" id="it-step-add">＋ Añadir paso</button>
-                  <ul class="cuenta-list" id="it-steps"></ul>
-                  <p class="cuenta-empty" id="it-steps-empty">
-                    Sin pasos todavía. Un itinerario sin pasos funciona como alarma de horario:
-                    al activarse te avisa de arrancar la sesión.
-                  </p>
-                </fieldset>
-                <button type="submit" class="cuenta-btn">Crear itinerario</button>
-              </form>
-            </details>
+            <h3>🗺️ Tus itinerarios</h3>
+            <p class="cuenta-empty">
+              Crear y gestionar itinerarios (días, pasos, horarios) se hace desde
+              <a href="/rutina">Tu rutina</a>.
+            </p>
           </div>
 
           <div class="page-card">
@@ -301,6 +219,16 @@
               <div class="auth-error hidden" id="pw-error" role="alert"></div>
               <button type="submit" class="cuenta-btn" id="pw-submit">Actualizar contraseña</button>
             </form>
+          </div>
+
+          <div class="page-card cuenta-danger-zone">
+            <h3>⚠️ Zona de peligro</h3>
+            <p class="rutina-hint">
+              Desactiva tu cuenta: no vas a poder volver a iniciar sesión. No borra tus
+              datos ni es algo que puedas deshacer vos mismo — si te arrepentís, escribinos
+              usando la burbuja 🐞 de reportes de la web.
+            </p>
+            <button type="button" class="cuenta-btn cuenta-btn-danger" id="deactivate-open">Desactivar mi cuenta</button>
           </div>
         </div>
 
@@ -366,6 +294,28 @@
         médico. Usa audífonos: sin ellos no se produce el efecto binaural. No las uses mientras
         conduces o manejas maquinaria.
       </p>
-    </footer>
+    </footer>
+
+    <!-- Confirmación de desactivar cuenta: pide la contraseña de nuevo (mismo
+         criterio que cambiar contraseña) antes de una acción que no podés
+         deshacer vos mismo. -->
+    <div class="auth-modal hidden" id="deactivate-modal" role="dialog" aria-modal="true" aria-label="Desactivar cuenta">
+      <div class="auth-card">
+        <button type="button" class="auth-close" id="deactivate-close" aria-label="Cerrar">✕</button>
+        <h2>⚠️ Desactivar tu cuenta</h2>
+        <p class="rutina-hint">
+          No vas a poder volver a iniciar sesión. No borra tus datos ni podés reactivarla
+          vos mismo — para eso, escribinos por la burbuja 🐞 de reportes de la web.
+        </p>
+        <form id="deactivate-form" class="cuenta-form">
+          <label>Confirmá tu contraseña
+            <input id="deactivate-password" type="password" autocomplete="current-password" required minlength="8" />
+          </label>
+          <div class="auth-error hidden" id="deactivate-error" role="alert"></div>
+          <button type="submit" class="auth-submit cuenta-btn-danger" id="deactivate-submit">Sí, desactivar mi cuenta</button>
+        </form>
+      </div>
+    </div>
+
   </body>
 </html>
