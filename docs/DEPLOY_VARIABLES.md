@@ -1,6 +1,10 @@
 # Variables de despliegue — Vyneural (Render + Vercel)
 
-> Estado verificado: **2026-08-19**. Backend real: `https://vyneural-backend.onrender.com`
+> Estado verificado: **2026-08-23**. En producción está corriendo la
+> **Opción B** (`EMAIL_PROVIDER=brevo`, confirmado en vivo vía
+> `node scripts/check-deploy.mjs`: `provider=brevo · configured=true`) —
+> Opción A (SMTP) queda documentada abajo solo como alternativa de pago, no
+> es lo que está desplegado hoy. Backend real: `https://vyneural-backend.onrender.com`
 > (NO `vyneural-api.onrender.com` — ese hostname no tiene servicio, `x-render-routing: no-server`).
 > `node scripts/check-deploy.mjs` corre esta misma verificación (health, rewrite,
 > CORS, hash del APK) contra `https://www.vyneural.cl` en un solo comando.

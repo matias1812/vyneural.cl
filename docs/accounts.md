@@ -23,15 +23,19 @@ usuario inicia sesión.
 | `src/ui/freq-modal.js` | Modal compartido "Guardar frecuencia personalizada" (generador + `/cuenta`) |
 | `src/api/fav-sync.js` | Favoritos del generador ↔ nube (idempotente, con `state_id`) |
 | `src/api/push.js` | Suscripción web push VAPID por dispositivo |
-| `src/cuenta.js` | `/cuenta`: perfil, favoritos, frecuencias, alarmas, itinerarios (con vista de horario) y push |
+| `src/cuenta.js` | `/cuenta`: perfil, favoritos, frecuencias, alarmas, dispositivos, push y desactivar cuenta |
 
 ## Páginas
 
 - `/cuenta` — vista de usuario con sesión (badge de verificación, reenvío de
-  correo, cambio de contraseña con re-autenticación, vista de horario del
-  itinerario con sus alarmas). Crea/pausa/elimina itinerarios pero no edita
-  sus pasos — eso es exclusivo de `/rutina` (misma cuenta, ambas páginas
-  sincronizadas: crear en una se ve al toque en la otra).
+  correo, cambio de contraseña con re-autenticación, desactivar cuenta con
+  confirmación por contraseña). La gestión de itinerarios (crear, pausar,
+  eliminar, editar pasos) vive **solo** en `/rutina` — antes `/cuenta` tenía
+  su propia copia completa del mismo formulario, que terminó divergiendo de
+  la de `/rutina` (le faltaba ambiente, no podía cargar una guardada para
+  editarla); se sacó por completo y quedó un link a `/rutina` en su lugar.
+  `/cuenta` sigue mostrando "Mis alarmas" (incluidas las que vienen de un
+  paso de itinerario, marcadas como tal — se editan desde `/rutina`).
 - `/rutina` — la única página que **exige sesión siempre** (excepción a la
   regla de arriba: itinerarios y recordatorios viven en la nube, no
   localmente). Sin sesión muestra un gate de login en vez del generador de
@@ -49,6 +53,20 @@ usuario inicia sesión.
 - `src/cuenta.js` muestra el **estado real del dispositivo** (suscrito o no) y
   avisa cuando falta contexto seguro (HTTPS / localhost).
 
+## Desactivar cuenta
+
+`POST /api/v1/users/me/deactivate` (backend, `routers/users.py`) exige la
+contraseña actual (mismo criterio que cambiar contraseña) y marca
+`User.is_active=False` — bloquea login (`routers/auth.py::login`, 403
+"usuario inactivo") y cualquier request autenticado en la próxima consulta
+(`deps.get_current_user` ya rechaza `is_active=False`, sin esperar a que
+expire el access token vigente), y revoca todas las sesiones. No borra
+ningún dato ni es reversible por el propio usuario — self-service solo
+llega hasta desactivar; reactivarla requiere contacto directo (la burbuja
+🐞 de reportes de la web, nunca un correo personal del equipo). El frontend
+(`/cuenta`, tarjeta "⚠️ Zona de peligro") pide confirmación con modal +
+contraseña antes de llamar al endpoint.
+
 ## Verificación estricta
 
 El flag `REQUIRE_EMAIL_VERIFICATION` del backend (default `false`) bloquea el
@@ -59,28 +77,13 @@ tiene la pantalla "Confirmá tu correo" y el reenvío.
 
 - El proxy de desarrollo de Vite redirige `/api` a `http://127.0.0.1:8000`
   (`VITE_PROXY_TARGET` para cambiarlo).
-- En producción, Vercel redirige `/api` al backend con `vercel.json`.
-- El email se imprime en el log en dev (`EMAIL [VERIFY] / [RESET]`) y se envía
-  por SMTP en producción (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
-  `SMTP_PASSWORD`, `EMAIL_FROM`, `FRONTEND_BASE_URL`).
-
-### Estado actual (2026-08-17) — "el correo no llega"
-
-Síntoma reportado: "mande uno nuevo… puse reenviar y no llegó". Causa raíz
-**de despliegue, no de código**:
-
-1. **El backend NO está desplegado en Render.** `https://vyneural-api.onrender.com`
-   responde `404` en todo con `x-render-routing: no-server` (no hay servicio en
-   ese hostname; ver `../backvyneural/docs/RENDER_DEPLOY.md` §6).
-2. **El rewrite de `/api` no está publicado en Vercel.** El `vercel.json` local
-   tiene `rewrites` pero está sin commitear; la web desplegada devuelve el 404
-   nativo de Vercel para `/api/*` (no el de FastAPI).
-3. El SMTP (Gmail) está **verificado y funciona** localmente
-   (`EMAIL entregado: SI`); solo hay que desplegar el backend con esas
-   variables de entorno.
-
-Para verificar en vivo, cualquier `/api` de la web desplegada debe responder
-con FastAPI (no con el 404 de Vercel) y `/health` del backend con `ok`.
+- En producción, Vercel redirige `/api` al backend (Render) con `vercel.json`.
+- El email se imprime en el log en dev (`EMAIL [VERIFY] / [RESET]`). En
+  producción va por **Brevo** (`EMAIL_PROVIDER=brevo` + `BREVO_API_KEY`, HTTPS
+  API) — Render free bloquea la salida a puertos SMTP directos (25/465/587),
+  así que el proveedor por HTTPS es el único camino que funciona ahí (ver
+  `../backvyneural/app/config.py`). Verificar con
+  `node scripts/check-deploy.mjs` (backend/frontend/CORS/email, todo en uno).
 
 ### Reenvío honesto
 
