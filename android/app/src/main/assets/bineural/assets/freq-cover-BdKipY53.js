@@ -1,0 +1,10 @@
+import{a1 as f,d as m,a4 as g,$ as y,a0 as x,p as M}from"./site-BSHlE2hf.js";const d=t=>(x("/api/v1/alarms"),t),k=()=>f("/api/v1/itineraries"),A=t=>y("/api/v1/itineraries",t).then(d),F=(t,a)=>M(`/api/v1/itineraries/${t}`,a).then(d),G=t=>m(`/api/v1/itineraries/${t}`).then(d),S=t=>g(`/api/v1/itineraries/${t}/toggle`),C=(t,a)=>g(`/api/v1/itineraries/${t}/reorder`,{order:a}),u=[["#7c3aed","#c4b5fd"],["#0ea5e9","#bae6fd"],["#f97316","#fed7aa"],["#10b981","#a7f3d0"],["#ec4899","#fbcfe8"],["#eab308","#fef08a"]];function I(t){const a=`${(t==null?void 0:t.name)||""}|${(t==null?void 0:t.carrier_frequency)||0}|${(t==null?void 0:t.beat_frequency)||0}|${(t==null?void 0:t.waveform)||""}`;let n=0;for(let e=0;e<a.length;e++)n=n*31+a.charCodeAt(e)>>>0;return n}function b(t,a,n){const e=n/2,i=n*.32,c=2,s=48,h=[];for(let l=0;l<=s;l++){const p=l/s,v=p*a,r=p*c*Math.PI*2;let o;if(t==="square")o=e-i*Math.sign(Math.sin(r)||1);else if(t==="triangle")o=e-i*(2/Math.PI)*Math.asin(Math.sin(r));else if(t==="sawtooth"){const $=r/(Math.PI*2)%1;o=e-i*(2*($-Math.floor($+.5)))}else o=e-i*Math.sin(r);h.push(`${v.toFixed(1)},${o.toFixed(1)}`)}return`M${h.join(" L")}`}function w(t){return String(t??"").replace(/[&<>"']/g,a=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[a])}function j(t,a=48){const n=I(t),[e,i]=u[n%u.length],c=b((t==null?void 0:t.waveform)||"sine",a,a),s=`fc-${n.toString(36)}`;return`<svg class="freq-cover" viewBox="0 0 ${a} ${a}" width="${a}" height="${a}" role="img" aria-label="Portada de ${w((t==null?void 0:t.name)||"frecuencia")}">
+    <defs>
+      <linearGradient id="${s}" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="${i}" />
+        <stop offset="1" stop-color="${e}" />
+      </linearGradient>
+    </defs>
+    <rect width="${a}" height="${a}" rx="${(a*.22).toFixed(1)}" fill="url(#${s})" />
+    <path d="${c}" fill="none" stroke="#ffffff" stroke-width="${Math.max(1.5,a*.045).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round" opacity="0.92" />
+  </svg>`}export{A as c,G as d,j as f,k as l,C as r,S as t,F as u};
