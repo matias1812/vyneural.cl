@@ -2141,6 +2141,11 @@ if (customLoadSelect) {
   customLoadSelect.addEventListener('change', () => {
     const f = savedFrequencies.find((sf) => sf.id === customLoadSelect.value);
     if (!f) return;
+    // selectState() PRIMERO: si `selected` no era ya Personalizado, entrar a
+    // él resetea `carrier` a 'personalizado' (ver su declaración) — setear
+    // carrier/loadedCustomBase ANTES, ese reset los pisaba en silencio.
+    const customState = STATES.find((s) => s.custom);
+    if (customState) selectState(customState);
     // Confirmado con el usuario: una guardada "963 afinada a Solfeggio 963"
     // quedó guardada como 2146,7 Hz efectivos — MÁS que el tope del slider
     // (1000). Asignarle esto a customBase.value lo recortaría a 1000 (el
@@ -2174,8 +2179,6 @@ if (customLoadSelect) {
     const savedAmbient = f.config && Array.isArray(f.config.ambient) ? f.config.ambient : [];
     ambientTypes = new Set(savedAmbient.filter((id) => AMBIENT_IDS.includes(id)));
     updateAmbientButtons();
-    const customState = STATES.find((s) => s.custom);
-    if (customState) selectState(customState);
     updateCustomLabels();
     syncWaveButtons();
     updateCustomPanel();
@@ -4816,6 +4819,10 @@ const savedSession = sanitizeSession(lsGet(LS_SESSION, null));
 const deepFreq = parseFloat(deepParams.get('freq'));
 const deepBeat = parseFloat(deepParams.get('beat'));
 const deepWave = deepParams.get('wave');
+// Portada propia sin escalar (ver _deep_link, backend/app/services/
+// reminders.py) — junto con ?carrier= (arriba) reconstruye exactamente la
+// sesión original en vez del resultado final congelado.
+const deepOwnBase = parseFloat(deepParams.get('ownBase'));
 const deepAutostart = deepParams.get('autostart') === 'true';
 // Ambiente elegido al personalizar la frecuencia en /rutina (ver
 // freqAmbient en rutina.js) — mismos ids que el mezclador de acá.
@@ -4855,9 +4862,6 @@ if (deepSeqRaw) {
 const customState = STATES.find((s) => s.custom);
 let wantId = deepState || (savedSession && savedSession.state);
 if (isFinite(deepFreq) && deepFreq > 0) {
-  customBase.value = String(Math.round(deepFreq * 10) / 10);
-  customBeat.value = String(deepBeat > 0 ? Math.round(deepBeat * 10) / 10 : 10);
-  selectedWave = deepWave || 'sine';
   wantId = customState ? customState.id : wantId;
 }
 const initial = STATES.find((s) => s.id === wantId) || STATES[0];
@@ -4871,6 +4875,27 @@ if (isFinite(deepFreq) && deepFreq > 0 && deepAmbient.length) {
   ambientTypes = new Set(deepAmbient);
 }
 selectState(initial);
+// Portada/ritmo/onda del deep link de alarma — DESPUÉS de selectState(): si
+// `selected` no era ya Personalizado, entrar a él por primera vez en este
+// arranque resetea `carrier` a 'personalizado' (ver la declaración de
+// selectState), así que setear esto antes se perdía en silencio. Mismo
+// criterio que checkPendingReminder/customLoadSelect: NO se toca el slider
+// (loadedCustomBase guarda el Hz exacto aparte — puede superar su tope si
+// la sesión estaba afinada a una portadora), y sin una receta válida en
+// ESTE link se fuerza 'personalizado' — sin esto, una familia que hubiera
+// quedado cacheada de una sesión anterior (localStorage) podía reescalar
+// un link que no la pedía.
+if (isFinite(deepFreq) && deepFreq > 0) {
+  const hasCarrierRecipe =
+    deepCarrier && deepCarrier in CARRIER_BASE && deepCarrier !== 'estandar' && isFinite(deepOwnBase);
+  if (!hasCarrierRecipe) carrier = 'personalizado';
+  loadedCustomBase = hasCarrierRecipe ? deepOwnBase : deepFreq;
+  customBeat.value = String(deepBeat > 0 ? Math.round(deepBeat * 10) / 10 : 10);
+  selectedWave = deepWave || 'sine';
+  // selectState() ya llamó a updateStatus() internamente más arriba, pero
+  // con el carrier/loadedCustomBase todavía sin corregir — se reafirma acá.
+  updateStatus();
+}
 // El filtro arranca en la vista curada 'Destacados' (los más populares), o en
 // el filtro que el usuario dejó guardado. Si el enlace profundo o la sesión
 // abren otro estado, seguir a su objetivo.
@@ -4974,7 +4999,16 @@ async function checkPendingReminder() {
         .filter((a) => a.enabled && dueAt(a) !== null)
         .sort((a, b) => dueAt(a) - dueAt(b))[0];
       if (due && due.config && due.config.freq > 0) {
-        pending = { id: due.id, name: due.name, freq: due.config.freq, beat: due.config.beat, wave: due.config.wave };
+        pending = {
+          id: due.id,
+          name: due.name,
+          freq: due.config.freq,
+          beat: due.config.beat,
+          wave: due.config.wave,
+          ambient: due.config.ambient,
+          carrier: due.config.carrier,
+          ownBase: due.config.ownBase,
+        };
       }
     } catch (_) {
       /* sin red: no bloquea la carga normal, se reintenta la próxima visita */
@@ -4982,15 +5016,45 @@ async function checkPendingReminder() {
   }
   if (!pending) return;
   if (pending.id && pendingAlreadySeen(pending.id)) return;
-  customBase.value = String(Math.round(pending.freq * 10) / 10);
-  customBeat.value = String(pending.beat > 0 ? Math.round(pending.beat * 10) / 10 : 10);
-  selectedWave = pending.wave || 'sine';
+  // selectState() PRIMERO: si `selected` no era ya el estado Personalizado,
+  // entrar a él resetea `carrier` a 'personalizado' (arranque limpio, ver su
+  // declaración) — seteando carrier/loadedCustomBase ANTES, ese reset los
+  // pisaba en silencio. Configurar todo DESPUÉS de seleccionar el estado es
+  // el mismo orden que el flujo manual normal (clic en la tarjeta, después
+  // elegir portadora).
   const customState = STATES.find((s) => s.custom);
   if (customState) selectState(customState);
+  // Mismo criterio que customLoadSelect (picker de "cargar guardada"): NO
+  // se toca el slider — loadedCustomBase guarda el Hz exacto aparte, que
+  // puede superar el tope del slider (60-1000) si la sesión estaba afinada
+  // a una portadora (963 Hz con Solfeggio 963 → 2146,7 Hz efectivos). Con
+  // receta (carrier+ownBase, ver _alarm_config en el backend) se enciende
+  // el chip de familia correcto; sin ella (alarmas viejas) cae al mismo
+  // comportamiento de antes: 'personalizado' con el resultado final.
+  const recipe = pending.carrier && pending.carrier in CARRIER_BASE && isFinite(pending.ownBase);
+  if (recipe) {
+    carrier = pending.carrier;
+    loadedCustomBase = pending.ownBase;
+  } else {
+    carrier = 'personalizado';
+    loadedCustomBase = pending.freq;
+  }
+  customBeat.value = String(pending.beat > 0 ? Math.round(pending.beat * 10) / 10 : 10);
+  selectedWave = pending.wave || 'sine';
+  ambientTypes = new Set(
+    Array.isArray(pending.ambient) ? pending.ambient.filter((id) => AMBIENT_IDS.includes(id)) : [],
+  );
+  updateAmbientButtons();
   updateCustomLabels();
   syncWaveButtons();
   updateCustomPanel();
   syncCarrierChips();
+  updateCarrierWarning();
+  // selectState() ya llamó a updateStatus() internamente, pero con el
+  // carrier/loadedCustomBase todavía sin setear (ver el reorden arriba) —
+  // se reafirma acá para que el reproductor (Izquierda/Derecha/Latido)
+  // refleje la config real, no la que había al entrar al estado.
+  updateStatus();
   openPendingModal(pending);
   if (pending.id) markPendingSeen(pending.id);
 }
