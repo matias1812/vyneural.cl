@@ -4952,19 +4952,30 @@ if (!(deepState || deepF1 || deepCarrier || isFinite(deepFreq)) && !savedSession
 // encontrar la MISMA alarma vencida/reciente y reabría el modal — muy
 // molesto trabajando en el generador sin relación con recordatorios. Una
 // alarma NUEVA (id distinto) sí vuelve a avisar.
-const PENDING_SEEN_KEY = 'vyneural_pending_seen_id';
-function pendingAlreadySeen(id) {
+// localStorage (no sessionStorage): reportado en vivo que el modal volvía a
+// aparecer al recargar la APK aunque ya se le hubiera dado play — cerrar y
+// reabrir la app (no solo recargar la página) es un reinicio del proceso,
+// que sessionStorage no sobrevive. La clave incluye el MOMENTO de la
+// ocurrencia (scheduled_at/last_fired_at, no solo el id): una alarma
+// recurrente reutiliza el mismo id en cada semana — sin el momento en la
+// clave, la primera vez que se marca "vista" la dejaría sin avisar NUNCA
+// más, ni siquiera en ocurrencias futuras genuinamente nuevas.
+const PENDING_SEEN_KEY = 'vyneural_pending_seen';
+function pendingSeenKey(id, occurrenceMs) {
+  return `${id}:${occurrenceMs}`;
+}
+function pendingAlreadySeen(id, occurrenceMs) {
   try {
-    return sessionStorage.getItem(PENDING_SEEN_KEY) === String(id);
+    return localStorage.getItem(PENDING_SEEN_KEY) === pendingSeenKey(id, occurrenceMs);
   } catch (_) {
     return false;
   }
 }
-function markPendingSeen(id) {
+function markPendingSeen(id, occurrenceMs) {
   try {
-    sessionStorage.setItem(PENDING_SEEN_KEY, String(id));
+    localStorage.setItem(PENDING_SEEN_KEY, pendingSeenKey(id, occurrenceMs));
   } catch (_) {
-    /* sessionStorage no disponible (modo privado, etc.): peor caso, vuelve a preguntar */
+    /* localStorage no disponible (modo privado, etc.): peor caso, vuelve a preguntar */
   }
 }
 
@@ -5001,6 +5012,7 @@ async function checkPendingReminder() {
       if (due && due.config && due.config.freq > 0) {
         pending = {
           id: due.id,
+          occurrence: dueAt(due),
           name: due.name,
           freq: due.config.freq,
           beat: due.config.beat,
@@ -5015,7 +5027,7 @@ async function checkPendingReminder() {
     }
   }
   if (!pending) return;
-  if (pending.id && pendingAlreadySeen(pending.id)) return;
+  if (pending.id && pendingAlreadySeen(pending.id, pending.occurrence)) return;
   // selectState() PRIMERO: si `selected` no era ya el estado Personalizado,
   // entrar a él resetea `carrier` a 'personalizado' (arranque limpio, ver su
   // declaración) — seteando carrier/loadedCustomBase ANTES, ese reset los
@@ -5056,7 +5068,7 @@ async function checkPendingReminder() {
   // refleje la config real, no la que había al entrar al estado.
   updateStatus();
   openPendingModal(pending);
-  if (pending.id) markPendingSeen(pending.id);
+  if (pending.id) markPendingSeen(pending.id, pending.occurrence);
 }
 
 // Modal de sesión pendiente: reemplaza el toast (fácil de pasar por alto) —
