@@ -968,9 +968,12 @@ function currentParams() {
   // El resto delega igual en carrierBaseFor, que hace el mismo escalado
   // proporcional para las familias fijas (solfeggio/solfeggio963/ancestral)
   // y los casos literales (schumann/estandar220/personalizado).
+  // loadedCustomBase (frecuencia guardada activa) manda sobre el slider
+  // cuando está seteada — ver su declaración para el porqué.
+  const ownBase = loadedCustomBase != null ? loadedCustomBase : parseFloat(customBase.value);
   const base = selected.custom
-    ? carrierBaseFor(carrier, parseFloat(customBase.value), parseFloat(customBase.value))
-    : carrierBaseFor(carrier, selected.base, parseFloat(customBase.value));
+    ? carrierBaseFor(carrier, ownBase, ownBase)
+    : carrierBaseFor(carrier, selected.base, ownBase);
   const beat = selected.custom ? parseFloat(customBeat.value) : (selected.stimulus ? selected.stimulus.beat : 10);
   const wave = selectedWave;
   return { base, beat, wave, volume: volumeLevel };
@@ -1866,11 +1869,26 @@ ambientOptions.addEventListener('click', (e) => {
 
 // ---------------------------------------------------------------- Personalizado
 function updateCustomLabels() {
-  customBaseLabel.textContent = `Portada: ${customBase.value} Hz`;
+  // Con una guardada cargada, el label muestra su Hz real (puede superar el
+  // tope del slider) en vez del valor — potencialmente recortado — del
+  // slider, que ni se movió.
+  const baseHz = loadedCustomBase != null ? loadedCustomBase : customBase.value;
+  customBaseLabel.textContent = `Portada: ${baseHz} Hz`;
   customBeatLabel.textContent = `Ritmo binaural: ${customBeat.value} Hz`;
 }
 
+// Mover cualquier slider a mano deja de ser exactamente la guardada que
+// elegiste en el picker (ver customLoadSelect más abajo) — deseleccionarla
+// evita que el dropdown siga mostrando un nombre que ya no corresponde a lo
+// que estás escuchando/configurando.
+function deselectLoadedFrequency() {
+  const sel = document.getElementById('custom-load-freq');
+  if (sel) sel.value = '';
+  loadedCustomBase = null;
+}
+
 customBase.addEventListener('input', () => {
+  deselectLoadedFrequency();
   updateCustomLabels();
   if ((selected.custom || carrier === 'personalizado') && playing) {
     simulation.audio.retune(currentParams());
@@ -1885,6 +1903,7 @@ customBase.addEventListener('input', () => {
   updateUrl();
 });
 customBeat.addEventListener('input', () => {
+  deselectLoadedFrequency();
   updateCustomLabels();
   if (selected.custom && playing) {
     simulation.audio.retune(currentParams());
@@ -1908,6 +1927,16 @@ const WAVES = [
   { id: 'square', label: 'Cuadrada', path: 'M0 8 L 0 0 L 10 0 L 10 16 L 20 16 L 20 0 L 30 0 L 30 16 L 40 16 L 40 8' },
 ];
 let selectedWave = 'sine';
+
+// Frecuencia de portada cargada desde una guardada (customLoadSelect, más
+// abajo), en Hz EXACTOS — no el valor del slider. El valor guardado puede
+// exceder el rango del slider (60-1000): una guardada "963 Hz afinada a
+// Solfeggio 963" quedó guardada como 2146,7 Hz efectivos, que el slider ni
+// puede representar. Elegir una guardada NO debe mover el slider — son dos
+// cosas independientes; mientras esto no sea null, currentParams() usa ESTE
+// valor en vez de leer customBase.value. Se limpia (null) apenas el usuario
+// toca el slider a mano (ver deselectLoadedFrequency).
+let loadedCustomBase = null;
 
 function waveIcon(path) {
   return `<svg class="wave-icon" viewBox="0 0 40 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
@@ -1992,6 +2021,12 @@ function updateCustomPanel() {
   customPanel.querySelectorAll('.custom-beat-only').forEach((el) =>
     el.classList.toggle('hidden', !selected.custom),
   );
+  // El chip "Personalizado" de Portadora es redundante (y confuso) cuando el
+  // ESTADO ya es Personalizado: ambos terminan significando lo mismo (el
+  // slider manda, sin familia). Se oculta solo ahí; en cualquier otro estado
+  // sigue siendo una opción válida de portadora.
+  const customCarrierChip = carrierOptions && carrierOptions.querySelector('[data-carrier="personalizado"]');
+  if (customCarrierChip) customCarrierChip.classList.toggle('hidden', selected.custom);
 }
 
 // Aviso sutil si la portadora es tan grave que el latido se percibe mal.
@@ -2042,8 +2077,17 @@ if (customSaveFreqBtn) {
         condition: expCondition,
         // El ambiente (lluvia, río, etc.) no viajaba: se guarda acá para que
         // cargar la frecuencia (ver customLoadSelect más abajo) la reproduzca
-        // completa, no solo base/ritmo/onda.
-        config: { source: 'generator', ambient: [...ambientTypes] },
+        // completa, no solo base/ritmo/onda. `carrier`/`ownBase` son la
+        // "receta" (portadora elegida + tu base propia, ANTES de escalar):
+        // sin esto, cargar una guardada solo podía reproducir el resultado
+        // final (p.base, ya escalado) sin poder volver a encender el chip de
+        // portadora original — quedaba todo como "Personalizado" sin más.
+        config: {
+          source: 'generator',
+          ambient: [...ambientTypes],
+          carrier,
+          ownBase: loadedCustomBase != null ? loadedCustomBase : parseFloat(customBase.value),
+        },
       });
       if (customSaveNameEl) customSaveNameEl.value = '';
       setCustomSaveNote('✅ Guardada en tu cuenta.');
@@ -2097,7 +2141,28 @@ if (customLoadSelect) {
   customLoadSelect.addEventListener('change', () => {
     const f = savedFrequencies.find((sf) => sf.id === customLoadSelect.value);
     if (!f) return;
-    customBase.value = String(Math.round((f.carrier_frequency || 220) * 10) / 10);
+    // Confirmado con el usuario: una guardada "963 afinada a Solfeggio 963"
+    // quedó guardada como 2146,7 Hz efectivos — MÁS que el tope del slider
+    // (1000). Asignarle esto a customBase.value lo recortaría a 1000 (el
+    // navegador clampea range inputs fuera de [min,max]) y además el pedido
+    // explícito es que elegir una guardada NO mueva el slider. Por eso NO se
+    // toca customBase acá: loadedCustomBase guarda el Hz exacto y
+    // currentParams() lo usa en vez de leer el slider (ver su declaración).
+    //
+    // Si la guardada trae "receta" (carrier + ownBase, ver el guardado más
+    // arriba) se usa esa: currentParams() recalcula la escala en vivo Y el
+    // chip de portadora correcto queda encendido (syncCarrierChips más
+    // abajo), por si el usuario quiere cambiarla desde ahí. Las guardadas
+    // viejas sin receta caen al comportamiento anterior: 'personalizado' con
+    // el resultado final congelado, sin chip que encender (nunca se supo cuál).
+    const recipe = f.config && f.config.carrier in CARRIER_BASE && isFinite(f.config.ownBase);
+    if (recipe) {
+      carrier = f.config.carrier;
+      loadedCustomBase = f.config.ownBase;
+    } else {
+      carrier = 'personalizado';
+      loadedCustomBase = f.carrier_frequency || 220;
+    }
     customBeat.value = String(f.beat_frequency > 0 ? Math.round(f.beat_frequency * 10) / 10 : 10);
     selectedWave = ['sine', 'triangle', 'sawtooth', 'square'].includes(f.waveform) ? f.waveform : 'sine';
     // Simétrico al guardado: reproducir una guardada restaura TODA su
@@ -2116,16 +2181,40 @@ if (customLoadSelect) {
     updateCustomPanel();
     syncCarrierChips();
     updateCarrierWarning();
+    // selectState() ya llama a updateStatus() interno, pero se reafirma acá
+    // explícito: es la prueba visible de que el reproductor (Izquierda/
+    // Derecha/Latido, debajo) reflejó la config cargada, no solo el panel.
+    updateStatus();
     if (playing) {
       simulation.audio.retune(currentParams());
       syncNativeAudioRetune();
+      applyAmbient();
     }
     saveSession();
     updateUrl();
-    customLoadSelect.value = '';
+    // Confirmación explícita, mostrando lo que currentParams() calculó
+    // DE VERDAD (no el valor crudo guardado): si hay una diferencia entre
+    // ambos, el toast mismo la muestra en vez de esconderla.
+    showToast(`Cargada: ${f.name || 'frecuencia'} — ${currentParams().base} Hz`);
+    // El select se queda mostrando la elegida (no vuelve al placeholder): así
+    // se ve cuál está activa. Resetearlo daba la falsa impresión de que la
+    // selección "no tomó".
   });
 }
 loadSavedFrequencies();
+// loadSavedFrequencies() de arriba corre UNA vez al cargar la página — si en
+// ese momento no había sesión, savedFrequencies queda [] para siempre y el
+// picker no vuelve a aparecer aunque el usuario haga login DESPUÉS, en la
+// misma carga de página (sin recargar). Mismo evento que ya usa el resto de
+// la app (ui/auth.js) para reaccionar a login/logout sin reload.
+document.addEventListener('vyneural:auth', (e) => {
+  if (e.detail && (e.detail.type === 'login' || e.detail.type === 'register')) {
+    loadSavedFrequencies();
+  } else if (e.detail && e.detail.type === 'logout') {
+    savedFrequencies = [];
+    renderSavedFrequencyOptions();
+  }
+});
 
 // La URL refleja estado + portadora para compartir y enlazar directo. Lleva la
 // familia de portadora (?carrier=…) porque la base efectiva de las familias
@@ -4832,15 +4921,38 @@ if (!(deepState || deepF1 || deepCarrier || isFinite(deepFreq)) && !savedSession
 // que un deep link de notificación (freq/beat/wave), nunca autoplay. Si ya
 // venís de un deep link explícito (?freq=… o ?seq=…), esa alarma YA es la
 // que abriste: no hay nada "pendiente" que buscar además.
+// Recordarla "ya vista" en esta pestaña (sessionStorage: se limpia sola al
+// cerrarla, no hace falta un botón de "no molestar"). Sin esto, cada recarga
+// de la página (recarga manual, o cualquier HMR en desarrollo) volvía a
+// encontrar la MISMA alarma vencida/reciente y reabría el modal — muy
+// molesto trabajando en el generador sin relación con recordatorios. Una
+// alarma NUEVA (id distinto) sí vuelve a avisar.
+const PENDING_SEEN_KEY = 'vyneural_pending_seen_id';
+function pendingAlreadySeen(id) {
+  try {
+    return sessionStorage.getItem(PENDING_SEEN_KEY) === String(id);
+  } catch (_) {
+    return false;
+  }
+}
+function markPendingSeen(id) {
+  try {
+    sessionStorage.setItem(PENDING_SEEN_KEY, String(id));
+  } catch (_) {
+    /* sessionStorage no disponible (modo privado, etc.): peor caso, vuelve a preguntar */
+  }
+}
+
 async function checkPendingReminder() {
   const now = Date.now();
-  const local = getAlarms()
-    .filter((a) => a.nextAt && a.nextAt <= now && a.freq > 0)
-    .sort((a, b) => a.nextAt - b.nextAt)[0];
-  let pending = local
-    ? { name: local.name, freq: local.freq, beat: local.beat, wave: local.wave }
-    : null;
-  if (!pending && getAccessToken()) {
+  // La rama "local" (getAlarms()/LS_ALARMS, notifications.js) se sacó: es un
+  // storage legacy que NADA en la app escribe hoy (los recordatorios
+  // actuales van todos por AlarmManager/IndexedDB, ver rutina.js y el modal
+  // de alarma de más abajo). Confiar en ella mostraba sesiones fantasma de
+  // datos viejos en localStorage sin relación con nada actual — el server es
+  // la única fuente de verdad real para "pendiente".
+  let pending = null;
+  if (getAccessToken()) {
     try {
       const serverAlarms = await listServerAlarms();
       // Render free duerme el proceso con inactividad: send_due_reminders()
@@ -4862,13 +4974,14 @@ async function checkPendingReminder() {
         .filter((a) => a.enabled && dueAt(a) !== null)
         .sort((a, b) => dueAt(a) - dueAt(b))[0];
       if (due && due.config && due.config.freq > 0) {
-        pending = { name: due.name, freq: due.config.freq, beat: due.config.beat, wave: due.config.wave };
+        pending = { id: due.id, name: due.name, freq: due.config.freq, beat: due.config.beat, wave: due.config.wave };
       }
     } catch (_) {
       /* sin red: no bloquea la carga normal, se reintenta la próxima visita */
     }
   }
   if (!pending) return;
+  if (pending.id && pendingAlreadySeen(pending.id)) return;
   customBase.value = String(Math.round(pending.freq * 10) / 10);
   customBeat.value = String(pending.beat > 0 ? Math.round(pending.beat * 10) / 10 : 10);
   selectedWave = pending.wave || 'sine';
@@ -4879,6 +4992,7 @@ async function checkPendingReminder() {
   updateCustomPanel();
   syncCarrierChips();
   openPendingModal(pending);
+  if (pending.id) markPendingSeen(pending.id);
 }
 
 // Modal de sesión pendiente: reemplaza el toast (fácil de pasar por alto) —

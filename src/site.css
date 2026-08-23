@@ -3391,6 +3391,26 @@ html:not(.in-app) .in-app-only {
   color: var(--text-dim);
 }
 
+/* Mismo rojo que .cuenta-item-del (eliminar) — una sola acción destructiva
+   real en toda la página de cuenta, se distingue del resto. */
+.cuenta-btn-danger {
+  background: transparent;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: #f87171;
+}
+
+.cuenta-btn-danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.cuenta-danger-zone {
+  border: 1px solid rgba(248, 113, 113, 0.25);
+}
+
+.cuenta-danger-zone h3 {
+  color: #f87171;
+}
+
 .cuenta-push-actions {
   display: flex;
   gap: 10px;

@@ -864,6 +864,16 @@ body {
   font-family: inherit;
 }
 
+/* El <select> cerrado toma el fondo oscuro de arriba, pero la lista
+   desplegada la pinta el sistema operativo/navegador, no esta hoja de
+   estilos — sin esto quedaba blanca por defecto con texto blanco (heredado
+   del select), ilegible salvo al pasar el mouse (el highlight de hover sí
+   se veía). Mismo patrón que .select-row select option. */
+#custom-load-freq option {
+  background: #14162b;
+  color: #fff;
+}
+
 /* Guardar la frecuencia actual en la cuenta: inline, dentro del mismo panel
    personalizado (ya no un modal aparte) — nombre + botón en una fila, con
    un aviso de resultado debajo. */

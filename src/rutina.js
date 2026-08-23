@@ -653,7 +653,12 @@ function prefillItCustomFromSelection() {
   const beatEl = document.getElementById('it-custom-beat');
   const nameEl = document.getElementById('it-custom-save-name');
   if (!sel || !sel.value) return;
-  let carrier = null;
+  // ownBaseHz = la PORTADA: el número en Hz (itCustomNominalBase).
+  // carrierMode = la PORTADORA: la familia elegida — Solfeggio, Ancestral,
+  // etc. (itCustomCarrierMode). Dos cosas distintas, nunca mezclar los
+  // nombres acá (ver IT_CUSTOM_CARRIERS más arriba para la lista real).
+  let ownBaseHz = null;
+  let carrierMode = 'estandar';
   let beat = null;
   let wave = null;
   let condition = null;
@@ -662,7 +667,7 @@ function prefillItCustomFromSelection() {
   if (sel.value.startsWith('p:')) {
     const profile = PROFILES.find((p) => p.id === sel.value.slice(2));
     if (profile) {
-      carrier = profile.stimulus.carrierBase;
+      ownBaseHz = profile.stimulus.carrierBase;
       beat = profile.stimulus.beat;
       wave = profile.stimulus.modulation || 'sine';
       name = profile.name;
@@ -670,7 +675,21 @@ function prefillItCustomFromSelection() {
   } else if (sel.value.startsWith('f:')) {
     const freq = savedFreqsMap.get(sel.value.slice(2));
     if (freq) {
-      carrier = freq.carrier_frequency ?? freq.left_frequency;
+      // Receta guardada (ver saveBtn, wireItCustomPanel): si esta guardada
+      // trae su PORTADORA (familia) + PORTADA propia sin escalar, se
+      // recupera esa combinación tal cual — el botón de familia correcto
+      // (Solfeggio 963, etc.) vuelve a encender solo. Guardadas viejas sin
+      // receta caen al comportamiento de siempre: modo 'estandar' con el Hz
+      // final ya escalado, congelado, sin ninguna familia marcada.
+      const hasRecipe = freq.config
+        && IT_CUSTOM_CARRIERS.some((c) => c.mode === freq.config.carrier)
+        && isFinite(freq.config.ownBase);
+      if (hasRecipe) {
+        ownBaseHz = freq.config.ownBase;
+        carrierMode = freq.config.carrier;
+      } else {
+        ownBaseHz = freq.carrier_frequency ?? freq.left_frequency;
+      }
       beat = freq.beat_frequency;
       wave = freq.waveform || 'sine';
       condition = freq.condition || 'binaural';
@@ -678,12 +697,9 @@ function prefillItCustomFromSelection() {
       name = freq.name;
     }
   }
-  if (carrier != null) {
-    // Arranca siempre en modo 'estandar': muestra la base propia del preset
-    // o de la guardada, sin escalar — desde ahí se puede afinar con una
-    // portadora o pasar a "Personalizado" para tocarla a mano.
-    itCustomNominalBase = carrier;
-    itCustomCarrierMode = 'estandar';
+  if (ownBaseHz != null) {
+    itCustomNominalBase = ownBaseHz;
+    itCustomCarrierMode = carrierMode;
     syncItCustomCarrierButtons();
     recomputeItCustomCarrier();
   }
@@ -768,12 +784,14 @@ function wireItCustomPanel() {
       if (submitBtn) submitBtn.disabled = true;
       setItCustomNote('Guardando…');
       try {
-        const carrier = itCustomCarrierHz || 220;
+        // carrierHz = la PORTADA final (Hz), YA escalada por la familia
+        // elegida — esto es lo que se guarda en carrier_frequency, siempre.
+        const carrierHz = itCustomCarrierHz || 220;
         const beat = (beatEl && parseFloat(beatEl.value)) || 10;
         const name = (nameEl && nameEl.value.trim()) || 'Personalizada';
         const frequency = await createFrequency({
           name: name.slice(0, 120),
-          carrier_frequency: Math.round(carrier * 10) / 10,
+          carrier_frequency: Math.round(carrierHz * 10) / 10,
           beat_frequency: Math.round(beat * 10) / 10,
           waveform: itCustomWave,
           condition: itCustomCondition,
@@ -781,7 +799,17 @@ function wireItCustomPanel() {
           // que hoy no afecta nada de lo que suena): así "Iniciar" desde el
           // itinerario reproduce el mismo paisaje sonoro que el usuario
           // eligió al personalizarla, no solo freq/ritmo/onda.
-          config: { source: 'itinerary', ambient: [...itCustomAmbient] },
+          // carrier/ownBase = la "receta": la PORTADORA (familia,
+          // itCustomCarrierMode) + la PORTADA propia sin escalar
+          // (itCustomNominalBase) — así cargar esta guardada después (ver
+          // prefillItCustomFromSelection) puede volver a encender el botón
+          // de familia correcto, no solo reproducir el Hz final congelado.
+          config: {
+            source: 'itinerary',
+            ambient: [...itCustomAmbient],
+            carrier: itCustomCarrierMode,
+            ownBase: itCustomNominalBase,
+          },
         });
         savedFreqsMap.set(frequency.id, frequency);
         populateStepFreqs();
