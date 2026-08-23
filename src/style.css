@@ -831,6 +831,39 @@ body {
   gap: 7px;
 }
 
+/* Cargar una frecuencia ya guardada en la cuenta: arriba del todo del panel
+   personalizado (antes de tocar ningún slider), así "Guardar" (abajo) y
+   "Cargar" (acá) quedan simétricos — una sola cuenta, ida y vuelta. Oculto
+   por defecto: solo aparece si hay sesión Y al menos una frecuencia guardada
+   (ver populateSavedFrequencies() en main.js). */
+.custom-load-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.custom-load-wrap.hidden {
+  display: none;
+}
+
+.custom-load-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #9aa0c3;
+}
+
+#custom-load-freq {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font-size: 13.5px;
+  font-family: inherit;
+}
+
 /* Guardar la frecuencia actual en la cuenta: inline, dentro del mismo panel
    personalizado (ya no un modal aparte) — nombre + botón en una fila, con
    un aviso de resultado debajo. */

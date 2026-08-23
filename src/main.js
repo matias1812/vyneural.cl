@@ -80,7 +80,7 @@ import { syncFavoriteToCloud, syncUnfavoriteFromCloud } from './api/fav-sync.js'
 // Guardar frecuencias personalizadas: inline, junto al panel de ajuste (ver
 // #custom-save-freq más abajo) — ya no un modal aparte, para tener toda la
 // config del panel personalizado en un solo lugar bajo el reproductor.
-import { createFrequency } from './api/frequencies.js';
+import { createFrequency, listFrequencies } from './api/frequencies.js';
 // Alarmas en la nube (P6-FEAT-001): la alarma del generador se sincroniza al
 // backend cuando hay sesión, para que el scheduler server-side pueda enviar
 // el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
@@ -902,9 +902,16 @@ function mixHex(hexA, hexB, t) {
 }
 
 function selectState(state) {
+  // Solo al ENTRAR a Personalizado desde otro estado se resetea la
+  // portadora a 'personalizado' (arranque limpio, sin heredar una familia
+  // rara de otro estado). Antes se evaluaba contra `state` después de ya
+  // haber pisado `selected`, así que volver a llamar selectState() con
+  // Personalizado YA activo (re-tocar la tarjeta, cargar una frecuencia
+  // guardada) SIEMPRE reseteaba — pisando en silencio una familia (963 Hz,
+  // Solfeggio, etc.) que el usuario ya había elegido para afinar el slider.
+  const enteringCustom = state.custom && !selected.custom;
   selected = state;
-  // El estado Personalizado usa su propia portadora (el slider de base).
-  if (state.custom && carrier !== 'personalizado') {
+  if (enteringCustom && carrier !== 'personalizado') {
     carrier = 'personalizado';
     syncCarrierChips();
   }
@@ -2029,11 +2036,18 @@ if (customSaveFreqBtn) {
         carrier_frequency: Math.round((p.base || 220) * 10) / 10,
         beat_frequency: Math.round((p.beat || 10) * 10) / 10,
         waveform: p.wave || 'sine',
-        condition: 'binaural',
-        config: { source: 'generator' },
+        // Antes quedaba SIEMPRE 'binaural' hardcodeado — guardar con
+        // Condición experimental en 'ruido' o 'tono puro' perdía esa
+        // elección; reproducirla después volvía a sonar binaural sin avisar.
+        condition: expCondition,
+        // El ambiente (lluvia, río, etc.) no viajaba: se guarda acá para que
+        // cargar la frecuencia (ver customLoadSelect más abajo) la reproduzca
+        // completa, no solo base/ritmo/onda.
+        config: { source: 'generator', ambient: [...ambientTypes] },
       });
       if (customSaveNameEl) customSaveNameEl.value = '';
       setCustomSaveNote('✅ Guardada en tu cuenta.');
+      loadSavedFrequencies();
     } catch (err) {
       setCustomSaveNote((err && err.detail) || 'No se pudo guardar. Intentá de nuevo.', true);
     } finally {
@@ -2041,6 +2055,77 @@ if (customSaveFreqBtn) {
     }
   });
 }
+
+// Cargar una frecuencia ya guardada en la cuenta: simétrico al "Guardar" de
+// arriba. Sin sesión, o sin ninguna guardada todavía, el picker queda oculto
+// (nada que elegir) en vez de mostrar un desplegable vacío.
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const customLoadWrap = document.getElementById('custom-load-wrap');
+const customLoadSelect = document.getElementById('custom-load-freq');
+let savedFrequencies = [];
+
+function renderSavedFrequencyOptions() {
+  if (!customLoadSelect || !customLoadWrap) return;
+  const hasAny = savedFrequencies.length > 0;
+  customLoadWrap.classList.toggle('hidden', !hasAny);
+  if (!hasAny) return;
+  customLoadSelect.innerHTML = '<option value="">— Elegí una de tu cuenta —</option>' +
+    savedFrequencies
+      .map((f) => `<option value="${f.id}">${escapeHtml(f.name || 'Sin nombre')} · ${Math.round(f.carrier_frequency)} Hz</option>`)
+      .join('');
+}
+
+async function loadSavedFrequencies() {
+  if (!getAccessToken()) return;
+  try {
+    savedFrequencies = (await listFrequencies()) || [];
+  } catch (_) {
+    savedFrequencies = []; // sin red o sesión vencida: el picker queda oculto, no rompe el panel
+  }
+  renderSavedFrequencyOptions();
+}
+
+if (customLoadSelect) {
+  customLoadSelect.addEventListener('change', () => {
+    const f = savedFrequencies.find((sf) => sf.id === customLoadSelect.value);
+    if (!f) return;
+    customBase.value = String(Math.round((f.carrier_frequency || 220) * 10) / 10);
+    customBeat.value = String(f.beat_frequency > 0 ? Math.round(f.beat_frequency * 10) / 10 : 10);
+    selectedWave = ['sine', 'triangle', 'sawtooth', 'square'].includes(f.waveform) ? f.waveform : 'sine';
+    // Simétrico al guardado: reproducir una guardada restaura TODA su
+    // config, no solo base/ritmo/onda — la condición experimental y el
+    // ambiente que tenía al guardarla, no lo que hubiera quedado puesto acá.
+    if (f.condition && Object.prototype.hasOwnProperty.call(EXP_CONDITION_TO_SESSION, f.condition)) {
+      setExpCondition(f.condition);
+    }
+    const savedAmbient = f.config && Array.isArray(f.config.ambient) ? f.config.ambient : [];
+    ambientTypes = new Set(savedAmbient.filter((id) => AMBIENT_IDS.includes(id)));
+    updateAmbientButtons();
+    const customState = STATES.find((s) => s.custom);
+    if (customState) selectState(customState);
+    updateCustomLabels();
+    syncWaveButtons();
+    updateCustomPanel();
+    syncCarrierChips();
+    updateCarrierWarning();
+    if (playing) {
+      simulation.audio.retune(currentParams());
+      syncNativeAudioRetune();
+    }
+    saveSession();
+    updateUrl();
+    customLoadSelect.value = '';
+  });
+}
+loadSavedFrequencies();
 
 // La URL refleja estado + portadora para compartir y enlazar directo. Lleva la
 // familia de portadora (?carrier=…) porque la base efectiva de las familias
@@ -4793,8 +4878,51 @@ async function checkPendingReminder() {
   syncWaveButtons();
   updateCustomPanel();
   syncCarrierChips();
-  showToast(`⏰ Tenías pendiente: ${pending.name || 'un recordatorio'} — tocá play cuando quieras`);
+  openPendingModal(pending);
 }
+
+// Modal de sesión pendiente: reemplaza el toast (fácil de pasar por alto) —
+// bloquea con una decisión explícita, en CUALQUIER entrada a la app, no solo
+// tocando la notificación (mismo criterio, ver comentario de
+// checkPendingReminder más arriba). REGLA DE ORO: "Reproducir ahora" es un
+// clic genuino del usuario — recién ahí arranca el audio, nunca antes.
+const pendingModal = document.getElementById('pending-modal');
+const pendingNameEl = document.getElementById('pending-name');
+const pendingDetailsEl = document.getElementById('pending-details');
+const pendingPlayBtn = document.getElementById('pending-play');
+const pendingDismissBtn = document.getElementById('pending-dismiss');
+const pendingCloseBtn = document.getElementById('pending-close');
+
+function openPendingModal(pending) {
+  if (!pendingModal) return;
+  if (pendingNameEl) pendingNameEl.textContent = pending.name || 'Tu sesión';
+  if (pendingDetailsEl) {
+    const p = currentParams();
+    pendingDetailsEl.textContent = `${p.base} Hz · Latido ${p.beat} Hz`;
+  }
+  pendingModal.classList.remove('hidden');
+  if (pendingPlayBtn) pendingPlayBtn.focus();
+}
+function closePendingModal() {
+  if (pendingModal) pendingModal.classList.add('hidden');
+}
+if (pendingPlayBtn) {
+  pendingPlayBtn.addEventListener('click', () => {
+    closePendingModal();
+    resumeSession('ui');
+  });
+}
+if (pendingDismissBtn) pendingDismissBtn.addEventListener('click', closePendingModal);
+if (pendingCloseBtn) pendingCloseBtn.addEventListener('click', closePendingModal);
+if (pendingModal) {
+  pendingModal.addEventListener('click', (e) => {
+    if (e.target === pendingModal) closePendingModal();
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && pendingModal && !pendingModal.classList.contains('hidden')) closePendingModal();
+});
+
 if (!isFinite(deepFreq) && !deepSeq) {
   checkPendingReminder();
 }
@@ -4813,7 +4941,7 @@ if (location.hash === '#permisos') {
 // play queda en manos del usuario (no se depende de que el navegador bloquee
 // el autoplay).
 if (deepAutostart && isFinite(deepFreq) && deepFreq > 0 && !playing) {
-  showToast('Tu sesión está lista — toca play para comenzar 🎧');
+  openPendingModal({ name: deepState ? (STATES.find((s) => s.id === deepState) || {}).name : null });
 }
 
 // P4-B — re-sincronización con la sesión nativa al cargar la página: navegar

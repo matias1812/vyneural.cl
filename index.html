@@ -157,12 +157,18 @@
 
         <div id="custom-panel" class="custom hidden">
           <h3 class="custom-title"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg> Ajusta tu frecuencia</h3>
+          <div class="custom-load-wrap hidden" id="custom-load-wrap">
+            <label class="custom-load-label" for="custom-load-freq">Cargar una frecuencia guardada</label>
+            <select id="custom-load-freq">
+              <option value="">— Elegí una de tu cuenta —</option>
+            </select>
+          </div>
           <label class="slider-row">
             <span class="ctrl-label">
               <span id="custom-base-label">Portada: 220 Hz</span>
               <span class="info-dot" tabindex="0" role="tooltip" aria-label="Qué es la portada" data-tip="Frecuencia base que se reproduce en ambos oídos. Define el tono del sonido; el efecto binaural depende solo del ritmo.">?</span>
             </span>
-            <input id="custom-base" type="range" min="60" max="400" step="1" value="220" />
+            <input id="custom-base" type="range" min="60" max="1000" step="1" value="220" />
           </label>
           <div class="custom-beat-only">
           <label class="slider-row">
@@ -520,6 +526,26 @@
           <p id="quick-reco-state" class="quick-reco-state"></p>
           <button id="quick-start" class="quick-start">Comenzar sesión ▶</button>
           <button id="quick-back" class="quick-back">Elegir otro</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sesión pendiente: reemplaza el toast silencioso — corre en CUALQUIER
+         entrada a la app (no solo tocando la notificación), y es imposible de
+         pasar por alto sin decidir. REGLA DE ORO intacta: solo deja la config
+         lista, el audio arranca únicamente con el clic de "Reproducir ahora"
+         de acá adentro (ver checkPendingReminder() en main.js). -->
+    <div id="pending-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Sesión pendiente">
+      <div class="modal-card quick-card">
+        <div class="modal-head">
+          <h3>⏰ Tenías una sesión pendiente</h3>
+          <button id="pending-close" class="modal-close" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="quick-reco">
+          <p id="pending-name" class="quick-reco-main"></p>
+          <p id="pending-details" class="quick-reco-state"></p>
+          <button id="pending-play" class="quick-start">Reproducir ahora ▶</button>
+          <button id="pending-dismiss" class="quick-back">Ahora no</button>
         </div>
       </div>
     </div>
