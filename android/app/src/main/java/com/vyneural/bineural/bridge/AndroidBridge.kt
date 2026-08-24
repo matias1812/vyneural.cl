@@ -7,6 +7,7 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.PowerManager
 import android.provider.Settings
 import java.io.BufferedReader
 import java.io.File
@@ -76,6 +77,11 @@ class AndroidBridge(
         info.put("alarmCount", runCatching { scheduler.list().size }.getOrDefault(0))
         info.put("exactAlarms", scheduler.canScheduleExact())
         info.put("exactAlarmsGranted", scheduler.canScheduleExact())
+        // Sin esta excepción, el ciclo de sincronización en 2.º plano
+        // (AlarmSync, cada ~5 min) puede quedar suspendido por el fabricante
+        // y un recordatorio creado en la web no llega al reloj nativo hasta
+        // que el usuario abre la app (bug real reportado en vivo).
+        info.put("batteryUnrestricted", isIgnoringBatteryOptimizations())
         info.put("retuneNative", true)
         info.put("backgroundService", true)
         info.put("backgroundServiceActive", audioRunning)
@@ -176,6 +182,17 @@ class AndroidBridge(
                         } catch (e: Exception) {
                             BineuralLog.e("bridge", "exact alarm settings", e)
                         }
+                    }
+                    respond("OK", command, null)
+                }
+                "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" -> {
+                    try {
+                        val i = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                            .setData(Uri.parse("package:${context.packageName}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(i)
+                    } catch (e: Exception) {
+                        BineuralLog.e("bridge", "battery optimization settings", e)
                     }
                     respond("OK", command, null)
                 }
@@ -367,6 +384,11 @@ class AndroidBridge(
             Diagnostics.lastError = e.message
             respond("BRIDGE_ERROR", null, null)
         }
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
+        return pm.isIgnoringBatteryOptimizations(context.packageName)
     }
 
     private fun respond(status: String, command: String?, data: JSONObject?): String {

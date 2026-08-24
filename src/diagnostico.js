@@ -197,6 +197,7 @@ function refreshCaps() {
     ['Notificaciones', merged.notifications.label || merged.notifications.permission, merged.notifications.provider || 'web'],
     ['Audio 2.º plano', merged.backgroundAudio.label, merged.backgroundAudio.provider || 'web'],
     ['Alarmas exactas', merged.exactAlarms.label, merged.exactAlarms.provider || 'web'],
+    ['Optimización de batería', merged.batteryUnrestricted.label, merged.batteryUnrestricted.provider || 'web'],
     ['Alarmas en el reloj del sistema', info ? `${info.alarmCount ?? 0} pendiente(s)` : '—', info ? 'android' : 'n/a'],
     ['Media Session', merged.mediaSession.label, merged.mediaSession.provider || 'web'],
     ['Wake Lock', merged.wakeLock.label, 'web'],
@@ -235,6 +236,15 @@ bind('btn-perm-alarm', () => {
     permNote('Comando nativo enviado: REQUEST_EXACT_ALARM_PERMISSION.');
   } else {
     permNote('Alarmas exactas solo en la APK (requieren el sistema operativo).');
+  }
+});
+bind('btn-perm-battery', () => {
+  const bridge = currentBridge();
+  if (bridge) {
+    bridge.requestIgnoreBatteryOptimizations();
+    permNote('Comando nativo enviado: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS.');
+  } else {
+    permNote('Optimización de batería solo aplica en la APK.');
   }
 });
 bind('btn-perm-wake', async () => {

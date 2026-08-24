@@ -252,6 +252,24 @@ export class SimulationEngine {
     if (this.isPlaying && this.audio && this.audio.ctx && this.audio._condition !== 'none' && !document.hidden) {
       this._healthFrames++;
       if (this._healthFrames % 30 === 0) {
+        // M3 — el primer frame tras volver de segundo plano cae justo en la
+        // misma ráfaga que dispara visibilitychange → restoreFromBackground()
+        // (main.js), que YA hace su propio recoverFade(). _healthFrames queda
+        // congelado mientras document.hidden (este bloque ni corre ahí), así
+        // que el primer tick al volver puede coincidir con el múltiplo de 30
+        // por pura casualidad de en qué frame se bloqueó — el watchdog nunca
+        // se enteraba y lanzaba una SEGUNDA rampa de ganancia por su cuenta,
+        // pisando la de restoreFromBackground(): dos recoverFade() con
+        // distinto punto de partida = el "acople"/interferencia reportado al
+        // desbloquear. RestoreGate (main.js, expuesto en window.__restoreGate)
+        // ya existe justo para deduplicar esto — el watchdog no lo consultaba.
+        const rg = window.__restoreGate;
+        if (rg) {
+          const s = rg.summary();
+          const justRestored =
+            s.state === 'RESTORING' || (s.state === 'SETTLED' && s.settledAgoMs != null && s.settledAgoMs < rg.settleMs);
+          if (justRestored) return;
+        }
         const health = evaluateAudioHealth({
           isPlaying: this.isPlaying,
           ctxState: this.audio.ctx.state,

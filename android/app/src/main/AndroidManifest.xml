@@ -10,6 +10,12 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Sin esto, muchos fabricantes (MIUI, Samsung...) matan el ciclo de
+         sincronización en segundo plano (AlarmSync, cada ~5 min): un
+         recordatorio creado en la web no llega al reloj nativo hasta que el
+         usuario abre la app. Se pide bajo demanda (REQUEST_IGNORE_BATTERY_
+         OPTIMIZATIONS), nunca automático. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:label="@string/app_name"

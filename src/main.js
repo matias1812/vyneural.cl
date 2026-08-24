@@ -367,8 +367,13 @@ function syncUiWithNativeSession() {
   saveSession();
   // P4-B — el proveedor REAL de la sesión restaurada es el servicio nativo:
   // la UI no debe declarar 'none' con audio sonando (mentira de estado).
-  setAudioProvider('native');
+  // Mutear el motor web ANTES de declarar el proveedor: si no, el invariante
+  // (native ⇒ web mudo) se evalúa contra la ganancia VIEJA que traía el motor
+  // web de antes de este resync (bug real, visto en vivo: "¡doble motor de
+  // audio detectado!" al tocar Play desde el widget de medios del sistema,
+  // que fuerza a la WebView a primer plano y dispara este resync).
   startWebVisualizerMuted(base);
+  setAudioProvider('native');
   ilog('playback', 'ui-resynced-from-native');
   return true;
 }
@@ -3428,6 +3433,17 @@ function renderPermissionState() {
       !(isNative && caps.exactAlarms.supported && !caps.exactAlarms.granted),
     );
   }
+  const permBatteryRow = document.getElementById('perm-battery-row');
+  const permBattery = document.getElementById('perm-battery');
+  if (permBatteryRow && permBattery) {
+    permBatteryRow.style.display = isNative ? '' : 'none';
+    permBattery.textContent = caps.batteryUnrestricted.label;
+    permBattery.className = 'perm-state' + (caps.batteryUnrestricted.granted ? ' ok' : ' warn');
+  }
+  const btnBatterySettings = document.getElementById('perm-battery-settings');
+  if (btnBatterySettings) {
+    btnBatterySettings.classList.toggle('hidden', !(isNative && !caps.batteryUnrestricted.granted));
+  }
 
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);
@@ -3478,6 +3494,13 @@ if (permissionsModal) {
     btnExactSettings.addEventListener('click', () => {
       const b = nativeAudio();
       if (b && b.requestExactAlarmPermission) b.requestExactAlarmPermission();
+    });
+  }
+  const btnBatterySettings = document.getElementById('perm-battery-settings');
+  if (btnBatterySettings) {
+    btnBatterySettings.addEventListener('click', () => {
+      const b = nativeAudio();
+      if (b && b.requestIgnoreBatteryOptimizations) b.requestIgnoreBatteryOptimizations();
     });
   }
 }

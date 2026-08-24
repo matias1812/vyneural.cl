@@ -103,36 +103,43 @@ class AudioForegroundService : Service() {
         when (label) {
             "LOSS", "LOSS_TRANSIENT" -> {
                 if (shouldPlay && running) setSessionPlaying(playing = false, pushToJs = false)
-                scheduleFocusReacquire()
+                // REGLA DE ORO — bug real reportado en vivo: una llamada
+                // entrante interrumpe (LOSS/LOSS_TRANSIENT), termina, el foco
+                // se recupera (GAIN) y la sesión volvía a sonar SOLA porque
+                // `shouldPlay` seguía en true — GAIN la reanudaba automático
+                // más abajo. Android no distingue acá un blip de una llamada
+                // real: cualquier interrupción debe exigir un gesto explícito
+                // para volver a sonar, nunca reanudar sola al recuperar foco.
+                shouldPlay = false
+                cancelFocusReacquire()
             }
             // P2 — endurecimiento UNKNOWN: un callback no reconocido NO se
             // transforma en pérdida genérica silenciosa. Queda visible como
             // UNKNOWN en Diagnostics (observabilidad) y entra en la MISMA
-            // política defensiva que LOSS: si la sesión debe sonar, se pausa
-            // y el watchdog re-solicita con backoff (recuperación). El
+            // política defensiva que LOSS: pausa y NO se reanuda sola. El
             // diagnóstico CRITICAL queda registrado en el log forense.
             "UNKNOWN" -> {
                 BineuralLog.e(
                     "audio-focus",
-                    "UNKNOWN focus callback — política defensiva: pausa + watchdog (CRITICAL)",
+                    "UNKNOWN focus callback — política defensiva: pausa, sin auto-resume (CRITICAL)",
                 )
                 // P2 — el UNKNOWN queda CONTADO y visible en el diagnóstico:
                 // nunca se transforma en pérdida genérica silenciosa.
                 Diagnostics.focusUnknownCount += 1
                 if (shouldPlay && running) setSessionPlaying(playing = false, pushToJs = false)
-                scheduleFocusReacquire()
+                shouldPlay = false
+                cancelFocusReacquire()
             }
             "GAIN" -> {
                 // H7 — el foco se recuperó: volver al reintento rápido por si
                 // vuelve a perderse (unlock, próximo gesto del WebView).
+                // shouldPlay ya quedó en false tras cualquier LOSS/UNKNOWN (ver
+                // arriba) — GAIN NUNCA vuelve a arrancar audio por su cuenta;
+                // el próximo play tiene que ser un gesto real del usuario.
                 focusRetryDelayMs = 1_200L
-                if (shouldPlay) {
-                    engine.resume()
-                    setSessionPlaying(playing = true, pushToJs = false)
-                }
             }
             // "DUCK": el foco SIGUE poseído (held=true); AudioFocusHelper ya
-            // aplicó engine.duck(true). No pausar, no programar watchdog.
+            // aplicó engine.duck(true). No pausar, no tocar shouldPlay.
         }
     }
 

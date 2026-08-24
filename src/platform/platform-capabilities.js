@@ -89,6 +89,27 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
         label: 'No garantizado sin la app (requiere calendario o web abierta)',
       };
 
+  // Optimización de batería: solo la APK. Sin la excepción, muchos
+  // fabricantes (MIUI, Samsung, etc.) matan el ciclo de sincronización en
+  // segundo plano (AlarmSync, cada ~5 min) — las alarmas creadas en la web
+  // no llegan al reloj nativo hasta que el usuario abre la app (bug real
+  // reportado: "la notificación de la apk llega solo si entro").
+  const batteryUnrestricted = isNative
+    ? {
+        provider: 'native',
+        supported: true,
+        granted: !!native.info && !!native.info.batteryUnrestricted,
+        label: native.info && native.info.batteryUnrestricted
+          ? 'Sin restricciones ✓'
+          : 'Requiere configuración del sistema (recomendado)',
+      }
+    : {
+        provider: 'web',
+        supported: false,
+        granted: false,
+        label: 'No aplica en el navegador',
+      };
+
   // Media Session: nativa en la APK; web depende del navegador. supported =
   // implementación REAL (no teórica); active y playbackState reflejan el
   // estado que el servicio nativo reporta (P1.5 Fase 14 — sin falsos
@@ -117,6 +138,7 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
     notifications: notif,
     backgroundAudio,
     exactAlarms,
+    batteryUnrestricted,
     mediaSession,
     // La APK no cambia estas: push sigue necesitando backend; wake lock es
     // pantalla, no audio.
