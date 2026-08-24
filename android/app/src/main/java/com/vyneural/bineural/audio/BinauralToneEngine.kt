@@ -38,7 +38,22 @@ class BinauralToneEngine {
     private var thread: Thread? = null
 
     fun start() {
-        if (playing.getAndSet(true)) return
+        // Bug real reportado en vivo: "el botón play no funciona" (solo
+        // pausa). Causa: pause() SOLO baja targetGain a 0 — nunca pone
+        // playing en false (eso es cosa de stop()). Un start() posterior a un
+        // pause() encontraba playing=true y retornaba sin hacer NADA — ni
+        // siquiera restauraba la ganancia — dejando la MediaSession/
+        // notificación en "reproduciendo" con el motor mudo de verdad.
+        // handleSystemPlay() (el callback de MediaSession, el que dispara el
+        // widget del sistema) llama a start() y confía en que "arranca o
+        // reanuda"; el camino de ACTION_PLAY en onStartCommand se salvaba
+        // porque SIEMPRE llama resume() después — start() ahora hace lo
+        // mismo para cualquier llamador, así deja de depender de que cada
+        // caller recuerde encadenar resume().
+        if (playing.getAndSet(true)) {
+            targetGain.set(volume.get())
+            return
+        }
         if (track == null) track = createTrack()
         trackStarted.set(false)
         thread = Thread({ runLoop() }, "bineural-audio").apply { start() }

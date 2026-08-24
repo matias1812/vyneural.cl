@@ -82,6 +82,12 @@ class AndroidBridge(
         // y un recordatorio creado en la web no llega al reloj nativo hasta
         // que el usuario abre la app (bug real reportado en vivo).
         info.put("batteryUnrestricted", isIgnoringBatteryOptimizations())
+        // Fabricantes con gestor de "inicio automático" propio (MIUI, EMUI,
+        // ColorOS, FuntouchOS, OxygenOS): matan alarmas al deslizar la app de
+        // recientes aunque la app esté en la whitelist de batería estándar.
+        // Ver OemAutostart — sin API pública, es best-effort por fabricante.
+        info.put("needsAutostartGuidance", com.vyneural.bineural.permissions.OemAutostart.needsGuidance())
+        info.put("manufacturer", com.vyneural.bineural.permissions.OemAutostart.manufacturer())
         info.put("retuneNative", true)
         info.put("backgroundService", true)
         info.put("backgroundServiceActive", audioRunning)
@@ -183,6 +189,10 @@ class AndroidBridge(
                             BineuralLog.e("bridge", "exact alarm settings", e)
                         }
                     }
+                    respond("OK", command, null)
+                }
+                "REQUEST_AUTOSTART_SETTINGS" -> {
+                    com.vyneural.bineural.permissions.OemAutostart.openSettings(context)
                     respond("OK", command, null)
                 }
                 "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" -> {

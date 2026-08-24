@@ -110,6 +110,29 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
         label: 'No aplica en el navegador',
       };
 
+  // Inicio automático por fabricante: MIUI, EMUI/Magic UI, ColorOS,
+  // FuntouchOS y OxygenOS matan alarmas al deslizar la app de recientes
+  // AUNQUE la app esté en la whitelist de batería estándar — usan su propio
+  // gestor de "inicio automático" por fuera de la API de Android, sin forma
+  // de consultar si ya está concedido (a diferencia de batería/alarmas
+  // exactas). Bug real reportado: recordatorio creado en la APK no sonó tras
+  // deslizarla de recientes, con batería y alarmas exactas ya autorizadas.
+  const autostartGuidance = isNative
+    ? {
+        provider: 'native',
+        supported: !!native.info && !!native.info.needsAutostartGuidance,
+        manufacturer: (native.info && native.info.manufacturer) || '',
+        label: native.info && native.info.needsAutostartGuidance
+          ? 'Recomendado revisar (no verificable por la app)'
+          : 'No requerido en este fabricante',
+      }
+    : {
+        provider: 'web',
+        supported: false,
+        manufacturer: '',
+        label: 'No aplica en el navegador',
+      };
+
   // Media Session: nativa en la APK; web depende del navegador. supported =
   // implementación REAL (no teórica); active y playbackState reflejan el
   // estado que el servicio nativo reporta (P1.5 Fase 14 — sin falsos
@@ -139,6 +162,7 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
     backgroundAudio,
     exactAlarms,
     batteryUnrestricted,
+    autostartGuidance,
     mediaSession,
     // La APK no cambia estas: push sigue necesitando backend; wake lock es
     // pantalla, no audio.

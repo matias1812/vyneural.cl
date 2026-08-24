@@ -27,6 +27,7 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'REQUEST_NOTIFICATION_PERMISSION',
   'REQUEST_EXACT_ALARM_PERMISSION',
   'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+  'REQUEST_AUTOSTART_SETTINGS',
   'OPEN_EXPERIMENT',
   'OPEN_SETTINGS',
   'SET_FULLSCREEN',
@@ -236,6 +237,7 @@ export function createNativeBridgeAdapter(env = {}) {
     requestNotificationPermission: () => send('REQUEST_NOTIFICATION_PERMISSION'),
     requestExactAlarmPermission: () => send('REQUEST_EXACT_ALARM_PERMISSION'),
     requestIgnoreBatteryOptimizations: () => send('REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'),
+    requestAutostartSettings: () => send('REQUEST_AUTOSTART_SETTINGS'),
     openNotificationSettings: () => send('OPEN_NOTIFICATION_SETTINGS'),
 
     // ---- Estado real (P1.5 Fase 13) ----

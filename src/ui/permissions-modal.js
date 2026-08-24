@@ -160,6 +160,7 @@ const MODAL_HTML = `
     <div class="perm-row"><span>Pantalla activa (Wake Lock)</span><b id="perm-wakelock" class="perm-state">—</b></div>
     <div class="perm-row"><span>Notificaciones push (servidor)</span><b id="perm-push" class="perm-state">—</b></div>
     <div class="perm-row" id="perm-battery-row" style="display:none"><span>Optimización de batería</span><b id="perm-battery" class="perm-state">—</b></div>
+    <div class="perm-row" id="perm-autostart-row" style="display:none"><span>Inicio automático (fabricante)</span><b id="perm-autostart" class="perm-state">—</b></div>
     <div class="perm-row"><span>Permisos habilitados en Vyneural</span><b id="perm-enabled" class="perm-state">—</b></div>
     <div class="perm-actions">
       <button id="perm-on" class="auth-submit">Activar permisos</button>
@@ -168,6 +169,7 @@ const MODAL_HTML = `
       <button id="perm-notif-settings" class="perm-test hidden">Abrir ajustes de notificación</button>
       <button id="perm-exact-settings" class="perm-test hidden">Autorizar alarmas exactas</button>
       <button id="perm-battery-settings" class="perm-test hidden">Quitar restricción de batería</button>
+      <button id="perm-autostart-settings" class="perm-test hidden">Revisar inicio automático</button>
     </div>
     <p id="perm-note" class="perm-note"></p>
   </div>
@@ -254,6 +256,17 @@ function renderPermissionState() {
   if (btnBatterySettings) {
     btnBatterySettings.classList.toggle('hidden', !(isNative && !caps.batteryUnrestricted.granted));
   }
+  const permAutostartRow = document.getElementById('perm-autostart-row');
+  const permAutostart = document.getElementById('perm-autostart');
+  if (permAutostartRow && permAutostart) {
+    permAutostartRow.style.display = isNative && caps.autostartGuidance.supported ? '' : 'none';
+    permAutostart.textContent = caps.autostartGuidance.label;
+    permAutostart.className = 'perm-state warn';
+  }
+  const btnAutostartSettings = document.getElementById('perm-autostart-settings');
+  if (btnAutostartSettings) {
+    btnAutostartSettings.classList.toggle('hidden', !(isNative && caps.autostartGuidance.supported));
+  }
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);
   permEnabled.className = 'perm-state' + (disabled ? ' bad' : ' ok');
@@ -309,6 +322,13 @@ function wireModal() {
     btnBatterySettings.addEventListener('click', () => {
       const b = nativeAudio();
       if (b && b.requestIgnoreBatteryOptimizations) b.requestIgnoreBatteryOptimizations();
+    });
+  }
+  const btnAutostartSettings = document.getElementById('perm-autostart-settings');
+  if (btnAutostartSettings) {
+    btnAutostartSettings.addEventListener('click', () => {
+      const b = nativeAudio();
+      if (b && b.requestAutostartSettings) b.requestAutostartSettings();
     });
   }
 }

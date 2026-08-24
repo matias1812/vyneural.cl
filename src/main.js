@@ -3448,6 +3448,17 @@ function renderPermissionState() {
   if (btnBatterySettings) {
     btnBatterySettings.classList.toggle('hidden', !(isNative && !caps.batteryUnrestricted.granted));
   }
+  const permAutostartRow = document.getElementById('perm-autostart-row');
+  const permAutostart = document.getElementById('perm-autostart');
+  if (permAutostartRow && permAutostart) {
+    permAutostartRow.style.display = isNative && caps.autostartGuidance.supported ? '' : 'none';
+    permAutostart.textContent = caps.autostartGuidance.label;
+    permAutostart.className = 'perm-state warn';
+  }
+  const btnAutostartSettings = document.getElementById('perm-autostart-settings');
+  if (btnAutostartSettings) {
+    btnAutostartSettings.classList.toggle('hidden', !(isNative && caps.autostartGuidance.supported));
+  }
 
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);
@@ -3505,6 +3516,13 @@ if (permissionsModal) {
     btnBatterySettings.addEventListener('click', () => {
       const b = nativeAudio();
       if (b && b.requestIgnoreBatteryOptimizations) b.requestIgnoreBatteryOptimizations();
+    });
+  }
+  const btnAutostartSettings = document.getElementById('perm-autostart-settings');
+  if (btnAutostartSettings) {
+    btnAutostartSettings.addEventListener('click', () => {
+      const b = nativeAudio();
+      if (b && b.requestAutostartSettings) b.requestAutostartSettings();
     });
   }
 }
