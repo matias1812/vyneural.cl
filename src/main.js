@@ -2606,6 +2606,10 @@ function restoreFromBackground() {
   // real a 'running' (ctx.onstatechange) completa la transición a FOREGROUND.
   lifecycle.transition('visibility', { visible: true, ctxState: ctx ? ctx.state : null, playing });
   sessionLog.foreground();
+  // M4 — fija la frecuencia en seco ANTES de reanudar/reafirmar el volumen:
+  // un retune() con una rampa en vuelo justo antes de suspender puede sonar
+  // "acelerado" o batido/doblado al reanudar (ver pinFrequencies en audio.js).
+  audio.pinFrequencies();
   // APK: el sonido lo sostiene el servicio nativo; la web queda muda siempre
   // (si se desmutea al volver, suenan dos motores a la vez).
   const nb = nativeAudio();

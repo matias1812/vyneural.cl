@@ -514,6 +514,41 @@ export class BinauralEngine {
     this.beat = beat;
   }
 
+  // M4 — fija en seco (sin rampa) la frecuencia de los osciladores al valor
+  // objetivo actual, cancelando cualquier automation pendiente. Se usa al
+  // volver de segundo plano (restoreFromBackground): un retune() pudo dejar
+  // una rampa de frecuencia A MEDIO CAMINO justo antes de que el SO suspenda
+  // el AudioContext; currentTime no avanza mientras está suspendido, así que
+  // al reanudar esa rampa retoma desde donde quedó — pero en algunos
+  // navegadores/WebView el primer bloque tras resume() puede rendirizar ese
+  // tramo de rampa mucho más rápido que en tiempo real (drift del reloj del
+  // dispositivo de audio tras el resume), lo que se percibe como que "la
+  // frecuencia se acelera" o, si L y R quedan temporalmente des-sincronizados
+  // entre sí, como un batido/doblez audible. Fijar el valor en seco elimina
+  // cualquier rampa en vuelo en el momento más delicado (justo al reanudar).
+  pinFrequencies() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const base = this._base;
+    const beat = this.beat;
+    try {
+      if (this.leftOsc && this.leftOsc.frequency) {
+        this.leftOsc.frequency.cancelScheduledValues(now);
+        this.leftOsc.frequency.setValueAtTime(base, now);
+      }
+      if (this.rightOsc && this.rightOsc.frequency) {
+        this.rightOsc.frequency.cancelScheduledValues(now);
+        this.rightOsc.frequency.setValueAtTime(base + beat, now);
+      }
+      if (this.amLfo && this.amLfo.frequency) {
+        this.amLfo.frequency.cancelScheduledValues(now);
+        this.amLfo.frequency.setValueAtTime(beat, now);
+      }
+    } catch (_) {
+      /* contexto cerrado */
+    }
+  }
+
   // Cambia la forma de onda en vivo: el tipo del oscilador es mutable, así
   // que se puede cambiar sobre la marcha sin cortar ni reiniciar el sonido.
   setWave(wave) {

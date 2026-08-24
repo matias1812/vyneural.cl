@@ -285,6 +285,10 @@ export class SimulationEngine {
           console.warn(
             `[SimulationEngine] ${health.action === 'resume' ? 'AudioContext suspendido con sesión activa' : 'Sesión en play sin señal de audio'} — recuperando sin clics.`,
           );
+          // M4 — mismo motivo que restoreFromBackground: fijar la frecuencia
+          // en seco antes de reanudar evita una rampa en vuelo que suene
+          // acelerada/doblada al recuperar el contexto.
+          if (this.audio.pinFrequencies) this.audio.pinFrequencies();
           this.audio.recoverFade(this.audio._volume ?? 0.6, 0.8);
         }
       }
