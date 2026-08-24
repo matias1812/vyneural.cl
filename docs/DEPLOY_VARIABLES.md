@@ -69,6 +69,7 @@ El frontend NO guarda secretos: en Vercel solo se publica el rewrite de `/api`
 | `CORS_ORIGINS` | `https://www.vyneural.cl,https://vyneural.cl,https://vyneural-six.vercel.app,null,file://` *(`null`/`file://`: origen opaco del WebView de la APK, sin origen http/https propio)* |
 | `ENVIRONMENT` | `production` |
 | `LOG_LEVEL` | `INFO` |
+| `FIREBASE_CREDENTIALS_JSON` | el JSON **completo** de la cuenta de servicio de Firebase (Consola Firebase → ⚙️ Configuración del proyecto → Cuentas de servicio → Generar nueva clave privada), pegado tal cual como valor de una sola variable — no un archivo. Sin esto, el push FCM a la APK es un no-op silencioso: el `AlarmManager` nativo sigue funcionando igual, solo se pierde la entrega cuando el proceso está muerto. |
 
 ### Automáticas / generadas por Render
 

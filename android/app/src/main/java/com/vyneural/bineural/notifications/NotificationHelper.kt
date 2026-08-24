@@ -37,7 +37,13 @@ object NotificationHelper {
     // Android no permite reconfigurar sonido/vibración de un canal existente
     // por código. Nuevo ID otra vez para que TODAS las instalaciones (nuevas
     // y viejas) reciban el canal con la config actual desde cero.
-    const val CHANNEL_ALARMS = "bineural_alarms_v4"
+    // v5: MISMO síntoma reportado otra vez (notificación sin sonido ni
+    // vibración) — el teléfono de prueba instaló varias builds de esta
+    // sesión ANTES de este archivo, así que "v4" quedó fijado con lo que
+    // fuera que tenía en ese momento. Bump otra vez; si esto vuelve a pasar
+    // tras una instalación limpia (nunca antes instalada en ese teléfono),
+    // ya no sería este mecanismo — sería la propia config de abajo.
+    const val CHANNEL_ALARMS = "bineural_alarms_v5"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1075602046091",
+    "project_id": "vyneural-81998",
+    "storage_bucket": "vyneural-81998.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1075602046091:android:ba3669f8fb7e4698c9e88e",
+        "android_client_info": {
+          "package_name": "com.vyneural.bineural"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDovaBiQK_0sU0YvLvPY9AZCtEZPAsufQs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,6 +1,12 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    // FCM real (P6 — recordatorios que llegan aunque el proceso de la app
+    // esté muerto, no solo pausado/segundo plano; ver VyneuralMessagingService.kt
+    // y REGLA DE ORO: el push SOLO prepara/muestra la notificación, JAMÁS
+    // arranca audio por su cuenta). Requiere google-services.json en app/ —
+    // ver comentario en el build.gradle raíz.
+    id 'com.google.gms.google-services'
 }
 
 // Credenciales de firma RELEASE: nunca en el repo. Se leen de local.properties
@@ -22,8 +28,8 @@ android {
         applicationId "com.vyneural.bineural"
         minSdk 26
         targetSdk 34
-        versionCode 18
-        versionName "1.5.5"
+        versionCode 20
+        versionName "1.6.0"
         // Backend al que el worker de sincronización en segundo plano consulta
         // alarmas y reporta el dispositivo. Se puede sobrescribir en builds de
         // prueba: ./gradlew assembleRelease -PapiBase=http://10.0.2.2:8000
@@ -71,4 +77,7 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.activity:activity-ktx:1.8.2'
+    // BoM fija versiones compatibles entre sí de todas las libs de Firebase.
+    implementation platform('com.google.firebase:firebase-bom:33.5.1')
+    implementation 'com.google.firebase:firebase-messaging-ktx'
 }

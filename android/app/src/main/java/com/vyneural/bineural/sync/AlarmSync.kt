@@ -25,16 +25,20 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Sincronización NATIVA con el backend (el "push" que la APK puede ofrecer
- * sin Firebase): un ciclo periódico (AlarmManager, auto-reprogramable, ~5
- * min) consulta las alarmas del usuario y las (re)programa en el reloj del
- * sistema. Así una alarma creada en la WEB llega a la APK y dispara con la
- * app cerrada, aunque el usuario no abra la app. También reporta el estado
- * del dispositivo (PUT /api/v1/devices/me) para la sección Dispositivos.
+ * Sincronización NATIVA con el backend: un ciclo periódico (AlarmManager,
+ * auto-reprogramable, ~5 min) consulta las alarmas del usuario y las
+ * (re)programa en el reloj del sistema. Así una alarma creada en la WEB
+ * llega a la APK y dispara con la app cerrada, aunque el usuario no abra la
+ * app. También reporta el estado del dispositivo — incluido el token FCM
+ * actual (PUT /api/v1/devices/me) — para la sección Dispositivos.
  *
- * Honestidad: no es push en tiempo real (eso requiere FCM/Firebase); es
- * sincronización periódica del servidor al dispositivo, suficiente para que
- * los recordatorios estén programados ANTES de la hora.
+ * P6 — este ciclo YA NO es la única vía de entrega: FCM (VyneuralMessagingService)
+ * complementa esto con push real, entregado por Play Services incluso con el
+ * PROCESO de la app muerto (no solo en 2.º plano) — algo que ni el
+ * AlarmManager nativo puede garantizar en fabricantes que matan procesos
+ * agresivamente (ver OemAutostart.kt). Este ciclo sigue siendo necesario:
+ * sincroniza alarmas CREADAS EN LA WEB al reloj nativo (FCM no reemplaza
+ * eso) y es el respaldo si FCM no está configurado o falla.
  *
  * Access token corto (15 min, ver app/config.py del backend): este ciclo
  * puede refrescarlo con su propio refresh_token cuando la app está cerrada
@@ -162,8 +166,13 @@ object AlarmSync {
         // Nada de esto cambia seguido: si es idéntico al último reporte que
         // tuvo éxito, saltear el PUT. El GET de alarmas de arriba (lo que
         // importa para la velocidad de un recordatorio) no se ve afectado.
+        // El token FCM entra en el fingerprint: un token nuevo (rotación de
+        // Play Services, reinstalación) SIEMPRE dispara un reporte, aunque
+        // permiso/versión no hayan cambiado — si no, el backend seguiría
+        // mandando push al token viejo hasta el próximo cambio de versión.
+        val fcmToken = com.vyneural.bineural.util.FcmTokenStore.get(context)
         val syncedPrefs = context.getSharedPreferences(PREFS_SYNCED, Context.MODE_PRIVATE)
-        val fingerprint = "$permission|${BuildConfig.VERSION_NAME}"
+        val fingerprint = "$permission|${BuildConfig.VERSION_NAME}|${fcmToken ?: ""}"
         if (syncedPrefs.getString(KEY_LAST_REPORTED, null) == fingerprint) return
 
         val body = JSONObject()
@@ -173,6 +182,7 @@ object AlarmSync {
             .put("notification_permission", permission)
             .put("push_enabled", granted)
             .put("user_agent", "Vyneural-APK/${BuildConfig.VERSION_NAME}")
+        if (fcmToken != null) body.put("fcm_token", fcmToken)
         val ok = authorizedPut(context, "${BuildConfig.API_BASE}/api/v1/devices/me", body)
         if (ok) syncedPrefs.edit().putString(KEY_LAST_REPORTED, fingerprint).apply()
     }
