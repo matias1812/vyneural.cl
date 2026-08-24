@@ -29,6 +29,21 @@ class AudioFocusHelper(
     var held: Boolean = false
         private set
 
+    // P2 bis — bug real reportado en vivo: "cualquier audio [de otra app] lo
+    // dispara". Causa: engine.pause() solo baja targetGain a 0 (el AudioTrack
+    // sigue vivo, playing=true) y ACTION_PAUSE nunca abandonaba el foco — la
+    // sesión seguía siendo la dueña registrada. Cuando CUALQUIER otra app
+    // soltaba su foco, Android se lo devolvía acá (GAIN) y este listener
+    // llamaba a engine.resume() sin condición, subiendo targetGain de nuevo:
+    // el motor volvía a sonar sin ningún gesto del usuario. `ducked` distingue
+    // el ÚNICO caso en el que GAIN debe tocar el motor por su cuenta (deshacer
+    // un duck transitorio de la MISMA sesión que nunca dejó de sonar) de
+    // cualquier otro caso — un resume real de pausa/pérdida es responsabilidad
+    // EXCLUSIVA de AudioForegroundService.handleFocusChange() (política: GAIN
+    // nunca reanuda solo).
+    @Volatile
+    private var ducked: Boolean = false
+
     private val listener = AudioManager.OnAudioFocusChangeListener { change ->
         val label = when (change) {
             AudioManager.AUDIOFOCUS_GAIN -> "GAIN"
@@ -53,11 +68,31 @@ class AudioFocusHelper(
         }
         onFocusChange?.invoke(label)
         when (change) {
-            AudioManager.AUDIOFOCUS_GAIN -> engine.resume()
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> engine.pause()
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> engine.duck(true)
+            AudioManager.AUDIOFOCUS_GAIN ->
+                // Solo deshace un duck de ESTA MISMA sesión (nunca dejó de
+                // sonar, solo bajó de volumen). Cualquier otro caso — incluida
+                // una pausa real, propia o ajena — NO toca el motor acá: la
+                // política de si corresponde reanudar vive únicamente en
+                // AudioForegroundService.handleFocusChange().
+                if (ducked) {
+                    ducked = false
+                    engine.duck(false)
+                }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                // Un LOSS_TRANSIENT pausa por completo (gain=0), sin importar
+                // si veníamos de un duck: si quedara `ducked=true` acá, el
+                // próximo GAIN llamaría duck(false) → gain a volumen completo
+                // sin gesto del usuario, reintroduciendo el mismo bug.
+                ducked = false
+                engine.pause()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                ducked = true
+                engine.duck(true)
+            }
             else -> {
                 // Pérdida permanente: pausar (la sesión queda en pausa, no se destruye).
+                ducked = false
                 engine.duck(false)
                 engine.pause()
             }

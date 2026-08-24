@@ -232,6 +232,14 @@ class AudioForegroundService : Service() {
             ACTION_PAUSE -> {
                 shouldPlay = false
                 cancelFocusReacquire()
+                // REGLA DE ORO — bug real reportado en vivo: "cualquier audio
+                // externo lo dispara". Sin abandon(), la sesión seguía siendo
+                // la dueña registrada del foco tras una pausa explícita; el
+                // foco volvía solo (GAIN) en cuanto CUALQUIER otra app soltaba
+                // el suyo, y AudioFocusHelper reanudaba el motor sin gesto del
+                // usuario (ver AudioFocusHelper.kt). Al pausar, soltar el foco
+                // por completo: el próximo play vuelve a solicitarlo.
+                focus?.abandon()
                 engine.pause()
                 running = false
                 Diagnostics.audioActive = false
@@ -338,6 +346,9 @@ class AudioForegroundService : Service() {
         Diagnostics.trace("media", "MEDIA_PAUSE before{running=$running}")
         shouldPlay = false
         cancelFocusReacquire()
+        // Ver ACTION_PAUSE arriba: soltar el foco al pausar es lo que evita
+        // que cualquier audio externo posterior lo reanude solo.
+        focus?.abandon()
         engine.pause()
         running = false
         Diagnostics.audioActive = false
