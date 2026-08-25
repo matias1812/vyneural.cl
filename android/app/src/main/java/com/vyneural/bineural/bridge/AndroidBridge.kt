@@ -219,12 +219,47 @@ class AndroidBridge(
                 "REQUEST_EXACT_ALARM_PERMISSION" -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         try {
-                            context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM))
+                            // Sin el data URI de package, este intent abre una lista
+                            // GENÉRICA de todas las apps con el permiso (el usuario
+                            // tiene que buscar Vyneural ahí adentro) — reportado que
+                            // "alarmas exactas" seguía como no permitida porque este
+                            // paso extra se salteaba. Con el package: URI salta
+                            // directo al toggle de ESTA app, un solo tap.
+                            val i = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                .setData(Uri.parse("package:${context.packageName}"))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(i)
                         } catch (e: Exception) {
                             BineuralLog.e("bridge", "exact alarm settings", e)
                         }
                     }
                     respond("OK", command, null)
+                }
+                "OPEN_ALARM_CHANNEL_SETTINGS" -> {
+                    // Salta directo a los ajustes del canal "Alarmas Vyneural" (donde
+                    // el usuario puede subir la Importancia a Alta si Android la bajó
+                    // sola) en vez de la lista general de notificaciones de la app —
+                    // un solo tap en vez de tres (Notificaciones → Alarmas → Importancia).
+                    try {
+                        val i = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            .putExtra(Settings.EXTRA_CHANNEL_ID, com.vyneural.bineural.notifications.NotificationHelper.CHANNEL_ALARMS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(i)
+                        respond("OK", command, null)
+                    } catch (e: Exception) {
+                        BineuralLog.e("bridge", "open alarm channel settings", e)
+                        try {
+                            val i = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            context.startActivity(i)
+                            respond("OK", command, null)
+                        } catch (e2: Exception) {
+                            BineuralLog.e("bridge", "open alarm channel settings fallback", e2)
+                            respond("BRIDGE_ERROR", command, null)
+                        }
+                    }
                 }
                 "REQUEST_AUTOSTART_SETTINGS" -> {
                     com.vyneural.bineural.permissions.OemAutostart.openSettings(context)

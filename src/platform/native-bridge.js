@@ -41,6 +41,7 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'GET_MEDIA_SESSION_STATE',
   'GET_NAV_STATE',
   'OPEN_NOTIFICATION_SETTINGS',
+  'OPEN_ALARM_CHANNEL_SETTINGS', // salta directo al canal "Alarmas Vyneural" (Importancia), no a la lista general
   'SESSION_END', // M1 — aviso nativo de fin de sesión (la WebView no muestra new Notification())
 ]);
 
@@ -239,6 +240,7 @@ export function createNativeBridgeAdapter(env = {}) {
     requestIgnoreBatteryOptimizations: () => send('REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'),
     requestAutostartSettings: () => send('REQUEST_AUTOSTART_SETTINGS'),
     openNotificationSettings: () => send('OPEN_NOTIFICATION_SETTINGS'),
+    openAlarmChannelSettings: () => send('OPEN_ALARM_CHANNEL_SETTINGS'),
 
     // ---- Estado real (P1.5 Fase 13) ----
     getAudioState: () => send('GET_AUDIO_STATE'),

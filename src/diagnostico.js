@@ -257,6 +257,15 @@ bind('btn-perm-alarm', () => {
     permNote('Alarmas exactas solo en la APK (requieren el sistema operativo).');
   }
 });
+bind('btn-perm-alarm-channel', () => {
+  const bridge = currentBridge();
+  if (bridge) {
+    bridge.openAlarmChannelSettings();
+    permNote('Ajustes del canal "Alarmas Vyneural" abiertos — subí Importancia a Alta si aparece Media/Baja.');
+  } else {
+    permNote('El canal de alarma solo aplica en la APK.');
+  }
+});
 bind('btn-perm-battery', () => {
   const bridge = currentBridge();
   if (bridge) {

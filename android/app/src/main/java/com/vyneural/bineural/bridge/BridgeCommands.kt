@@ -32,6 +32,7 @@ object BridgeCommands {
         "GET_MEDIA_SESSION_STATE",
         "GET_NAV_STATE",
         "OPEN_NOTIFICATION_SETTINGS",
+        "OPEN_ALARM_CHANNEL_SETTINGS", // salta directo al canal "Alarmas Vyneural" (Importancia), no a la lista general
         "SESSION_END", // M1 — aviso nativo de fin de sesión (la WebView no muestra new Notification())
         "STORE_AUTH", // sesión del WebView → prefs nativas (worker de sync en 2.º plano)
         "CLEAR_AUTH", // cierre de sesión → limpiar prefs nativas + alarmas sincronizadas

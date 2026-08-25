@@ -48,7 +48,19 @@ object NotificationHelper {
     // (tono de alarma en "Silencio"), y setSound(null, attrs) apaga el
     // sonido del canal a propósito — se agregó un 3er fallback. Bump para
     // que el canal se cree de cero con ese fallback ya aplicado.
-    const val CHANNEL_ALARMS = "bineural_alarms_v6"
+    // v7: los diagnósticos nuevos de /diagnostico (alarmChannelDiagnostics,
+    // AndroidBridge.kt) mostraron la causa REAL en el dispositivo que seguía
+    // reportando "llega pero no suena ni vibra": el canal v6 (creado con
+    // IMPORTANCE_HIGH por código) terminó en IMPORTANCE_LOW — Android puede
+    // bajar la importancia de un canal por su cuenta si el usuario descarta
+    // varias notificaciones de esa app sin abrirlas (comportamiento adaptativo
+    // de Android 12+), y pasamos varias builds de esta sesión probando/
+    // descartando notificaciones de prueba en ese mismo canal. Un canal
+    // existente es inmutable por código — ni ensureChannels() ni ninguna otra
+    // llamada puede subirle la importancia de vuelta a HIGH; solo el usuario
+    // puede hacerlo a mano en Ajustes, o se crea un canal nuevo. Bump a v7
+    // para que el canal nazca de cero en IMPORTANCE_HIGH otra vez.
+    const val CHANNEL_ALARMS = "bineural_alarms_v7"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.
