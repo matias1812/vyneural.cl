@@ -916,9 +916,23 @@ function selectState(state) {
   // guardada) SIEMPRE reseteaba — pisando en silencio una familia (963 Hz,
   // Solfeggio, etc.) que el usuario ya había elegido para afinar el slider.
   const enteringCustom = state.custom && !selected.custom;
+  const leavingCustom = selected.custom && !state.custom;
   selected = state;
   if (enteringCustom && carrier !== 'personalizado') {
     carrier = 'personalizado';
+    syncCarrierChips();
+  }
+  // Simétrico a lo de arriba: al SALIR de Personalizado hacia un preset, si
+  // la portadora seguía en 'personalizado' (el usuario nunca la cambió a una
+  // familia real mientras ajustaba el slider) queda huérfana — reportado en
+  // vivo que el panel "Ajusta tu frecuencia" se quedaba pegado (lo muestra
+  // también cuando carrier==='personalizado', sin importar el estado, ver
+  // updateCustomPanel) y ningún chip de portadora quedaba marcado (el chip
+  // "Personalizado" ya no es una opción clickeable). Si el usuario SÍ eligió
+  // una familia real estando en Personalizado, carrier no es 'personalizado'
+  // acá y este bloque no toca nada — esa elección se respeta en el preset.
+  if (leavingCustom && carrier === 'personalizado') {
+    carrier = 'estandar';
     syncCarrierChips();
   }
   cards.forEach((c) => c.classList.toggle('selected', c.dataset.id === state.id));
