@@ -149,8 +149,15 @@ async function loadComments() {
 // mismo bug y mismo fix que refreshProfileOnBoot() en ui/auth.js. Recién
 // se muestra el aviso de "no disponible" si se agotan los reintentos, para
 // no mostrar un mensaje alarmante de más durante un cold start normal.
+//
+// Presupuesto extendido (ver mismo cambio en ui/auth.js y cuenta.js):
+// reportado en vivo un caso real de ~5 min sin resolver en la APK, por
+// encima de los ~41s originales.
 async function loadCommentsOnBoot() {
-  const RETRY_DELAYS_MS = [3000, 6000, 12000, 20000]; // ~41s de cobertura
+  const RETRY_DELAYS_MS = [
+    3000, 6000, 12000, 20000, // ~41s — cold start "típico"
+    30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, // +270s — cold start largo
+  ]; // ~5m11s de cobertura total
   for (let attempt = 0; ; attempt++) {
     try {
       await fetchComments();

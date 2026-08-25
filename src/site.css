@@ -3143,6 +3143,45 @@ html:not(.in-app) .in-app-only {
   gap: 10px;
 }
 
+/* Selector de hora propio (solo APK, ver ui/apk-time-picker.js) — reemplaza
+   el <input type="time"> nativo, cuyo TimePickerDialog del WebView de
+   Android tiene un bug de conversión confirmado en producción (12:56 PM
+   guardado como 00:56). Tres <select> en vez de un widget nativo. */
+.apk-time-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.apk-time-picker select {
+  padding: 10px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font-size: 13.5px;
+  font-family: inherit;
+}
+
+.apk-time-picker select.apk-time-hour,
+.apk-time-picker select.apk-time-minute {
+  width: 4.2em;
+}
+
+.apk-time-picker select.apk-time-ampm {
+  width: 4.6em;
+}
+
+.apk-time-picker .apk-time-sep {
+  color: #9aa0c3;
+  font-weight: 600;
+}
+
+.apk-time-picker select option {
+  background: #14162b;
+  color: #fff;
+}
+
 @media (max-width: 520px) {
   .cuenta-form-row {
     grid-template-columns: 1fr;

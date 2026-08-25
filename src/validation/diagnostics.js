@@ -51,6 +51,7 @@ import { createNotificationManager } from '../core/notification-manager.js';
 // restore y política de cancelación de automation.
 import { BinauralEngine } from '../audio.js';
 import { RestoreGate } from '../core/restore-gate.js';
+import { to24h, from24h } from '../ui/apk-time-picker.js';
 import { muteMasterGain, restoreMasterGain, setParamValueCancelingAutomation } from '../core/audio-automation.js';
 // P5.4 — anillo causal puro (responder "¿qué emitió el primer PLAY?").
 import { createCausalLog } from '../core/causal-log.js';
@@ -2328,6 +2329,53 @@ export async function runBineuralDiagnostics() {
     if (ruleIdx < 0 || !css.slice(ruleIdx, ruleIdx + 260).includes('display: none')) {
       throw new Error('la regla de fullscreen debe ocultar la burbuja con display:none');
     }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // APK TIME PICKER — reemplazo del <input type="time"> nativo (P6): bug real
+  // confirmado en producción, el TimePickerDialog del WebView de Android
+  // guardó "12:56" (mediodía) como "00:56" (medianoche) — un desfasaje de
+  // 12 h en el límite AM/PM del mediodía. Estos tests cubren exactamente ese
+  // límite y sus vecinos, para que un futuro cambio no lo reintroduzca.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('ApkTimePicker: mediodía (12 PM) y medianoche (12 AM) no se confunden', () => {
+    // El bug real: 12 con PM debe dar 12:xx (mediodía), NUNCA 00:xx.
+    if (to24h(12, '56', 'PM') !== '12:56') throw new Error('12 PM debe ser 12:56, no medianoche');
+    if (to24h(12, '00', 'AM') !== '00:00') throw new Error('12 AM debe ser medianoche (00:00)');
+    if (to24h(12, '00', 'PM') !== '12:00') throw new Error('12 PM en punto debe ser mediodía (12:00)');
+  });
+
+  runTest('ApkTimePicker: to24h — horas comunes AM/PM', () => {
+    if (to24h(1, '05', 'AM') !== '01:05') throw new Error('1:05 AM');
+    if (to24h(11, '30', 'AM') !== '11:30') throw new Error('11:30 AM');
+    if (to24h(1, '05', 'PM') !== '13:05') throw new Error('1:05 PM debe ser 13:05');
+    if (to24h(11, '30', 'PM') !== '23:30') throw new Error('11:30 PM debe ser 23:30');
+  });
+
+  runTest('ApkTimePicker: from24h es el inverso exacto de to24h (round-trip)', () => {
+    const cases = [
+      [12, '56', 'PM'],
+      [12, '00', 'AM'],
+      [1, '05', 'AM'],
+      [11, '30', 'PM'],
+    ];
+    for (const [h12, minute, ampm] of cases) {
+      const packed = to24h(h12, minute, ampm);
+      const unpacked = from24h(packed);
+      if (unpacked.h12 !== h12 || unpacked.minute !== minute || unpacked.ampm !== ampm) {
+        throw new Error(`round-trip roto para ${h12}:${minute} ${ampm} → "${packed}" → ${JSON.stringify(unpacked)}`);
+      }
+    }
+  });
+
+  runTest('ApkTimePicker: from24h de un valor vacío/inválido cae a un default seguro', () => {
+    const empty = from24h('');
+    if (empty.h12 !== 12 || empty.minute !== '00' || empty.ampm !== 'PM') {
+      throw new Error('valor vacío debe caer a 12:00 PM, no a un estado indefinido');
+    }
+    const garbage = from24h('no-es-una-hora');
+    if (garbage.h12 !== 12 || garbage.ampm !== 'PM') throw new Error('valor basura debe caer al mismo default seguro');
   });
 
   // ──────────────────────────────────────────────────────────────────────────

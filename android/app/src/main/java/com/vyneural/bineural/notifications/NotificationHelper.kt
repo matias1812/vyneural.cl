@@ -40,10 +40,15 @@ object NotificationHelper {
     // v5: MISMO síntoma reportado otra vez (notificación sin sonido ni
     // vibración) — el teléfono de prueba instaló varias builds de esta
     // sesión ANTES de este archivo, así que "v4" quedó fijado con lo que
-    // fuera que tenía en ese momento. Bump otra vez; si esto vuelve a pasar
-    // tras una instalación limpia (nunca antes instalada en ese teléfono),
-    // ya no sería este mecanismo — sería la propia config de abajo.
-    const val CHANNEL_ALARMS = "bineural_alarms_v5"
+    // fuera que tenía en ese momento.
+    // v6: confirmado en un dispositivo con instalación fresca del v5 — ni
+    // siquiera el botón "Probar notificación" (dispara al toque, sin
+    // scheduling de por medio) sonaba/vibraba. Esta vez la causa SÍ era la
+    // config de abajo: RingtoneManager.getDefaultUri() puede devolver null
+    // (tono de alarma en "Silencio"), y setSound(null, attrs) apaga el
+    // sonido del canal a propósito — se agregó un 3er fallback. Bump para
+    // que el canal se cree de cero con ese fallback ya aplicado.
+    const val CHANNEL_ALARMS = "bineural_alarms_v6"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.
@@ -73,9 +78,22 @@ object NotificationHelper {
                 description = "Alarmas reales de sesión (sonido de alarma + vibración)"
                 enableVibration(true)
                 setVibrationPattern(VIBRATION_ALARM)
+                // Reportado en vivo: ni el botón "Probar notificación" ni las
+                // alarmas reales sonaban/vibraban en un dispositivo — hueco
+                // real encontrado acá: RingtoneManager.getDefaultUri() puede
+                // devolver null si el usuario puso el tono de alarma (o el de
+                // timbre, el 2º fallback) en "Silencio" — no es el VOLUMEN,
+                // es la selección del tono en sí. setSound(null, attrs) APAGA
+                // el sonido del canal a propósito según la API de Android; sin
+                // este 3er fallback al sonido de notificación por defecto del
+                // sistema (que casi nunca es null), el canal quedaba mudo sin
+                // que el código lo supiera. La vibración es independiente de
+                // esto — enableVibration(true) de arriba no se toca.
+                val alarmSound = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+                    ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+                    ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
                 setSound(
-                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
-                        ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE),
+                    alarmSound,
                     android.media.AudioAttributes.Builder()
                         .setUsage(android.media.AudioAttributes.USAGE_ALARM)
                         .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)

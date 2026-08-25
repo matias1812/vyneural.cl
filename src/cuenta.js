@@ -558,8 +558,16 @@ async function loadAll() {
 // bug y mismo fix que refreshProfileOnBoot() (ui/auth.js) y
 // loadCommentsOnBoot() (comments.js). El botón "Reintentar" sigue andando
 // igual (showSessionRecovery) para quien no quiera esperar.
+//
+// Presupuesto extendido (ver mismo cambio en ui/auth.js): reportado en vivo
+// un caso real de ~5 min sin resolver en la APK, por encima de los ~41s
+// originales — un cold start de Render ocasionalmente tarda mucho más que
+// el rango "típico" documentado.
 async function loadAllOnBoot() {
-  const RETRY_DELAYS_MS = [3000, 6000, 12000, 20000]; // ~41s de cobertura
+  const RETRY_DELAYS_MS = [
+    3000, 6000, 12000, 20000, // ~41s — cold start "típico"
+    30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, // +270s — cold start largo
+  ]; // ~5m11s de cobertura total
   for (let attempt = 0; ; attempt++) {
     const needsRetry = await loadAll();
     if (!needsRetry || attempt >= RETRY_DELAYS_MS.length) return;

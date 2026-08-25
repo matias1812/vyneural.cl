@@ -703,8 +703,21 @@ async function refreshProfile() {
 // que un cold start a mitad de flujo es mucho menos probable, y bloquear el
 // modal reintentando de más sería peor UX que mostrar el nombre genérico
 // una vez.
+//
+// El presupuesto original (~41s) daba por hecho el cold start "típico"
+// documentado de Render free (20-50s) — reportado en vivo un caso real de
+// ~5 min con "Cuenta" trabado en la APK, bastante por encima de esa
+// ventana (el free tier ocasionalmente tarda mucho más si viene de horas
+// dormido, o si Render mismo está lento). Se extiende con más pasos de 30s:
+// cualquier fallo mientras isLoggedIn() siga true YA está garantizado que es
+// transitorio (una sesión de verdad inválida sale del loop en la próxima
+// vuelta vía el chequeo de abajo), así que alargar la espera es seguro —
+// el costo es un GET /auth/me liviano repetido, nunca un bloqueo de UI.
 async function refreshProfileOnBoot() {
-  const RETRY_DELAYS_MS = [3000, 6000, 12000, 20000]; // ~41s de cobertura
+  const RETRY_DELAYS_MS = [
+    3000, 6000, 12000, 20000, // ~41s — cold start "típico"
+    30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, // +270s — cold start largo
+  ]; // ~5m11s de cobertura total
   for (let attempt = 0; ; attempt++) {
     await refreshProfile();
     if (profile || !isLoggedIn() || attempt >= RETRY_DELAYS_MS.length) return;

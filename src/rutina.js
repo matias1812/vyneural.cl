@@ -23,6 +23,7 @@ import { getAlarms, saveAlarms, fireAlarm, rruleFor, nextAlarmAt, requestPermiss
 import { createNativeBridgeAdapter } from './platform/native-bridge.js';
 import { PROFILES } from './models/profiles.js';
 import { carrierBaseFor } from './core/carrier.js';
+import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js';
 
 // Sanitización: los nombres de frecuencias/itinerarios vienen del usuario
 // (backend), nunca se inyectan sin escapar.
@@ -914,6 +915,10 @@ function wireItineraryForm() {
     }
   });
 
+  // P6 — mismo reemplazo que reminder-time (ver ui/apk-time-picker.js):
+  // <input type="time"> nativo con bug de conversión confirmado en
+  // producción dentro del WebView de la APK.
+  if (nativeBridge.present) mountApkTimePicker('it-step-time');
   const add = document.getElementById('it-step-add');
   const timeEl = document.getElementById('it-step-time');
   if (timeEl) timeEl.addEventListener('input', toggleStepNotifyWrap);
@@ -1011,6 +1016,7 @@ function wireItineraryForm() {
     if (sel) sel.value = `f:${step.frequency_id}`;
     if (dur) dur.value = String(step.duration);
     if (timeEl) timeEl.value = step.time_of_day || '';
+    resyncApkTimePicker('it-step-time');
     if (notifyEl) notifyEl.checked = step.notification_enabled !== false;
     toggleStepNotifyWrap();
     itSteps.splice(i, 1);
@@ -1163,6 +1169,10 @@ function wireReminderForm() {
   const timeEl = document.getElementById('reminder-time');
   if (!form || !stateSel) return;
 
+  // P6 — <input type="time"> nativo con bug de conversión confirmado en
+  // producción dentro del WebView de la APK; reemplazo propio en selects
+  // (ver ui/apk-time-picker.js). Web/desktop sigue con el input nativo.
+  if (nativeBridge.present) mountApkTimePicker('reminder-time');
   populateReminderPresets();
   // Los días de repetición son exclusivos de la APK (ver nota de la página):
   // en web/PWA el selector ni se muestra, para no prometer algo que no cumple.

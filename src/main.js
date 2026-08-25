@@ -38,6 +38,7 @@ import { getCachedPushStatus } from './api/push.js';
 import { createNativeBridgeAdapter, parseBridgeResponse } from './platform/native-bridge.js';
 import { mergePlatformCapabilities } from './platform/platform-capabilities.js';
 import { detectNotificationCapabilities, capabilitySummary } from './core/notification-capabilities.js';
+import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js';
 
 import { runBineuralDiagnostics } from './validation/diagnostics.js';
 import {
@@ -4113,6 +4114,11 @@ function restoreSession(saved) {
 // ---------------------------------------------------------------- Recordatorio de sesión
 const alarmBtn = document.getElementById('alarm-btn');
 const alarmModal = document.getElementById('alarm-modal');
+// P6 — el <input type="time"> nativo tiene un bug de conversión confirmado
+// en producción dentro del WebView de la APK (12:56 PM guardado como
+// 00:56); en la APK se reemplaza por un selector propio (mismo nodo/id,
+// ver ui/apk-time-picker.js). En web/desktop queda el input nativo tal cual.
+if (nativeBridge.present) mountApkTimePicker('alarm-time');
 const alarmTime = document.getElementById('alarm-time');
 const alarmState = document.getElementById('alarm-state');
 const alarmCustom = document.getElementById('alarm-custom');
@@ -4253,7 +4259,10 @@ function openAlarmModal() {
     return;
   }
   updateAlarmGating();
-  if (!alarmTime.value) alarmTime.value = defaultAlarmTime();
+  if (!alarmTime.value) {
+    alarmTime.value = defaultAlarmTime();
+    resyncApkTimePicker('alarm-time');
+  }
   refreshAlarmPerm();
   refreshAlarmHonestNote();
   renderAlarms();
