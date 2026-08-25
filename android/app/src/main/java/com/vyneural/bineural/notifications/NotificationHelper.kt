@@ -108,6 +108,27 @@ object NotificationHelper {
                 setShowBadge(false)
             },
         )
+        logChannelState(nm)
+    }
+
+    /** Diagnóstico: v4/v5/v6 fueron sucesivos intentos a ciegas de arreglar
+     *  "no suena ni vibra" sin poder confirmar la causa real en el
+     *  dispositivo que lo reportaba. Esto lee de vuelta lo que el SISTEMA
+     *  efectivamente terminó aplicando al canal (no lo que le pedimos) —
+     *  visible con `adb logcat -s BineuralLog` — para la próxima vez saber
+     *  con certeza en vez de seguir adivinando con otro bump de versión. */
+    private fun logChannelState(nm: NotificationManager) {
+        try {
+            val ch = nm.getNotificationChannel(CHANNEL_ALARMS) ?: return
+            com.vyneural.bineural.util.BineuralLog.d(
+                "notif-channel",
+                "id=${ch.id} importance=${ch.importance} sound=${ch.sound} " +
+                    "vibrationEnabled=${ch.shouldVibrate()} pattern=${ch.vibrationPattern?.toList()} " +
+                    "audioAttrs=${ch.audioAttributes}",
+            )
+        } catch (e: Exception) {
+            com.vyneural.bineural.util.BineuralLog.e("notif-channel", "no se pudo leer el estado del canal", e)
+        }
     }
 
     private val VIBRATION_ALARM = longArrayOf(0, 500, 300, 500, 300, 700)
@@ -246,9 +267,11 @@ object NotificationHelper {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
+            com.vyneural.bineural.util.BineuralLog.e("notif-channel", "showAlarm: POST_NOTIFICATIONS no concedido, notificación DESCARTADA")
             return
         }
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        logChannelState(nm)
         nm.notify(NOTIF_ALARM, alarmNotification(context, title, body, freq, beat, wave))
     }
 

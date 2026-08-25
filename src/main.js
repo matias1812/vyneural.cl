@@ -2330,6 +2330,8 @@ if (quickModal && quickOptions && quickReco) {
     quickOptions.classList.remove('hidden');
     quickReco.classList.add('hidden');
   });
+  const quickClose = document.getElementById('quick-close');
+  if (quickClose) quickClose.addEventListener('click', () => closeQuickstart(true));
   // Cerrar tocando fuera o con Escape (equivale a "saltar por ahora").
   quickModal.addEventListener('click', (e) => {
     if (e.target === quickModal) closeQuickstart(true);

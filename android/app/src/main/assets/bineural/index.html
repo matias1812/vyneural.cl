@@ -68,13 +68,13 @@
         "publisher": { "@type": "Organization", "name": "Vyneural" }
       }
     </script>
-    <script type="module" src="./assets/main-DgZHS9bD.js"></script>
+    <script type="module" src="./assets/main-Bj-_xPFy.js"></script>
     <link rel="modulepreload" href="./assets/site-Dg7fUjME.js">
     <link rel="modulepreload" href="./assets/apk-time-picker-B4IIxQg2.js">
     <link rel="modulepreload" href="./assets/preload-helper-Dp1pzeXC.js">
     <link rel="modulepreload" href="./assets/alarms-rqPI1kAW.js">
     <link rel="stylesheet" href="./assets/site-Dr2FX3Jw.css">
-    <link rel="stylesheet" href="./assets/main-OWbCR3H-.css">
+    <link rel="stylesheet" href="./assets/main-CZFO--td.css">
   </head>
   <body>
     <div id="loader" class="loader">
@@ -518,6 +518,13 @@
 
     <div id="quickstart" class="modal hidden" role="dialog" aria-modal="true" aria-label="Qué necesitas ahora">
       <div class="modal-card quick-card">
+        <!-- Antes solo se cerraba tocando el fondo oscuro o con Escape —
+             ninguno de los dos es obvio, y un usuario que no lo sabe queda
+             "atrapado" detrás del modal: los clics en las tarjetas de la
+             página de atrás no llegan a nada (bug real reportado en vivo:
+             "ya no deja seleccionar preset"). Botón ✕ visible, mismo patrón
+             que #pending-modal. -->
+        <button id="quick-close" class="modal-close" aria-label="Cerrar">✕</button>
         <div id="quick-options" class="quick-options">
           <h3 class="quick-title">¿Qué necesitas ahora?</h3>
           <p class="quick-sub">Elige y Vyneural te prepara una sesión lista en un clic.</p>

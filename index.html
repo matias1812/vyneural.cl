@@ -511,6 +511,13 @@
 
     <div id="quickstart" class="modal hidden" role="dialog" aria-modal="true" aria-label="Qué necesitas ahora">
       <div class="modal-card quick-card">
+        <!-- Antes solo se cerraba tocando el fondo oscuro o con Escape —
+             ninguno de los dos es obvio, y un usuario que no lo sabe queda
+             "atrapado" detrás del modal: los clics en las tarjetas de la
+             página de atrás no llegan a nada (bug real reportado en vivo:
+             "ya no deja seleccionar preset"). Botón ✕ visible, mismo patrón
+             que #pending-modal. -->
+        <button id="quick-close" class="modal-close" aria-label="Cerrar">✕</button>
         <div id="quick-options" class="quick-options">
           <h3 class="quick-title">¿Qué necesitas ahora?</h3>
           <p class="quick-sub">Elige y Vyneural te prepara una sesión lista en un clic.</p>

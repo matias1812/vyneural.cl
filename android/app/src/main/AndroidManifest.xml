@@ -10,6 +10,13 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Bug real reportado en vivo: la vibración de las alarmas nunca sonó,
+         en NINGÚN test (botón de prueba, alarma nativa, FCM), sin importar
+         cuántas veces se recreara el canal de notificaciones (v4/v5/v6) —
+         porque este permiso, que Vibrator/NotificationChannel.enableVibration
+         necesita para vibrar de verdad, nunca estuvo declarado. Es un
+         permiso "normal" (se concede solo al instalar, sin diálogo). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Sin esto, muchos fabricantes (MIUI, Samsung...) matan el ciclo de
          sincronización en segundo plano (AlarmSync, cada ~5 min): un
          recordatorio creado en la web no llega al reloj nativo hasta que el

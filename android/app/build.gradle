@@ -28,8 +28,8 @@ android {
         applicationId "com.vyneural.bineural"
         minSdk 26
         targetSdk 34
-        versionCode 23
-        versionName "1.6.3"
+        versionCode 24
+        versionName "1.6.4"
         // Backend al que el worker de sincronización en segundo plano consulta
         // alarmas y reporta el dispositivo. Se puede sobrescribir en builds de
         // prueba: ./gradlew assembleRelease -PapiBase=http://10.0.2.2:8000
