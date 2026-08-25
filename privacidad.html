@@ -102,7 +102,7 @@
           <li><strong>Preferencias:</strong> tema, idioma, zona horaria y volumen predeterminado, para que la app se vea y suene como la dejaste.</li>
           <li><strong>Tu contenido:</strong> frecuencias guardadas, favoritos, recordatorios/alarmas e itinerarios (con sus pasos). Es tuyo: podés editarlo o eliminarlo desde <a href="/cuenta">Mi cuenta</a>.</li>
           <li><strong>Sesiones:</strong> guardamos un <em>hash</em> de tus tokens de sesión (nunca el token en sí), el navegador/dispositivo aproximado y la IP del último acceso, con su fecha de expiración. Sirve para mantener la sesión abierta, cerrarla de forma remota y detectar accesos sospechosos.</li>
-          <li><strong>Suscripciones de notificaciones:</strong> el endpoint y las claves de push de cada dispositivo donde activas las notificaciones. Solo se usan para enviarte los avisos de tus recordatorios.</li>
+          <li><strong>Suscripciones de notificaciones:</strong> en la web, el endpoint y las claves de push de cada dispositivo donde activás las notificaciones. En la app Android, el <em>token</em> de Firebase Cloud Messaging (FCM) de tu dispositivo. En ambos casos, solo se usan para enviarte los avisos de tus recordatorios — nunca para identificarte fuera de Vyneural.</li>
           <li><strong>Auditoría mínima:</strong> registros de eventos relevantes (qué acción, cuándo) sin datos sensibles, para proteger el servicio contra abusos.</li>
         </ul>
 
@@ -155,6 +155,16 @@
           nuestro propio backend directamente a tu navegador, no QStash. Más detalles en la
           <a href="https://upstash.com/trust/privacy.pdf" rel="noopener noreferrer" target="_blank">política de privacidad de Upstash</a>.
         </p>
+        <p>
+          En la app Android, los recordatorios también pueden llegar por <strong>Firebase Cloud
+          Messaging (FCM)</strong>, el servicio de notificaciones push de Google — así te avisan
+          aunque la app esté completamente cerrada. Lo que le enviamos a Firebase es un mensaje de
+          <em>datos</em> mínimo (el identificador del recordatorio y la frecuencia a abrir): Firebase
+          lo entrega a tu dispositivo, pero la notificación que ves la construye la app en tu
+          teléfono, no Google. Google puede procesar el token de tu dispositivo y datos técnicos
+          estándar de entrega según su propia política; más detalles en la
+          <a href="https://firebase.google.com/support/privacy" rel="noopener noreferrer" target="_blank">política de privacidad de Firebase</a>.
+        </p>
 
         <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>Seguridad</h2>
         <ul>
@@ -192,7 +202,7 @@
           <p>
             ¿Preguntas sobre esta política, tus datos o querés desactivar tu cuenta? Usá la
             burbuja 🐞 (abajo a la derecha, en cualquier página) para escribirnos. Leemos todo.
-            Última actualización: <time datetime="2026-08-23">23 de agosto de 2026</time>.
+            Última actualización: <time datetime="2026-08-24">24 de agosto de 2026</time>.
           </p>
         </div>
       </div>
