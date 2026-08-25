@@ -165,7 +165,6 @@ const MODAL_HTML = `
     <div class="perm-actions">
       <button id="perm-on" class="auth-submit">Activar permisos</button>
       <button id="perm-off" class="perm-off">Desactivar</button>
-      <button id="perm-test" class="perm-test hidden">Probar notificación</button>
       <button id="perm-notif-settings" class="perm-test hidden">Abrir ajustes de notificación</button>
       <button id="perm-exact-settings" class="perm-test hidden">Autorizar alarmas exactas</button>
       <button id="perm-battery-settings" class="perm-test hidden">Quitar restricción de batería</button>
@@ -235,8 +234,6 @@ function renderPermissionState() {
     permPush.textContent = caps.push.label;
     permPush.className = 'perm-state ' + (caps.push.configured ? 'ok' : 'warn');
   }
-  const permTest = document.getElementById('perm-test');
-  if (permTest) permTest.classList.toggle('hidden', !isNative);
   // Un solo botón para las dos causas reales de "no llega/no suena": si el
   // permiso de notificaciones no está concedido, primero hay que resolver
   // ESO (los ajustes del canal ni se pueden abrir bien sin él); si ya está
@@ -307,13 +304,6 @@ function wireModal() {
     lsSet(LS_PERM_DISABLED, true);
     renderPermissionState();
   });
-  const btnTest = document.getElementById('perm-test');
-  if (btnTest) {
-    btnTest.addEventListener('click', () => {
-      const b = nativeAudio();
-      if (b && b.testNotification) b.testNotification();
-    });
-  }
   const btnNotifSettings = document.getElementById('perm-notif-settings');
   if (btnNotifSettings) {
     btnNotifSettings.addEventListener('click', () => {
@@ -349,6 +339,26 @@ function wireModal() {
   }
 }
 
+// Reportado en vivo: a veces esta fila mostraba "No configurado" acá y
+// "Configurado" segundos después en /cuenta — el único intento de acá podía
+// caer justo en un cold start del backend (Render free tier) y quedarse así
+// para siempre en esta apertura del modal (el .catch(() => {}) tragaba el
+// error sin reintentar). /cuenta sobrevive lo mismo porque reintenta con
+// backoff (ver loadAllOnBoot) — mismo criterio acá, versión corta.
+const PUSH_STATUS_RETRY_MS = [3000, 6000, 12000, 20000]; // ~41s — cold start típico
+async function refreshPushStatusWithRetry() {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await pushStatus();
+      renderPermissionState();
+      return;
+    } catch (_) {
+      if (attempt >= PUSH_STATUS_RETRY_MS.length) return;
+      await new Promise((r) => setTimeout(r, PUSH_STATUS_RETRY_MS[attempt]));
+    }
+  }
+}
+
 export function openPermissions() {
   ensureModal();
   wireModal();
@@ -359,11 +369,7 @@ export function openPermissions() {
   if (!permsDisabled() && notificationSupported() && Notification.permission === 'default') {
     requestAllPermissions().then(() => renderPermissionState());
   }
-  // Estado de push consultado fresco (best-effort): en páginas que nunca
-  // llamaron a pushStatus() antes, getCachedPushStatus() estaría vacío y la
-  // fila mostraría "no configurado" por defecto (honesto pero pesimista) —
-  // se corrige solo cuando llega la respuesta real.
-  pushStatus().then(() => renderPermissionState()).catch(() => {});
+  refreshPushStatusWithRetry();
 }
 
 export function closePermissions() {

@@ -32,7 +32,7 @@ import {
 } from './notifications.js';
 import { AlarmManager, createDurableStore, alarmOwnerForPlatform } from './core/alarm-manager.js';
 import { createNotificationManager } from './core/notification-manager.js';
-import { getCachedPushStatus } from './api/push.js';
+import { getCachedPushStatus, pushStatus } from './api/push.js';
 // P0 — Separación Core / Platform: el bridge nativo (futura APK Android) y
 // la fusión honesta de capacidades. Sin bridge, todo queda como web pura.
 import { createNativeBridgeAdapter, parseBridgeResponse } from './platform/native-bridge.js';
@@ -2027,12 +2027,6 @@ function updateCustomPanel() {
   customPanel.querySelectorAll('.custom-beat-only').forEach((el) =>
     el.classList.toggle('hidden', !selected.custom),
   );
-  // El chip "Personalizado" de Portadora es redundante (y confuso) cuando el
-  // ESTADO ya es Personalizado: ambos terminan significando lo mismo (el
-  // slider manda, sin familia). Se oculta solo ahí; en cualquier otro estado
-  // sigue siendo una opción válida de portadora.
-  const customCarrierChip = carrierOptions && carrierOptions.querySelector('[data-carrier="personalizado"]');
-  if (customCarrierChip) customCarrierChip.classList.toggle('hidden', selected.custom);
 }
 
 // Aviso sutil si la portadora es tan grave que el latido se percibe mal.
@@ -3344,6 +3338,29 @@ const permWakelock = document.getElementById('perm-wakelock');
 const permEnabled = document.getElementById('perm-enabled');
 const permNote = document.getElementById('perm-note');
 
+// Reportado en vivo: la fila "Notificaciones push (servidor)" mostraba "No
+// configurado" acá aunque /cuenta (que sí consulta pushStatus() siempre, sin
+// depender del permiso del navegador ni de sesión) mostraba que SÍ estaba
+// configurado — esta copia del modal nunca llamaba a pushStatus() por su
+// cuenta: dependía de que ui/auth.js la hubiera pedido antes (solo pasa
+// logueado y con Notification.permission distinto de "granted"), así que en
+// muchos casos abría con el caché vacío. El endpoint es público (config del
+// servidor, no del usuario) — no hace falta esperar nada para pedirlo acá. Un
+// reintento corto cubre además un cold start del backend (Render free tier).
+const PUSH_STATUS_RETRY_MS = [3000, 6000, 12000, 20000]; // ~41s — cold start típico
+async function refreshPushStatusWithRetry() {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await pushStatus();
+      renderPermissionState();
+      return;
+    } catch (_) {
+      if (attempt >= PUSH_STATUS_RETRY_MS.length) return;
+      await new Promise((r) => setTimeout(r, PUSH_STATUS_RETRY_MS[attempt]));
+    }
+  }
+}
+
 function openPermissions() {
   renderPermissionState();
   if (permissionsModal) permissionsModal.classList.remove('hidden');
@@ -3353,6 +3370,7 @@ function openPermissions() {
   if (!permsDisabled() && notificationSupported() && Notification.permission === 'default') {
     requestAllPermissions().then(() => renderPermissionState());
   }
+  refreshPushStatusWithRetry();
 }
 function closePermissions() {
   if (permissionsModal) permissionsModal.classList.add('hidden');
@@ -3422,10 +3440,6 @@ function renderPermissionState() {
   if (permPush) {
     permPush.textContent = caps.push.label;
     permPush.className = 'perm-state ' + (caps.push.configured ? 'ok' : 'warn');
-  }
-  const permTest = document.getElementById('perm-test');
-  if (permTest) {
-    permTest.classList.toggle('hidden', !isNative);
   }
   // Botones nativos contextuales: solo cuando la APK existe y el estado real
   // del sistema lo amerita (denegado para siempre / no autorizado). Un solo
@@ -3498,13 +3512,6 @@ if (permissionsModal) {
     lsSet(LS_PERM_DISABLED, true);
     renderPermissionState();
   });
-  const btnTest = document.getElementById('perm-test');
-  if (btnTest) {
-    btnTest.addEventListener('click', () => {
-      const b = nativeAudio();
-      if (b && b.testNotification) b.testNotification();
-    });
-  }
   // Ajustes reales de la APK (P1.5 Fase 9/10): notificaciones denegadas →
   // botón directo a los ajustes del SO; alarmas exactas sin autorizar →
   // botón al diálogo de autorización. Nunca se fingen permisos concedidos.

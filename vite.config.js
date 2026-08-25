@@ -48,7 +48,6 @@ export default defineConfig({
         'codigo-abierto': resolve(__dirname, 'codigo-abierto.html'),
         'hoja-de-ruta': resolve(__dirname, 'hoja-de-ruta.html'),
         rutina: resolve(__dirname, 'rutina.html'),
-        diagnostico: resolve(__dirname, 'diagnostico.html'),
         cuenta: resolve(__dirname, 'cuenta.html'),
         verificar: resolve(__dirname, 'verificar.html'),
         restablecer: resolve(__dirname, 'restablecer.html'),
