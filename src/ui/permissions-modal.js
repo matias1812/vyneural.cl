@@ -237,9 +237,20 @@ function renderPermissionState() {
   }
   const permTest = document.getElementById('perm-test');
   if (permTest) permTest.classList.toggle('hidden', !isNative);
+  // Un solo botón para las dos causas reales de "no llega/no suena": si el
+  // permiso de notificaciones no está concedido, primero hay que resolver
+  // ESO (los ajustes del canal ni se pueden abrir bien sin él); si ya está
+  // concedido, el problema real reportado en vivo fue el canal quedando en
+  // Importancia baja (Android la baja solo al descartar notificaciones sin
+  // abrirlas) — ahí este mismo botón salta directo a esa pantalla. Antes
+  // había un botón aparte solo para esto último; se fusionó para no sumar
+  // más botones sueltos al modal (varios ya conviven acá).
   const btnNotifSettings = document.getElementById('perm-notif-settings');
   if (btnNotifSettings) {
-    btnNotifSettings.classList.toggle('hidden', !(isNative && notifPerm !== 'granted'));
+    btnNotifSettings.classList.toggle('hidden', !isNative);
+    btnNotifSettings.textContent =
+      notifPerm === 'granted' ? 'Revisar sonido/vibración de alarma' : 'Abrir ajustes de notificación';
+    btnNotifSettings.dataset.notifGranted = notifPerm === 'granted' ? '1' : '0';
   }
   const btnExactSettings = document.getElementById('perm-exact-settings');
   if (btnExactSettings) {
@@ -307,7 +318,12 @@ function wireModal() {
   if (btnNotifSettings) {
     btnNotifSettings.addEventListener('click', () => {
       const b = nativeAudio();
-      if (b && b.openNotificationSettings) b.openNotificationSettings();
+      if (!b) return;
+      if (btnNotifSettings.dataset.notifGranted === '1') {
+        if (b.openAlarmChannelSettings) b.openAlarmChannelSettings();
+      } else if (b.openNotificationSettings) {
+        b.openNotificationSettings();
+      }
     });
   }
   const btnExactSettings = document.getElementById('perm-exact-settings');

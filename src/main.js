@@ -3428,10 +3428,18 @@ function renderPermissionState() {
     permTest.classList.toggle('hidden', !isNative);
   }
   // Botones nativos contextuales: solo cuando la APK existe y el estado real
-  // del sistema lo amerita (denegado para siempre / no autorizado).
+  // del sistema lo amerita (denegado para siempre / no autorizado). Un solo
+  // botón cubre las dos causas reales de "no llega/no suena": sin permiso
+  // de notificaciones concedido, abre esos ajustes primero; ya concedido,
+  // salta directo al canal de alarma (Importancia) — Android puede bajarla
+  // sola al descartar notificaciones sin abrirlas, reportado en vivo. Se
+  // fusionó en uno para no sumar otro botón más a esta fila.
   const btnNotifSettings = document.getElementById('perm-notif-settings');
   if (btnNotifSettings) {
-    btnNotifSettings.classList.toggle('hidden', !(isNative && notifPerm !== 'granted'));
+    btnNotifSettings.classList.toggle('hidden', !isNative);
+    btnNotifSettings.textContent =
+      notifPerm === 'granted' ? 'Revisar sonido/vibración de alarma' : 'Abrir ajustes de notificación';
+    btnNotifSettings.dataset.notifGranted = notifPerm === 'granted' ? '1' : '0';
   }
   const btnExactSettings = document.getElementById('perm-exact-settings');
   if (btnExactSettings) {
@@ -3504,7 +3512,12 @@ if (permissionsModal) {
   if (btnNotifSettings) {
     btnNotifSettings.addEventListener('click', () => {
       const b = nativeAudio();
-      if (b && b.openNotificationSettings) b.openNotificationSettings();
+      if (!b) return;
+      if (btnNotifSettings.dataset.notifGranted === '1') {
+        if (b.openAlarmChannelSettings) b.openAlarmChannelSettings();
+      } else if (b.openNotificationSettings) {
+        b.openNotificationSettings();
+      }
     });
   }
   const btnExactSettings = document.getElementById('perm-exact-settings');
