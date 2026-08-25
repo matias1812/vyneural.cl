@@ -172,6 +172,23 @@ bind('btn-bg', () => {
 });
 
 // ── Permisos ───────────────────────────────────────────────────────────────
+// P6 — estado REAL del canal de notificaciones de alarma (config que Android
+// terminó aplicando, no lo que le pedimos): reportado en vivo que la
+// notificación llega sin sonido ni vibración con permisos/volumen ya
+// confirmados OK del lado del usuario. Visible acá sin necesitar cable ni
+// adb logcat — ver AndroidBridge.kt::alarmChannelDiagnostics.
+function alarmChannelRows(info) {
+  const ch = info && info.alarmChannel;
+  if (!ch || ch.exists === false) return [];
+  const importanceLabel = { 0: 'NONE (bloqueado)', 1: 'MIN', 2: 'LOW', 3: 'DEFAULT', 4: 'HIGH ✓' }[ch.importance] ?? String(ch.importance);
+  return [
+    ['Canal de alarma: importancia', importanceLabel, 'android'],
+    ['Canal de alarma: sonido', ch.sound && ch.sound !== 'null' ? ch.sound : '⚠️ SIN sonido (null)', 'android'],
+    ['Canal de alarma: vibración', ch.vibrationEnabled ? `activada (${ch.vibrationPattern})` : '⚠️ desactivada', 'android'],
+    ['Notificaciones de la app (sistema)', ch.appNotificationsEnabled ? 'habilitadas ✓' : '⚠️ BLOQUEADAS por el sistema', 'android'],
+  ];
+}
+
 function refreshCaps() {
   const probe = probeCapabilities({
     notificationSupported: notificationSupported(),
@@ -200,6 +217,7 @@ function refreshCaps() {
     ['Optimización de batería', merged.batteryUnrestricted.label, merged.batteryUnrestricted.provider || 'web'],
     ['Inicio automático (fabricante)', merged.autostartGuidance.supported ? merged.autostartGuidance.label : 'No requerido', merged.autostartGuidance.provider || 'web'],
     ['Alarmas en el reloj del sistema', info ? `${info.alarmCount ?? 0} pendiente(s)` : '—', info ? 'android' : 'n/a'],
+    ...alarmChannelRows(info),
     ['Media Session', merged.mediaSession.label, merged.mediaSession.provider || 'web'],
     ['Wake Lock', merged.wakeLock.label, 'web'],
     ['Push', merged.push.label, 'web'],

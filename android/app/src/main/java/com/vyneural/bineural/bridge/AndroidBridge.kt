@@ -97,7 +97,42 @@ class AndroidBridge(
         info.put("focusReacquireCount", Diagnostics.focusReacquireCount)
         info.put("focusUnknownCount", Diagnostics.focusUnknownCount)
         info.put("fullscreen", Diagnostics.immersiveActive)
+        // Reportado en vivo: notificación de alarma llega, sin sonido ni
+        // vibración, con permisos y volumen de alarma confirmados OK del
+        // lado del usuario — necesitamos ver la config REAL que Android
+        // terminó aplicando al canal, no seguir adivinando con otro bump de
+        // versión (v4→v5→v6 ya se probaron a ciegas). Visible en /diagnostico,
+        // sin necesitar cable ni adb logcat.
+        info.put("alarmChannel", alarmChannelDiagnostics())
         return info.toString()
+    }
+
+    private fun alarmChannelDiagnostics(): JSONObject {
+        val j = JSONObject()
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val ch = nm.getNotificationChannel(com.vyneural.bineural.notifications.NotificationHelper.CHANNEL_ALARMS)
+            if (ch == null) {
+                j.put("exists", false)
+                return j
+            }
+            j.put("exists", true)
+            j.put("id", ch.id)
+            // 0=NONE 1=MIN 2=LOW 3=DEFAULT 4=HIGH — necesitamos ver si quedó en
+            // 4 de verdad o si el usuario/sistema lo bajó en algún momento.
+            j.put("importance", ch.importance)
+            j.put("sound", ch.sound?.toString() ?: "null")
+            j.put("vibrationEnabled", ch.shouldVibrate())
+            j.put("vibrationPattern", ch.vibrationPattern?.joinToString(",") ?: "null")
+            // Verificación cruzada: ¿el sistema global de notificaciones/canal
+            // está siquiera habilitado para bloquear/silenciar por fuera del
+            // permiso POST_NOTIFICATIONS?
+            j.put("channelBlocked", ch.importance == android.app.NotificationManager.IMPORTANCE_NONE)
+            j.put("appNotificationsEnabled", nm.areNotificationsEnabled())
+        } catch (e: Exception) {
+            j.put("error", e.message ?: "unknown")
+        }
+        return j
     }
 
     @SuppressLint("NewApi")
