@@ -149,7 +149,11 @@ CFL = c·√2 < 1  (clamp a c ≤ 1/√2 ≈ 0.7071)
 E = ½Σ(Δu/Δt)² + ½c²Σ|∇u|²           # energía; decae ~ E₀·damp^(2t)
 ```
 
-- Contorno circular Dirichlet (u=0, reflexión R=1). `setCircle` / `pokeDisc`.
+- Contorno circular libre/Neumann (∂u/∂n=0 en el borde de la máscara, reflexión
+  de gradiente nulo vía celda fantasma en `step()`; era Dirichlet u=0 antes de
+  la auditoría 2026-09-08 — ver esa auditoría para el porqué del cambio, y el
+  test "free (Neumann) boundary" en `diagnostics.js` para la verificación
+  numérica). `setCircle` / `pokeDisc`.
 - Clamp de amplitud ±5.0 (no físico, registrado en `clipCount`).
 - Métricas (`getPhysicsMetrics`): CFL, energía, tasa de decaimiento teórica,
   clipCount, steps. Clasificación: PHYSICAL (paso, energía) · EMPIRICAL (damp) ·
@@ -158,7 +162,11 @@ E = ½Σ(Δu/Δt)² + ½c²Σ|∇u|²           # energía; decae ~ E₀·damp^(
 ## 8. CymaticsRenderer (src/cymatics.js · modos de Bessel)
 
 - Modos propios de cuenca circular: radiales `J_m(kr)` con condición de contorno
-  Dirichlet; dispersión gravedad-capilar `ω² = gk + (σ/ρ)k³`; respuesta
+  libre/Neumann (`J'_m(ka)=0` — superficie libre en pared vertical, NO
+  Dirichlet: los ceros usados son de la derivada de Bessel, ver `ZP_BY_M` en
+  `core/plate-field.js`); dispersión gravedad-capilar `ω² = gk + (σ/ρ)k³`
+  (límite de agua profunda — sin término `tanh(kh)`, no modela profundidad
+  finita); respuesta
   subarmónica de Faraday (conducción a ~2× la resonancia); detuning
   `δ = ω_conducción − ω_res`.
 - Modo dominante `(m, n, ω, δ)` calculado en cada render (`getDominantMode()`) y

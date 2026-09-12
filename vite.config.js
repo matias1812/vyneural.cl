@@ -39,6 +39,10 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
+        estudiar: resolve(__dirname, 'estudiar.html'),
+        dormir: resolve(__dirname, 'dormir.html'),
+        meditar: resolve(__dirname, 'meditar.html'),
+        solfeggio: resolve(__dirname, 'solfeggio.html'),
         'que-son-las-ondas-binaurales': resolve(__dirname, 'que-son-las-ondas-binaurales.html'),
         beneficios: resolve(__dirname, 'beneficios.html'),
         'como-usar': resolve(__dirname, 'como-usar.html'),

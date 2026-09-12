@@ -74,6 +74,16 @@ export function initStarfield() {
   }
 
   function frame() {
+    // FIX (auditoría P7 2026-09-03): este loop corría para siempre sin
+    // importar la pestaña — a diferencia de drawVisual() (main.js), que se
+    // congela con document.hidden. Mismo criterio acá: en segundo plano
+    // nadie ve el fondo, así que se salta el trabajo de dibujo (pero se
+    // sigue reprogramando el rAF, igual que drawVisual, para no necesitar un
+    // listener de visibilitychange aparte que lo reanude).
+    if (document.hidden) {
+      if (!paused) requestAnimationFrame(frame);
+      return;
+    }
     ctx.clearRect(0, 0, w, h);
     const sp = speed + scrollBoost;
     const rot = window.scrollY * 0.00035;

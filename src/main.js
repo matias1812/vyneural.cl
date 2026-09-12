@@ -2,7 +2,6 @@ import './style.css';
 import { inject } from '@vercel/analytics';
 import { BinauralEngine } from './audio.js';
 import { AmbientEngine } from './ambient.js';
-import { WaveField } from './wavefield.js';
 import { CymaticsRenderer } from './cymatics.js';
 import { SimulationEngine } from './core/simulation.js';
 import { ExperimentRunner } from './core/experiments.js';
@@ -10,6 +9,7 @@ import { createSilentAudio } from './core/media-anchor.js';
 import { SimulationConfig, experimentToJson } from './core/reproducibility.js';
 import { PROFILES, getProfileById } from './models/profiles.js';
 import { CARRIER_BASE, carrierBaseFor } from './core/carrier.js';
+import { resolvePresetSlug } from '../shared/preset-catalog.js';
 import { initStarfield } from './starfield.js';
 import {
   getAlarms,
@@ -508,9 +508,7 @@ window.addEventListener('vyneural:audiofreq', (e) => {
   const customState = STATES.find((s) => s.custom);
   if (!customState) return;
   selectState(customState);
-  carrier = 'personalizado';
-  syncCarrierChips();
-  updateCustomPanel();
+  setCarrierFamily('personalizado');
   customBase.value = String(Math.round(base * 10) / 10);
   if (beat != null) customBeat.value = String(Math.round(beat * 10) / 10);
   updateCustomLabels();
@@ -721,6 +719,16 @@ let LANE_RIGHT_COLOR = '#f472b6';
 let LANE_LEFT_COLOR_RGB = [96, 165, 250];
 let LANE_RIGHT_COLOR_RGB = [244, 114, 182];
 let ACCENT_RGB = [167, 139, 250];
+// Copias SUAVIZADAS (EMA, τ≈0.7s) de los RGB de arriba: las que de verdad
+// lee el visualizador cuadro a cuadro (auditoría de transiciones). Los RGB
+// "target" de arriba se actualizan al instante en selectState() (los chips/
+// swatches de la UI sí deben reflejar el estado nuevo de inmediato) pero
+// pasarlos directo al render pintaba un salto de color duro en las gotas/la
+// placa con cada cambio de estado — mismo criterio que visBase/visBeat, que
+// ya suavizan la frecuencia pero nunca el color.
+let ACCENT_RGB_VIS = [167, 139, 250];
+let LANE_LEFT_COLOR_RGB_VIS = [96, 165, 250];
+let LANE_RIGHT_COLOR_RGB_VIS = [244, 114, 182];
 
 // ---------------------------------------------------------------- Persistencia local
 // Todo queda en localStorage (sin servidores ni cuentas): la sesión (último
@@ -729,9 +737,6 @@ let ACCENT_RGB = [167, 139, 250];
 const LS_SESSION = 'ob-session-v1';
 const LS_FAVS = 'ob-favs-v1';
 const LS_HISTORY = 'ob-history-v1';
-// Visualizador elegido: 'gotas' (simulación de ondas actual) o 'cimatica'
-// (placa circular con gotas de Faraday). Persistente entre visitas.
-const LS_VIZ = 'ob-viz-v1';
 
 function lsGet(key, fallback) {
   try {
@@ -975,6 +980,22 @@ function selectState(state) {
   }
   saveSession();
   updateUrl();
+}
+
+// Único punto de verdad para forzar la portadora a una familia (normalmente
+// 'personalizado', al cargar un Hz absoluto desde fuera del picker de
+// presets: bridge nativo, itinerario, frecuencia guardada sin receta) y
+// disparar el mismo par de sync/update que cada call-site repetía a mano.
+// Consolidación de la auditoría 2026-08-29 (fix de portadora huérfana,
+// commit 83f23b7): `carrier` es estado module-scope mutado desde ~10 sitios
+// distintos sin una función reductora única — un futuro cambio en uno de
+// ellos podía reintroducir la misma clase de bug sin que se note. No cambia
+// el comportamiento observable de ningún call-site, solo el número de
+// lugares que hay que tocar si este par vuelve a cambiar.
+function setCarrierFamily(family) {
+  carrier = family;
+  syncCarrierChips();
+  updateCustomPanel();
 }
 
 // ---------------------------------------------------------------- Audio
@@ -1593,9 +1614,7 @@ function applySeqStep(index) {
   const customState = STATES.find((s) => s.custom);
   if (!customState) return;
   selectState(customState);
-  carrier = 'personalizado';
-  syncCarrierChips();
-  updateCustomPanel();
+  setCarrierFamily('personalizado');
   customBase.value = String(Math.round(step.base * 10) / 10);
   customBeat.value = String(Math.round(step.beat * 10) / 10);
   selectedWave = step.wave;
@@ -2179,7 +2198,7 @@ if (customLoadSelect) {
       carrier = f.config.carrier;
       loadedCustomBase = f.config.ownBase;
     } else {
-      carrier = 'personalizado';
+      setCarrierFamily('personalizado');
       loadedCustomBase = f.carrier_frequency || 220;
     }
     customBeat.value = String(f.beat_frequency > 0 ? Math.round(f.beat_frequency * 10) / 10 : 10);
@@ -2247,7 +2266,13 @@ function currentUrlParams() {
   return p;
 }
 function updateUrl() {
-  history.replaceState(null, '', `${location.pathname}?${currentUrlParams()}`);
+  // Fijo a '/', NUNCA location.pathname: si se llegó por /preset/:slug (ver
+  // el bloque "Deep link limpio" más abajo) y se usara pathname tal cual,
+  // la barra quedaría en "/preset/foo?state=bar" tras el primer cambio de
+  // estado — y al recargar, el parser de slug pisaría ese state=bar con el
+  // preset original de la URL. shareLink() (unas líneas más abajo) ya
+  // construye su URL igual, contra '/' a secas; esto solo alinea ambas.
+  history.replaceState(null, '', `/?${currentUrlParams()}`);
 }
 
 carrierOptions.addEventListener('click', (e) => {
@@ -2987,49 +3012,11 @@ function updateStatus() {
 }
 
 // ---------------------------------------------------------------- Visualizador
-// Física real de ondas en agua: cada gota es una cuenca circular simulada
-// con la ecuación de onda 2D (WaveField). Las fuentes excitan el agua, las
-// ondas se propagan, rebotan en el borde y se superponen formando patrones
-// de interferencia reales. En la gota del cerebro conviven tres fuentes
-// (azul = frecuencia 1, rosa = frecuencia 2, acento = latido) que chocan
-// entre sí, y el latido inyecta un impulso exacto en cada pulso real.
-//
-// Alternativa: la simulación de cimática (CymaticsRenderer), que el usuario
-// elige con el interruptor del panel (💧 Gotas / 🔮 Cimática) y que también
-// se guarda en localStorage para la próxima visita.
-
-// Visualizador activo: 'gotas' (por defecto) o 'cimatica'.
-let vizMode = lsGet(LS_VIZ, 'gotas');
-if (vizMode !== 'gotas' && vizMode !== 'cimatica') vizMode = 'gotas';
+// Cimática (CymaticsRenderer): placa de Faraday con modos propios de Bessel,
+// afinados a las frecuencias reales de la sesión. Gotas (la simulación de
+// ondas en agua alternativa) fue retirada del producto — Cimática es ahora
+// el único visualizador.
 // cymatics ya fue instanciado arriba y pasado al SimulationEngine.
-
-// Interruptor para elegir la simulación (💧 Gotas / 🔮 Cimática).
-const vizSwitch = document.getElementById('viz-switch');
-const vizBtns = vizSwitch ? [...vizSwitch.querySelectorAll('.viz-switch-btn')] : [];
-function setVizMode(mode) {
-  if (mode !== 'gotas' && mode !== 'cimatica') return;
-  vizMode = mode;
-  lsSet(LS_VIZ, mode);
-  // El fondo (starfield) NO cambia al alternar entre gotas y cimática: se
-  // mantiene estable para que el cambio de visualización no altere el fondo.
-  vizBtns.forEach((b) => {
-    const on = b.dataset.viz === mode;
-    b.classList.toggle('active', on);
-    b.setAttribute('aria-pressed', String(on));
-  });
-  // En algunos dispositivos (móvil) crear/cambiar de simulación puede hacer
-  // que el navegador suspenda el AudioContext; se re-afirma la sesión para
-  // que el cambio de visualización nunca deje el audio mudo con el botón
-  // "en play". restoreFromBackground() ya ignora el caso en pausa.
-  if (playing) setTimeout(() => requestRestore(true), 150);
-}
-if (vizSwitch) {
-  vizSwitch.addEventListener('click', (e) => {
-    const btn = e.target.closest('.viz-switch-btn');
-    if (btn) setVizMode(btn.dataset.viz);
-  });
-  setVizMode(vizMode); // refleja el valor guardado al cargar
-}
 
 // ---------------------------------------------------------------- Más opciones (⋯)
 // Menú desplegable: Panel Bineural Engine, Modo experimental y Permisos de la web.
@@ -3457,17 +3444,25 @@ function renderPermissionState() {
   }
   // Botones nativos contextuales: solo cuando la APK existe y el estado real
   // del sistema lo amerita (denegado para siempre / no autorizado). Un solo
-  // botón cubre las dos causas reales de "no llega/no suena": sin permiso
-  // de notificaciones concedido, abre esos ajustes primero; ya concedido,
-  // salta directo al canal de alarma (Importancia) — Android puede bajarla
-  // sola al descartar notificaciones sin abrirlas, reportado en vivo. Se
-  // fusionó en uno para no sumar otro botón más a esta fila.
+  // botón cubre las tres causas reales de "no llega/no suena": sin permiso
+  // de notificaciones concedido, abre esos ajustes primero; ya concedido
+  // pero sin acceso a No Molestar, salta a ese permiso (bug reportado: llega
+  // pero a veces sin alarma — ver setBypassDnd en NotificationHelper.kt v8);
+  // con todo eso resuelto, salta al canal de alarma (Importancia) — Android
+  // puede bajarla sola al descartar notificaciones sin abrirlas, reportado
+  // en vivo. Se fusionó en uno para no sumar otro botón más a esta fila.
   const btnNotifSettings = document.getElementById('perm-notif-settings');
   if (btnNotifSettings) {
     btnNotifSettings.classList.toggle('hidden', !isNative);
+    const dndNeedsSetup = !!(caps.alarmChannel && caps.alarmChannel.supported && !caps.alarmChannel.dndBypassGranted);
     btnNotifSettings.textContent =
-      notifPerm === 'granted' ? 'Revisar sonido/vibración de alarma' : 'Abrir ajustes de notificación';
+      notifPerm !== 'granted'
+        ? 'Abrir ajustes de notificación'
+        : dndNeedsSetup
+          ? 'Permitir alarma en No Molestar'
+          : 'Revisar sonido/vibración de alarma';
     btnNotifSettings.dataset.notifGranted = notifPerm === 'granted' ? '1' : '0';
+    btnNotifSettings.dataset.dndNeedsSetup = notifPerm === 'granted' && dndNeedsSetup ? '1' : '0';
   }
   const btnExactSettings = document.getElementById('perm-exact-settings');
   if (btnExactSettings) {
@@ -3534,10 +3529,12 @@ if (permissionsModal) {
     btnNotifSettings.addEventListener('click', () => {
       const b = nativeAudio();
       if (!b) return;
-      if (btnNotifSettings.dataset.notifGranted === '1') {
-        if (b.openAlarmChannelSettings) b.openAlarmChannelSettings();
-      } else if (b.openNotificationSettings) {
-        b.openNotificationSettings();
+      if (btnNotifSettings.dataset.notifGranted !== '1') {
+        if (b.openNotificationSettings) b.openNotificationSettings();
+      } else if (btnNotifSettings.dataset.dndNeedsSetup === '1') {
+        if (b.openDndAccessSettings) b.openDndAccessSettings();
+      } else if (b.openAlarmChannelSettings) {
+        b.openAlarmChannelSettings();
       }
     });
   }
@@ -3581,20 +3578,6 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-let waveLeft = null;
-let waveRight = null;
-let waveBrainB = null;
-let waveBrainP = null;
-let waveBrainA = null;
-let wavePoolR = 0;
-let lastBeatPhase = 0;
-// Momento del último impulso de cada cuenca (índice: 0=L, 1=R, 2=B, 3=P).
-let impactTimes = [0, 0, 0, 0];
-let brainCanvas = null;
-let brainCtx = null;
-let brainImg = null;
-let brainSize = 0;
-
 function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -3602,139 +3585,6 @@ function hexToRgb(hex) {
 
 // (LANE_LEFT_COLOR_RGB, LANE_RIGHT_COLOR_RGB y ACCENT_RGB se declaran arriba,
 // junto al estado de la app, para que el arranque las use.)
-
-// Crea (o recrea si cambió el tamaño) las cuencas de agua. Si ya existían
-// campos con ondas en marcha, redimensiona transfiriendo el estado (u y
-// prev) en vez de reiniciar: al cambiar de tamaño (p. ej. al entrar en
-// pantalla completa) el agua continúa exactamente donde estaba, solo que
-// a otra resolución.
-function transferField(oldField, newSize, opts) {
-  const nf = new WaveField(newSize, opts);
-  nf.setCircle(newSize / 2, newSize / 2, newSize / 2 - 1.5);
-  if (oldField) {
-    const os = oldField.size;
-    const ns = newSize;
-    const scale = os / ns;
-    for (let y = 0; y < ns; y++) {
-      for (let x = 0; x < ns; x++) {
-        const ox = Math.round((x - ns / 2) * scale + os / 2);
-        const oy = Math.round((y - ns / 2) * scale + os / 2);
-        if (ox < 0 || oy < 0 || ox >= os || oy >= os) continue;
-        const oi = oy * os + ox;
-        const ni = y * ns + x;
-        nf.u[ni] = oldField.u[oi];
-        nf.prev[ni] = oldField.prev[oi];
-      }
-    }
-  }
-  return nf;
-}
-
-function ensureFields(poolR) {
-  if (wavePoolR && Math.abs(wavePoolR - poolR) < 2) return;
-  wavePoolR = poolR;
-  const size = Math.max(48, Math.ceil(poolR) + 2);
-  // c más lento y más amortiguación: anillos limpios y definidos que se
-  // expanden y se apagan, sin acumularse en un revoltijo caótico.
-  const opts = { c: 0.45, damp: 0.992 };
-  waveLeft = transferField(waveLeft, size, opts);
-  waveRight = transferField(waveRight, size, opts);
-  waveBrainB = transferField(waveBrainB, size, opts);
-  waveBrainP = transferField(waveBrainP, size, opts);
-  waveBrainA = transferField(waveBrainA, size, opts);
-  if (brainSize !== size) {
-    brainSize = size;
-    brainCanvas = document.createElement('canvas');
-    brainCanvas.width = size;
-    brainCanvas.height = size;
-    brainCtx = brainCanvas.getContext('2d');
-    brainImg = brainCtx.createImageData(size, size);
-  }
-}
-
-// La gota del cerebro: la unión de las tres frecuencias con un color limpio.
-// El agua se tiñe con un degradado azul → acento → rosa (de izquierda a
-// derecha) y la superficie es la superposición física de las tres ondas
-// (vb + vp + va): las crestas brillan hacia blanco y los valles se oscurecen,
-// como la luz reflejándose en agua real. La interferencia se ve en el
-// brillo, no en colores que chocan.
-function renderBrain() {
-  const size = waveBrainB.size;
-  const n = waveBrainB.n;
-  const mask = waveBrainB.mask;
-  const soft = waveBrainB.soft;
-  const ub = waveBrainB.u;
-  const up = waveBrainP.u;
-  const ua = waveBrainA.u;
-  const d = brainImg.data;
-  const rb = LANE_LEFT_COLOR_RGB[0];
-  const gb = LANE_LEFT_COLOR_RGB[1];
-  const bb = LANE_LEFT_COLOR_RGB[2];
-  const rp = LANE_RIGHT_COLOR_RGB[0];
-  const gp = LANE_RIGHT_COLOR_RGB[1];
-  const bp = LANE_RIGHT_COLOR_RGB[2];
-  const ra = ACCENT_RGB[0];
-  const ga = ACCENT_RGB[1];
-  const ba = ACCENT_RGB[2];
-  const s = size / 2;
-  for (let i = 0; i < n; i++) {
-    const o = i * 4;
-    if (!mask[i]) {
-      d[o] = 0;
-      d[o + 1] = 0;
-      d[o + 2] = 0;
-      d[o + 3] = 0;
-      continue;
-    }
-    // Color por posición: izquierda azul, centro acento, derecha rosa.
-    const tx = (i % size - s) / (s - 1);
-    let cr;
-    let cg;
-    let cb;
-    if (tx <= 0) {
-      const k = -tx;
-      cr = rb + (ra - rb) * k;
-      cg = gb + (ga - gb) * k;
-      cb = bb + (ba - bb) * k;
-    } else {
-      const k = tx;
-      cr = ra + (rp - ra) * k;
-      cg = ga + (gp - ga) * k;
-      cb = ba + (bp - ba) * k;
-    }
-    // Superficie del agua: suma física de las tres ondas, con ganancia visual.
-    const v = (ub[i] + up[i] + ua[i]) * 2.6;
-    let bri = 0.32 + v * 0.5;
-    if (bri < 0.15) bri = 0.15;
-    if (bri > 1.25) bri = 1.25;
-    cr *= bri;
-    cg *= bri;
-    cb *= bri;
-    if (v > 0.35) {
-      const w = Math.min(1, (v - 0.35) * 0.9);
-      cr += (255 - cr) * w;
-      cg += (255 - cg) * w;
-      cb += (255 - cb) * w;
-    }
-    d[o] = cr > 255 ? 255 : cr;
-    d[o + 1] = cg > 255 ? 255 : cg;
-    d[o + 2] = cb > 255 ? 255 : cb;
-    d[o + 3] = soft ? Math.round(255 * soft[i]) : 255;
-  }
-  brainCtx.putImageData(brainImg, 0, 0);
-}
-
-// Pinta una cuenca en el lienzo principal, recortada al círculo de la gota.
-function drawField(field, rgb, cx, cy, r, composite, alpha = 1) {
-  ctx2d.save();
-  ctx2d.beginPath();
-  ctx2d.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx2d.clip();
-  if (composite) ctx2d.globalCompositeOperation = composite;
-  ctx2d.globalAlpha = alpha;
-  ctx2d.drawImage(field.render(rgb), cx - r, cy - r, r * 2, r * 2);
-  ctx2d.restore();
-}
 
 // Cadencia adaptativa del visualizador en táctil: en sesión se pintan 3 de
 // cada 4 frames (~45 fps) y en pausa 2 de cada 4 (~30 fps). El latido y los
@@ -3752,11 +3602,12 @@ let visBase = 220;
 let visBeat = 6;
 let lastVizT = 0;
 let vizWarm = false;
-// Cache de los gradientes esféricos de las gotas: se recrean solo cuando
-// cambia el tamaño de las cuencas o el color de acento (antes se creaban
-// 6 gradientes por frame).
-let shadeCache = null;
-let shadeCacheKey = '';
+// FIX (auditoría P7 2026-09-03): volumen y forma de onda alimentan el MISMO
+// cómputo visual por cuadro que base/beat/color de arriba, pero se leían
+// crudos (currentParams()) sin ningún suavizado — un arrastre rápido del
+// slider de volumen o cambiar de onda saltaba de golpe en vez de ir "poco a
+// poco" como el resto. Mismo criterio de EMA que visBase/visBeat.
+let visVolume = 0.6;
 
 function drawVisual() {
   requestAnimationFrame(drawVisual);
@@ -3782,14 +3633,34 @@ function drawVisual() {
   lastVizT = now;
   const tb = isFinite(p.base) ? p.base : visBase;
   const tbt = isFinite(p.beat) ? p.beat : visBeat;
+  // Volumen: mismo pipeline que base/beat/color, ver arriba (auditoría P7).
+  // Slider continuo (τ=0,35s, más ágil que el color: un arrastre de volumen
+  // se espera responsivo, similar al ramp de 200ms del motor de audio).
+  const targetVolume = isFinite(p.volume) ? p.volume : visVolume;
   if (!vizWarm) {
     vizWarm = true;
     visBase = tb;
     visBeat = tbt;
+    visVolume = targetVolume;
+    ACCENT_RGB_VIS = ACCENT_RGB.slice();
+    LANE_LEFT_COLOR_RGB_VIS = LANE_LEFT_COLOR_RGB.slice();
+    LANE_RIGHT_COLOR_RGB_VIS = LANE_RIGHT_COLOR_RGB.slice();
   } else {
     const kS = 1 - Math.exp(-dts / 1.5);
     visBase += (tb - visBase) * kS;
     visBeat += (tbt - visBeat) * kS;
+    // Mismo criterio de suavizado que la frecuencia, pero τ = 0,7 s (más
+    // ágil: un cambio de color instantáneo se nota de golpe, no necesita
+    // tanta inercia como una re-afinación de tono) — el salto duro de color
+    // al cambiar de estado era la transición más brusca del visualizador.
+    const kC = 1 - Math.exp(-dts / 0.7);
+    for (let i = 0; i < 3; i++) {
+      ACCENT_RGB_VIS[i] += (ACCENT_RGB[i] - ACCENT_RGB_VIS[i]) * kC;
+      LANE_LEFT_COLOR_RGB_VIS[i] += (LANE_LEFT_COLOR_RGB[i] - LANE_LEFT_COLOR_RGB_VIS[i]) * kC;
+      LANE_RIGHT_COLOR_RGB_VIS[i] += (LANE_RIGHT_COLOR_RGB[i] - LANE_RIGHT_COLOR_RGB_VIS[i]) * kC;
+    }
+    const kV = 1 - Math.exp(-dts / 0.35);
+    visVolume += (targetVolume - visVolume) * kV;
   }
   const beat = Math.max(0.5, visBeat);
 
@@ -3806,51 +3677,10 @@ function drawVisual() {
   const isNoise = cond === 'noise';
   const isSilence = cond === 'none';
 
-  // ----- Simulación alternativa: cimática ---------------------------------
-  // Si el usuario eligió Cimática se dibuja la placa de Faraday en lugar de
-  // las tres gotas de ondas. Sincronizada con el latido real del
-  // AudioContext: la fase 0 (el pulso) hace brillar el aro LED y las gotas.
-  if (vizMode === 'cimatica') {
-    const periodMs = Math.max(80, 1000 / beat);
-    let phase;
-    if (playing && simulation.audio.isPlaying && rhythmic) {
-      const ph = simulation.audio.getBeatPhase();
-      phase = ph != null ? ph : Math.min(1, (now - lastPulse) / periodMs);
-    } else {
-      phase = (now % 4000) / 4000;
-    }
-    const eased = 0.5 + 0.5 * Math.cos(2 * Math.PI * phase);
-    cymatics.render(ctx2d, w, h, {
-      // Frecuencias ya suavizadas: la placa se afina gradualmente y sus
-      // modos dominantes se reorganizan poco a poco al cambiar el tono.
-      base: visBase,
-      beat,
-      playing,
-      pulse: eased,
-      condition: cond,
-      // Misma paleta que las gotas: izquierda azul, centro morado (acento
-      // del estado), derecha rosa.
-      colors: [LANE_LEFT_COLOR_RGB, ACCENT_RGB, LANE_RIGHT_COLOR_RGB],
-    });
-    return;
-  }
-
-  // Tres gotas en fila: frecuencia 1 | cerebro | frecuencia 2. En pantalla
-  // completa en el teléfono la fila se agranda un poco (ocupa casi todo el
-  // ancho) para que las gotas sean las protagonistas de la pantalla. La
-  // condición coincide con el CSS: todo dispositivo táctil, no solo estrecho
-  // (un teléfono apaisado mide hasta ~932px de ancho).
-  const mobileImmersive =
-    document.body.classList.contains('immersive') &&
-    (window.innerWidth <= 900 || matchMedia('(hover: none) and (pointer: coarse)').matches);
-  const poolR = Math.min(h, w / 3) * (mobileImmersive ? 0.45 : 0.4);
-  const cxs = [w / 6, w / 2, (5 * w) / 6];
-  const cys = [h / 2, h / 2, h / 2];
-  const cy = h / 2;
-
-  // Fase del latido real, tomada del reloj del AudioContext para que las
-  // ondas brillen exactamente cuando suena el latido (fase 0 = pulso).
-  // En pausa, respiración suave.
+  // ----- Cimática: se dibuja la placa de Faraday. Sincronizada con el
+  // latido real del AudioContext: la fase 0 (el pulso) hace brillar el aro
+  // LED y los modos dominantes de la placa (Gotas eliminado — solo queda
+  // este renderer).
   const periodMs = Math.max(80, 1000 / beat);
   let phase;
   if (playing && simulation.audio.isPlaying && rhythmic) {
@@ -3859,232 +3689,27 @@ function drawVisual() {
   } else {
     phase = (now % 4000) / 4000;
   }
-  // Respiración suave y continua: máximo justo en el latido (phase 0),
-  // sin "flash" duro que dé sensación de reinicio.
   const eased = 0.5 + 0.5 * Math.cos(2 * Math.PI * phase);
-  const beatBright = 0.62 + 0.38 * eased; // las tres gotas brillan al unísono
-
-  // ----- Física: las fuentes excitan directamente el agua ------------------
-  // No hay gotas que caigan: las tres frecuencias inyectan su impulso en la
-  // cuenca (ondas que se propagan, rebotan en el borde y chocan entre sí) y
-  // el latido añade su pulso exacto en la fase 0 del reloj del AudioContext.
-  ensureFields(poolR);
-  const size = waveLeft.size;
-  const s = size / 2;
-  const off = size * 0.1; // separación de las fuentes en la unión
-
-  // Intervalo visual de excitación de cada cuenca: proporcional a 1/f de su
-  // portadora real (más frecuencia → más ondas por segundo, como el agua
-  // real). La constante K_VIS lleva la escala: a 220 Hz el período visual
-  // queda en ~1,5 s, y al subir/bajar la frecuencia los pulsos se aceleran
-  // o espacian exactamente en esa proporción.
-  const K_VIS = 330;
-  // Frecuencia visual suavizada: las gotas aceleran/desaceleran su ritmo de
-  // ondas gradualmente con el cambio de tono real (sin salto de T1/T2).
-  const f1v = Math.max(1, visBase);
-  const f2v = f1v + beat;
-  const T1 = K_VIS / f1v;
-  const T2 = K_VIS / f2v;
-  const Tpause = K_VIS * 2.2 / f1v; // en pausa, ~2,2× más espaciado
-  if (playing) {
-    if (isNoise) {
-      // Ruido: excitación turbulenta e irregular. Los intervalos y las
-      // intensidades son pseudoaleatorios (hash del reloj visual) y las
-      // fuentes se desplazan del centro: el agua se agita sin estructura
-      // tonal, como el estímulo NOISE real.
-      const hsh = (x) => {
-        const v = Math.sin(x * 12.9898) * 43758.5453;
-        return v - Math.floor(v);
-      };
-      const n1 = hsh(Math.floor(t * 3.7));
-      const n2 = hsh(Math.floor(t * 3.7) + 1);
-      if (t - impactTimes[0] >= 0.25 + n1 * 0.9) {
-        waveLeft.pokeDisc(s + (n2 - 0.5) * size * 0.3, s + (n1 - 0.5) * size * 0.3, 0.5 + n1 * 1.1);
-        impactTimes[0] = t;
-      }
-      if (t - impactTimes[1] >= 0.25 + n2 * 0.9) {
-        waveRight.pokeDisc(s + (n1 - 0.5) * size * 0.3, s + (n2 - 0.5) * size * 0.3, 0.5 + n2 * 1.1);
-        impactTimes[1] = t;
-      }
-      if (t - impactTimes[2] >= 0.3 + n1 * 1.1) {
-        waveBrainB.pokeDisc(s - off + (n2 - 0.5) * size * 0.2, s + (n1 - 0.5) * size * 0.2, 0.6 + n2 * 0.9);
-        impactTimes[2] = t;
-      }
-      if (t - impactTimes[3] >= 0.3 + n2 * 1.1) {
-        waveBrainP.pokeDisc(s + off + (n1 - 0.5) * size * 0.2, s + (n2 - 0.5) * size * 0.2, 0.6 + n1 * 0.9);
-        impactTimes[3] = t;
-      }
-    } else if (isSilence) {
-      // Silencio: el control SILENCE no excita el agua con tono alguno —
-      // solo impulsos suaves y muy espaciados, agua en calma.
-      if (t - impactTimes[0] >= Tpause) {
-        waveLeft.pokeDisc(s, s, 0.6);
-        impactTimes[0] = t;
-      }
-      if (t - impactTimes[1] >= Tpause) {
-        waveRight.pokeDisc(s, s, 0.6);
-        impactTimes[1] = t;
-      }
-      if (t - impactTimes[2] >= Tpause) {
-        waveBrainB.pokeDisc(s - off, s, 0.5);
-        impactTimes[2] = t;
-      }
-      if (t - impactTimes[3] >= Tpause) {
-        waveBrainP.pokeDisc(s + off, s, 0.5);
-        impactTimes[3] = t;
-      }
-    } else if (isPure) {
-      // Tono puro: una única frecuencia excita todas las cuencas al mismo
-      // ritmo — patrón estacionario simétrico, sin batido entre dos tonos
-      // (las dos gotas laterales vibran en fase, no desfasadas).
-      if (t - impactTimes[0] >= T1) {
-        waveLeft.pokeDisc(s, s, 1.5);
-        waveRight.pokeDisc(s, s, 1.5);
-        waveBrainB.pokeDisc(s - off, s, 1.3);
-        waveBrainP.pokeDisc(s + off, s, 1.3);
-        impactTimes[0] = t;
-        impactTimes[1] = t;
-        impactTimes[2] = t;
-        impactTimes[3] = t;
-      }
-    } else {
-      // Binaural / AM: las dos frecuencias, una fuente por cuenca (los
-      // laterales en el centro, la unión con azul y rosa desfasadas que
-      // chocan al cruzarse). Cada cuenca late a su propia frecuencia: f1 y
-      // f2 a ritmos distintos que producen el batido real entre las dos
-      // gotas. En AM la fuerza de cada impulso respira con la envolvente
-      // de amplitud (el pulso real), como la portadora modulada que suena.
-      const amStr = cond === 'amplitude-modulation' ? 0.7 + 1.0 * eased : 1.5;
-      const amStrB = cond === 'amplitude-modulation' ? 0.6 + 0.9 * eased : 1.3;
-      if (t - impactTimes[0] >= T1) {
-        waveLeft.pokeDisc(s, s, amStr);
-        impactTimes[0] = t;
-      }
-      if (t - impactTimes[1] >= T2) {
-        waveRight.pokeDisc(s, s, amStr);
-        impactTimes[1] = t;
-      }
-      if (t - impactTimes[2] >= T1) {
-        waveBrainB.pokeDisc(s - off, s, amStrB);
-        impactTimes[2] = t;
-      }
-      if (t - impactTimes[3] >= T2) {
-        waveBrainP.pokeDisc(s + off, s, amStrB);
-        impactTimes[3] = t;
-      }
-    }
-  } else {
-    // En pausa: impulsos espaciados y suaves, el agua sigue viva pero
-    // tranquila (la excitación ambiental, no la portadora).
-    if (t - impactTimes[0] >= Tpause) {
-      waveLeft.pokeDisc(s, s, 0.6);
-      impactTimes[0] = t;
-    }
-    if (t - impactTimes[1] >= Tpause) {
-      waveRight.pokeDisc(s, s, 0.6);
-      impactTimes[1] = t;
-    }
-    if (t - impactTimes[2] >= Tpause) {
-      waveBrainB.pokeDisc(s - off, s, 0.5);
-      impactTimes[2] = t;
-    }
-    if (t - impactTimes[3] >= Tpause) {
-      waveBrainP.pokeDisc(s + off, s, 0.5);
-      impactTimes[3] = t;
-    }
-  }
-  // Latido: una gota de luz exacta en cada pulso real (fase 0). Solo las
-  // condiciones con batido real (binaural/AM) pulsan el centro; el resto
-  // (tono puro, ruido, silencio) no tiene pulso que marcar.
-  if (playing && rhythmic && phase != null) {
-    const wrapped = lastBeatPhase > phase && lastBeatPhase - phase > 0.5;
-    if (wrapped) waveBrainA.pokeDisc(s, s, 1.8);
-  }
-  lastBeatPhase = phase;
-
-  waveLeft.step();
-  waveRight.step();
-  waveBrainB.step();
-  waveBrainP.step();
-  waveBrainA.step();
-
-  // ----- Render: pintar cada cuenca sobre su gota --------------------------
-  const rgbL = LANE_LEFT_COLOR_RGB;
-  const rgbR = LANE_RIGHT_COLOR_RGB;
-  const rgbA = ACCENT_RGB;
-
-  drawField(waveLeft, rgbL, cxs[0], cys[0], poolR, null, 1);
-  drawField(waveRight, rgbR, cxs[2], cys[2], poolR, null, 1);
-  // La gota del cerebro combina las tres frecuencias por dominancia local.
-  renderBrain();
-  drawField({ render: () => brainCanvas }, null, cxs[1], cys[1], poolR, null, 1);
-
-  const pools = [
-    { x: cxs[0], y: cys[0], color: LANE_LEFT_COLOR },
-    { x: cxs[1], y: cys[1], color: accentColor },
-    { x: cxs[2], y: cys[2], color: LANE_RIGHT_COLOR },
-  ];
-
-  // Gradientes esféricos cacheados: la clave incluye el tamaño de las
-  // cuencas y el color de acento (cambian con el layout y el estado).
-  const shadeKey = `${Math.round(poolR * 10)}|${accentColor}`;
-  if (shadeCacheKey !== shadeKey) {
-    shadeCacheKey = shadeKey;
-    shadeCache = pools.map((pool) => {
-      const shade = ctx2d.createRadialGradient(
-        pool.x - poolR * 0.25,
-        pool.y - poolR * 0.25,
-        poolR * 0.15,
-        pool.x,
-        pool.y,
-        poolR,
-      );
-      shade.addColorStop(0, 'rgba(0,0,0,0)');
-      shade.addColorStop(0.7, 'rgba(0,0,0,0.05)');
-      shade.addColorStop(1, 'rgba(0,0,0,0.3)');
-      const hx = pool.x - poolR * 0.32;
-      const hy = pool.y - poolR * 0.38;
-      const hg = ctx2d.createRadialGradient(hx, hy, 0, hx, hy, poolR * 0.45);
-      hg.addColorStop(0, 'rgba(255,255,255,0.3)');
-      hg.addColorStop(0.3, 'rgba(255,255,255,0.07)');
-      hg.addColorStop(1, 'rgba(255,255,255,0)');
-      const gl = ctx2d.createRadialGradient(hx, hy, 0, hx, hy, poolR * 0.13);
-      gl.addColorStop(0, 'rgba(255,255,255,0.9)');
-      gl.addColorStop(1, 'rgba(255,255,255,0)');
-      return { shade, hg, gl, hx, hy };
-    });
-  }
-  pools.forEach((pool, i) => {
-    const g = shadeCache[i];
-    if (!g) return;
-    ctx2d.fillStyle = g.shade;
-    ctx2d.beginPath();
-    ctx2d.arc(pool.x, pool.y, poolR, 0, Math.PI * 2);
-    ctx2d.fill();
-    ctx2d.fillStyle = g.hg;
-    ctx2d.beginPath();
-    ctx2d.arc(pool.x, pool.y, poolR, 0, Math.PI * 2);
-    ctx2d.fill();
-    ctx2d.fillStyle = g.gl;
-    ctx2d.beginPath();
-    ctx2d.ellipse(g.hx, g.hy, poolR * 0.17, poolR * 0.12, -0.5, 0, Math.PI * 2);
-    ctx2d.fill();
+  cymatics.render(ctx2d, w, h, {
+    // Frecuencias ya suavizadas: la placa se afina gradualmente y sus
+    // modos dominantes se reorganizan poco a poco al cambiar el tono.
+    base: visBase,
+    beat,
+    playing,
+    pulse: eased,
+    condition: cond,
+    // Volumen y forma de onda ya se calculaban en currentParams() pero
+    // nunca llegaban al renderer (auditoría 2026-08-29): subir/bajar el
+    // volumen o cambiar sine↔square no cambiaba nada visualmente. Ahora sí.
+    // Volumen SUAVIZADO (visVolume, auditoría P7): un arrastre rápido del
+    // slider ya no salta de golpe, mismo criterio que base/beat/color.
+    volume: visVolume,
+    wave: selectedWave,
+    // Izquierda azul, centro morado (acento del estado), derecha rosa.
+    // Versión SUAVIZADA (ver ACCENT_RGB_VIS): el color de la placa ya no
+    // salta de golpe al cambiar de estado.
+    colors: [LANE_LEFT_COLOR_RGB_VIS, ACCENT_RGB_VIS, LANE_RIGHT_COLOR_RGB_VIS],
   });
-
-  // Núcleo de la gota central: el cerebro, pulsa suave con el latido real.
-  const brain = pools[1];
-  const coreR = poolR * 0.17 * (0.85 + eased * 0.4);
-  const glow = ctx2d.createRadialGradient(brain.x, brain.y, 0, brain.x, brain.y, coreR * 3.2);
-  glow.addColorStop(0, hexToRgba(accentColor, 0.5 + eased * 0.3));
-  glow.addColorStop(1, hexToRgba(accentColor, 0));
-  ctx2d.fillStyle = glow;
-  ctx2d.beginPath();
-  ctx2d.arc(brain.x, brain.y, coreR * 3.2, 0, Math.PI * 2);
-  ctx2d.fill();
-  ctx2d.beginPath();
-  ctx2d.arc(brain.x, brain.y, coreR, 0, Math.PI * 2);
-  ctx2d.fillStyle = hexToRgba('#ffffff', 0.4 + eased * 0.4);
-  ctx2d.fill();
 }
 drawVisual();
 
@@ -4876,6 +4501,24 @@ renderAlarms();
 // Deep link: ?state=meditacion abre directamente ese estado (tiene prioridad
 // sobre la sesión guardada para que compartir funcione).
 const deepParams = new URLSearchParams(location.search);
+// Deep link limpio: /preset/:slug (ver vercel.json + api/preset/[slug].js
+// para el SSR de metaetiquetas). Se traduce a los MISMOS parámetros que ya
+// entiende todo el bloque de abajo (?state=/?carrier=/?freq=&beat=&wave=) —
+// una sola fuente de verdad compartida con la Edge Function
+// (shared/preset-catalog.js), aplicada ANTES de leer cualquier deepX para
+// no duplicar su lógica de precedencia. Nunca setea autostart: llegar por
+// un preset compartido no es una alarma, el play sigue siendo del usuario.
+const presetSlugMatch = /^\/preset\/([^/]+)\/?$/.exec(location.pathname);
+if (presetSlugMatch) {
+  const preset = resolvePresetSlug(decodeURIComponent(presetSlugMatch[1]));
+  if (preset) {
+    if (preset.stateId) deepParams.set('state', preset.stateId);
+    if (preset.carrier) deepParams.set('carrier', preset.carrier);
+    if (preset.customBase != null) deepParams.set('freq', String(preset.customBase));
+    if (preset.customBeat != null) deepParams.set('beat', String(preset.customBeat));
+    if (preset.wave) deepParams.set('wave', preset.wave);
+  }
+}
 const deepState = deepParams.get('state');
 // Deep link de portadora: ?carrier=solfeggio/ancestral/schumann/personalizado
 // marca la familia directamente. Por compatibilidad con enlaces antiguos,

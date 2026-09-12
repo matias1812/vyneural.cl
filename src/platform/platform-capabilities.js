@@ -154,6 +154,32 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
       }
     : { provider: 'web', ...web.mediaSession, label: web.mediaSession.label };
 
+  // Canal de alarma real: si Android puede bypassear No Molestar para las
+  // alarmas de Vyneural (v8, ver NotificationHelper.kt) — requiere el
+  // permiso ACCESS_NOTIFICATION_POLICY concedido A MANO por el usuario
+  // (Android no lo pide con un diálogo normal, solo con un Intent a una
+  // lista general). Bug real: "llega pero a veces sin alarma" en modo
+  // silencio/No Molestar — setBypassDnd(true) en el canal no basta sin este
+  // permiso adicional del sistema.
+  const alarmChannel = isNative
+    ? {
+        provider: 'native',
+        supported: !!native.info && !!native.info.alarmChannel && !!native.info.alarmChannel.exists,
+        dndBypassGranted: !!(native.info && native.info.alarmChannel && native.info.alarmChannel.canBypassDnd),
+        label:
+          native.info && native.info.alarmChannel && native.info.alarmChannel.exists
+            ? (native.info.alarmChannel.canBypassDnd
+                ? 'Suena en No Molestar ✓'
+                : 'Requiere configuración del sistema (recomendado)')
+            : 'Se crea al usar la primera alarma',
+      }
+    : {
+        provider: 'web',
+        supported: false,
+        dndBypassGranted: false,
+        label: 'No aplica en el navegador',
+      };
+
   return {
     platformKind,
     platform: isNative ? 'android' : 'web',
@@ -163,6 +189,7 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
     exactAlarms,
     batteryUnrestricted,
     autostartGuidance,
+    alarmChannel,
     mediaSession,
     // La APK no cambia estas: push sigue necesitando backend; wake lock es
     // pantalla, no audio.

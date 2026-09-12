@@ -38,164 +38,65 @@
 
 const TWO_PI = Math.PI * 2;
 
-// Constantes físicas del agua (~20 °C, unidades SI).
-const G = 9.81; // gravedad (m/s²)
-const SIGMA_RHO = 7.29e-5; // tensión superficial / densidad (m³/s²)
+// FIX (auditoría 2026-09-08, Parte A — "una sola cimática, dos cámaras"):
+// toda la física modal que vivía acá (tablas de ceros de Bessel, búsqueda
+// de modo, ancho de resonancia, radio del plato, funciones de Bessel) se
+// extrajo a core/plate-field.js — fuente ÚNICA para esta vista 2D, la
+// futura vista 3D (Parte D) y el validador cruzado FDTD↔modal (Parte E).
+// Ningún renderer vuelve a definir su propia versión de esto. Ver ese
+// archivo para el detalle de cada pieza (son movidas tal cual, mismo
+// comportamiento — no se recalibró nada acá).
+import {
+  zeroFor,
+  modeOmega,
+  selectModeWithFallback,
+  resonantModeForBeat,
+  gammaAt,
+  lorentz,
+  PHYS_A,
+  REF_F,
+  GAMMA_MIN,
+  ringsFor,
+  besselJArray,
+  MORPH_BLEND_K,
+} from './core/plate-field.js';
 
-// Ceros de J'_m (m = 0 … 6): modos radiales de una cuenca circular con
-// pared vertical (condición de borde libre de la superficie:
-// J'_m(k a) = 0). Los modos angulares (m ≥ 2) son los que producen los
-// patrones florales y la deriva/rotación real de la cimática de Faraday.
-const ZP0 = [
-  3.8317, 7.0156, 10.1735, 13.3237, 16.4706, 19.6159,
-  22.7601, 25.9037, 29.0468, 32.1897,
-];
-const ZP1 = [
-  1.8412, 5.3314, 8.5363, 11.706, 14.8636, 18.0155,
-  21.1644, 24.3113, 27.4571, 30.6019,
-];
-const ZP2 = [
-  3.0542, 6.7061, 9.9695, 13.1704, 16.3475, 19.5129,
-  22.6716, 25.826, 28.9777, 32.1273,
-];
-const ZP3 = [
-  4.2012, 8.0152, 11.3459, 14.5858, 17.7887, 20.9725,
-  24.1449, 27.3101, 30.4703, 33.6267,
-];
-const ZP4 = [
-  5.3176, 9.2824, 12.6819, 15.9641, 19.196, 22.401,
-  25.5898, 28.7678, 31.9372, 35.0995,
-];
-const ZP5 = [
-  6.4156, 10.5199, 13.9872, 17.3128, 20.5755, 23.8038,
-  27.0103, 30.2028, 33.3854, 36.5607,
-];
-const ZP6 = [
-  7.5013, 11.7349, 15.2682, 18.6374, 21.9317, 25.1839,
-  28.4065, 31.6089, 34.7967, 37.9737,
-];
-const ZP_BY_M = [ZP0, ZP1, ZP2, ZP3, ZP4, ZP5, ZP6];
-
-// Ceros de J'_m para m > 6 (aproximación de McMahon, suficiente para el
-// matiz de resonancia de los modos de detalle 2m/3m, que no están en las
-// tablas): j'_{m,1} ≈ m + 0,80862·m^(1/3) y la separación entre ceros
-// consecutivos tiende a π.
-function zPrimeApprox(m, n) {
-  return m + 0.80862 * Math.cbrt(m) + (n - 1) * Math.PI;
-}
-
-// Frecuencia de resonancia (rad/s) del modo (m, n) de la cuenca de radio a:
-//   ω² = g·k + (σ/ρ)·k³,  k = j'_{m,n}/a
-// Es la dispersión real; la diferencia δ = ω_res − ω_s con la excitación es
-// el batido que produce la rotación/deriva observada en cimática real.
-function modeOmega(m, n, a) {
-  const k = (m <= 6 ? ZP_BY_M[m][n - 1] : zPrimeApprox(m, n)) / a;
-  return Math.sqrt(G * k + SIGMA_RHO * k * k * k);
-}
-
-// Amplitud resonante (tipo Lorentz) de un modo angular desafiinado en δ:
-// un modo lejos de la resonancia aporta poco al patrón, como en el agua
-// real. γ es la anchura de resonancia (~2 Hz para una cuenca de 2 cm).
-// Matiza la textura y el detalle mandala, que además tienen un suelo
-// mínimo para que las subestructuras se vean siempre (la no linealidad
-// del agua real excita armónicos aunque estén lejos de la resonancia
-// lineal). El modo dominante se elige por cercanía a la resonancia y se
-// normaliza para que la flor se vea siempre, como cuando se afina el
-// plato a la frecuencia del canto.
-// PHASE 8: Frequency-dependent resonance width Γ(ω_s).
-// In real cymatics, the resonance bandwidth narrows at higher frequencies
-// (the quality factor Q = ω_s / Γ increases with frequency because capillary
-// waves have lower damping than gravity waves). At low ω_s (few Hz) damping is
-// broad (Γ ≈ 25 rad/s); at high ω_s (>300 Hz) it narrows toward Γ_min.
-// Model: Γ(f) = Γ_max / (1 + f / f_half),  f_half = 80 Hz.
-// This replaces the old constant GAMMA = 12 which was physically incorrect.
-const GAMMA_MAX  = 25; // rad/s — low-frequency (gravity-wave regime)
-const GAMMA_MIN  =  6; // rad/s — high-frequency floor (capillary regime)
-const GAMMA_HALF = 80; // Hz  — crossover frequency
-function gammaAt(f) {
-  // Interpolate from GAMMA_MAX → GAMMA_MIN as f increases.
-  return GAMMA_MIN + (GAMMA_MAX - GAMMA_MIN) / (1 + f / GAMMA_HALF);
-}
-function lorentz(delta, f) {
-  const g = gammaAt(f != null ? f : 100);
-  return 1 / (1 + (delta / g) * (delta / g));
-}
-
-// Número de onda de Faraday para una excitación a f Hz. La superficie
-// responde a ω_s = π·f (subarmónica) y k resuelve la dispersión
-// gravedad-capilaridad con Newton-Raphson.
-function faradayWavenumber(f) {
-  const ws = Math.PI * f; // ω_s = ω_d / 2
-  const ws2 = ws * ws;
-  // Estimación inicial en la rama dominante: capilar si ω_s² ≫ g·k_c³.
-  const kCap = Math.cbrt(ws2 / SIGMA_RHO);
-  const kGra = ws2 / G;
-  let k = kCap < kGra ? kCap : kGra;
-  for (let i = 0; i < 10; i++) {
-    const fk = G * k + SIGMA_RHO * k * k * k - ws2;
-    const dfk = G + 3 * SIGMA_RHO * k * k;
-    let dk = fk / dfk;
-    if (dk > k * 0.8) dk = k * 0.8;
-    else if (dk < -k * 0.8) dk = -k * 0.8;
-    k -= dk;
-    if (Math.abs(dk) < k * 1e-6) break;
-  }
-  return k;
-}
-
-// Radio físico del plato: se elige para que a 220 Hz (la portadora de
-// referencia) quepan exactamente REF_RINGS anillos con el borde libre:
-//   a = j'_{0,6} / k(220 Hz)  ≈ 10,5 mm  (una cuenca real de ~2 cm,
-//   mostrada ampliada).
-const REF_F = 220;
-const REF_RINGS = 6;
-const PHYS_A = ZP0[REF_RINGS - 1] / faradayWavenumber(REF_F);
-
-// Anillos visibles para una frecuencia dada: número de longitudes de onda
-// (π·k·a) que caben en el plato, redondeado al modo radial más cercano.
-function ringsFor(f) {
-  const r = Math.round((faradayWavenumber(f) * PHYS_A) / Math.PI);
-  return Math.max(1, Math.min(ZP0.length, r));
-}
-
-// --------------------------------------------------------------------------
-// Funciones de Bessel (modos radiales de la cuenca).
-// --------------------------------------------------------------------------
-
-// J0 por serie de potencias (x < 8) y forma asintótica (x ≥ 8).
-function besselJ0(x) {
-  x = Math.abs(x);
-  if (x < 1e-4) return 1;
-  if (x < 8) {
-    const xx = x * x;
-    let s = 1;
-    let term = 1;
-    for (let k = 1; k <= 10; k++) {
-      term *= -(xx) / (4 * k * k);
-      s += term;
-    }
-    return s;
-  }
-  return Math.sqrt(2 / (Math.PI * x)) * Math.cos(x - Math.PI / 4);
-}
-
-// J1 por serie de potencias (x < 8) y forma asintótica (x ≥ 8).
-function besselJ1(x) {
-  x = Math.abs(x);
-  if (x < 1e-4) return 0;
-  if (x < 8) {
-    const half = x / 2;
-    const xx = x * x;
-    let s = half;
-    let term = half;
-    for (let k = 1; k <= 10; k++) {
-      term *= -(xx) / (4 * k * (k + 1));
-      s += term;
-    }
-    return s;
-  }
-  return Math.sqrt(2 / (Math.PI * x)) * Math.cos(x - (3 * Math.PI) / 4);
-}
+// FIX (auditoría 2026-09-08, Parte B — "una sola cimática, dos cámaras"):
+// cota de seguridad para una transición de modo que por algún motivo no
+// decayera (p. ej. un τ corrupto) — NUNCA debería dispararse en operación
+// normal. gammaAt(f) está acotado en [GAMMA_MIN, GAMMA_MAX] para todo f, así
+// que τ_fundido = MORPH_BLEND_K/gammaAt(f) está acotado en
+// [MORPH_BLEND_K/GAMMA_MAX, MORPH_BLEND_K/GAMMA_MIN] siempre — el peor caso
+// natural llega a oldW≈0,02 (el umbral real de abajo) en
+// ~4·MORPH_BLEND_K/GAMMA_MIN. Este tope es 8× ese peor caso natural, puro
+// respaldo ante un bug, no un knob de ritmo (para eso está
+// MORPH_BLEND_K/GAMMA_MIN/GAMMA_MAX, ver plate-field.js).
+// FIX (2026-09-08, "colisionador de frecuencias" — transiciones erráticas):
+// esto usaba SLOWMO_K (330), no MORPH_BLEND_K (10) — un fundido cruzado NO
+// envuelve una oscilación visible (es el mismo caso que el suavizado de
+// volumen más abajo, que YA evita SLOWMO_K por esta razón), así que no debía
+// llevar el factor de cámara lenta. Con SLOWMO_K el peor caso real llegaba a
+// ~220s (963 Hz medido: ~177s) con el modo BLOQUEADO todo ese tiempo (ver
+// lockSrc): cualquier cambio de frecuencia real durante esa ventana quedaba
+// sin efecto visible hasta que por fin soltaba — el patrón se veía congelado
+// y después saltaba de golpe. Ver la nota completa junto a MORPH_BLEND_K en
+// plate-field.js.
+// FIX (2026-09-08, "va bien y luego salta" — reportado para saltos GRANDES
+// de frecuencia): el fundido ahora se alarga hasta `MORPH_DIST_SCALE_MAX`×
+// cuando el cambio de modo (m, n) es grande (ver la nota junto a
+// `distScale` más abajo, donde arranca cada fundido) — el techo de
+// seguridad tiene que crecer con el mismo factor o dispararía ANTES de que
+// termine de asentar un fundido grande legítimo.
+const MORPH_DIST_SCALE_MAX = 3;
+const MAX_MORPH_AGE_S = (8 * MORPH_DIST_SCALE_MAX * MORPH_BLEND_K) / GAMMA_MIN;
+// FEATURE (2026-09-08, "hagamos que se interpole"): a partir de qué
+// distancia de modo (|Δm|+|Δn|) se arma un camino de resonancias
+// intermedias reales (`_computeModeWaypoints`) en vez de ir directo al
+// objetivo. Por debajo de esto el usuario ya confirmó en vivo que "va
+// bien" con un solo fundido (más largo gracias a distScale); por encima,
+// un solo fundido — por más largo que sea — salta entre dos formas
+// demasiado distintas para leerse como una reorganización continua.
+const WAYPOINT_MODE_DIST_MIN = 5;
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
@@ -255,15 +156,12 @@ function fillRadTableRows(
       rad[o] = dist;
       rad[o + 1] = Math.atan2(dy, dx);
       const arg = argScale * dist;
-      js[0] = besselJ0(arg);
-      if (arg < 1e-3) {
-        for (let mm = 1; mm <= maxM; mm++) js[mm] = 0;
-      } else {
-        js[1] = besselJ1(arg);
-        for (let mm = 2; mm <= maxM; mm++) {
-          js[mm] = ((2 * (mm - 1)) / arg) * js[mm - 1] - js[mm - 2];
-        }
-      }
+      // FIX (auditoría 2026-09-08, Parte A): misma recurrencia de Bessel,
+      // ahora en core/plate-field.js:besselJArray() (comparte implementación
+      // con la vista 3D y el validador FDTD↔modal). `js` se sigue pasando
+      // por referencia y reusando entre llamadas — este es el hot loop de
+      // la reconstrucción de tabla radial, sin asignar arrays por píxel.
+      besselJArray(maxM, arg, js);
       rad[o + 2] = js[0];
       rad[o + 3] = js[mDom];
       rad[o + 4] = js[mS1];
@@ -397,6 +295,18 @@ uniform float uMid;
 uniform vec3 uPal;
 uniform vec3 uDeep;
 uniform vec3 uWhite;
+// Modelo neuronal real (auditoría de luz 2026-09-02): afina el reflejo
+// especular derivado del patrón (ver más abajo). No estaban conectados a
+// NINGUNA capa visual del shader antes de esto.
+uniform float uCoherence;
+uniform float uVelocity;
+// Compuerta de estabilidad (auditoría P7 2026-09-03, "tirones al cambiar de
+// frecuencia"): 0 justo tras un cambio de modo, sube a 1 en ~0,6s una vez
+// que el patrón se asienta. Multiplica el especular y la cáustica más abajo
+// — ambos son derivadas del patrón (1ª y 2ª), mucho más sensibles que el
+// color base a un salto discreto del modo dominante (m,n es un entero, no
+// interpola aunque la frecuencia sí lo haga).
+uniform float uLightGate;
 
 out vec4 outColor;
 
@@ -466,7 +376,50 @@ void main() {
       + uJo[7] * Co.y * cos(uMo[5] * th + uPho[6]));
   }
 
+  // Pendiente ANGULAR de la flor (∂sum/∂θ), derivada analítica exacta del
+  // mismo sumatorio de arriba (cos→-m·sin por regla de la cadena; el modo
+  // J0·A.z no depende de θ, así que no aporta). ripp no depende de θ (solo
+  // de dist), así que ∂eBase/∂θ = dSum·ripp·uAmp·uSwell·uMEnv sin más
+  // términos — usado más abajo para el reflejo especular (auditoría de luz
+  // 2026-09-02): antes el único "reflejo" era un blob fijo en una esquina,
+  // sin relación con el patrón real. Solo la flor NUEVA aporta (durante un
+  // fundido cruzado el reflejo de la anterior se omite a propósito — se
+  // simplifica, ya se está desvaneciendo).
+  float dSum = 0.0;
+  if (uNewW > 0.02) {
+    dSum = -uJ[1] * B.x * uM[0] * sin(uM[0] * th + uPh[0])
+      - uJ[2] * B.x * uM[0] * sin(uM[0] * th + uPh[1])
+      - uJ[3] * B.y * uM[1] * sin(uM[1] * th + uPh[2])
+      - uJ[4] * B.z * uM[2] * sin(uM[2] * th + uPh[3])
+      - uJ[5] * B.w * uM[3] * sin(uM[3] * th + uPh[4])
+      - uJ[6] * C.x * uM[4] * sin(uM[4] * th + uPh[5])
+      - uJ[7] * C.y * uM[5] * sin(uM[5] * th + uPh[6]);
+    dSum *= uNewW;
+  }
+
+  // Curvatura ANGULAR de la flor (∂²sum/∂θ², segunda derivada analítica del
+  // mismo sumatorio — cos→-m²·cos por regla de la cadena aplicada dos veces).
+  // Cero uniforms/texturas nuevas: reusa exactamente lo que dEdTh ya usa.
+  // Alimenta la CÁUSTICA más abajo — luz que se concentra por refracción
+  // donde la superficie se dobla bruscamente (2ª derivada), a diferencia del
+  // reflejo especular de arriba (pendiente, 1ª derivada): mismo fenómeno que
+  // hace destellar los cruces/colisiones en video de cimática/agua real.
+  // Mismo criterio de fundido cruzado que dSum: solo la flor NUEVA aporta.
+  float d2Sum = 0.0;
+  if (uNewW > 0.02) {
+    d2Sum = -uJ[1] * B.x * uM[0] * uM[0] * cos(uM[0] * th + uPh[0])
+      - uJ[2] * B.x * uM[0] * uM[0] * cos(uM[0] * th + uPh[1])
+      - uJ[3] * B.y * uM[1] * uM[1] * cos(uM[1] * th + uPh[2])
+      - uJ[4] * B.z * uM[2] * uM[2] * cos(uM[2] * th + uPh[3])
+      - uJ[5] * B.w * uM[3] * uM[3] * cos(uM[3] * th + uPh[4])
+      - uJ[6] * C.x * uM[4] * uM[4] * cos(uM[4] * th + uPh[5])
+      - uJ[7] * C.y * uM[5] * uM[5] * cos(uM[5] * th + uPh[6]);
+    d2Sum *= uNewW;
+  }
+
   float eBase = sum * ripp * uAmp * uSwell * uMEnv;
+  float dEdTh = dSum * ripp * uAmp * uSwell * uMEnv;
+  float d2EdTh2 = d2Sum * ripp * uAmp * uSwell * uMEnv;
   float e = eBase + grain * uGEnv * (0.1 + abs(eBase)) * 0.045 * uAmp;
 
   float sand = 0.0;
@@ -499,6 +452,46 @@ void main() {
     vec3 sandCol = mix(vec3(240.0, 245.0, 252.0), uPal, 0.22);
     col = mix(col, sandCol, sa);
   }
+
+  // Reflejo especular derivado del patrón real (auditoría de luz
+  // 2026-09-02): brilla donde la pendiente angular es casi nula (una
+  // cresta/valle local — como el brillo del sol justo en la cima de una
+  // ola) y solo sobre elevación POSITIVA (la luz rebota en la cresta, no en
+  // el valle en sombra). uCoherence (modelo neuronal real) afina el
+  // reflejo: coherente = pocos brillos definidos, como agua en calma;
+  // turbulento = disperso en muchos puntos chicos vía el grano capilar
+  // (grain), como agua picada. uVelocity anima cuánto "vive" el brillo.
+  float crestGate = clamp01(e * 4.0);
+  float shininess = mix(2.5, 11.0, clamp01(uCoherence));
+  float flatness = 1.0 / (1.0 + dEdTh * dEdTh * shininess);
+  float scatter = mix(1.0, grain, 1.0 - clamp01(uCoherence));
+  float specular = flatness * crestGate * scatter * soft
+    * (0.3 + 0.35 * uAmpPat) * (0.5 + 0.6 * clamp01(uVelocity)) * uLightGate;
+  col = min(col + vec3(255.0) * specular, vec3(255.0));
+
+  // Cáustica por curvatura (auditoría de luz 2026-09-02, "otra iluminación"):
+  // destello disperso e irregular donde la 2ª derivada es alta — los cruces
+  // reales de modos/anillos, no solo la cresta. uCoherence invierte el
+  // sentido respecto al especular: baja coherencia (turbulento) = destellos
+  // MÁS dispersos/frecuentes, como agua picada refractando luz por todos
+  // lados; alta coherencia = pocos y nítidos. Reusa crestGate (mismo criterio
+  // "solo lado iluminado") sin crear un gate nuevo.
+  //
+  // FIX (reportado en vivo: "apagones, destellos, cambios bruscos"): la 2ª
+  // derivada crece con m² (hasta 36 para m=6, el CUÁDRUPLE de sensible que
+  // el especular de 1ª derivada), y clamp01() tiene un codo duro — con la
+  // precesión normal del patrón, la señal cruzaba ese codo muy rápido y se
+  // veía como parpadeo binario (encendido/apagado) en vez de un brillo vivo.
+  // Se comprime igual que ya hace eP = sign(e)·sqrt(|e|) más arriba (mismo
+  // criterio del archivo para evitar contraste duro) y se satura SUAVE
+  // (d/(d+1), sin codo — asíntota a 1, nunca un salto) en vez de clamp01.
+  float d2n = sqrt(abs(d2EdTh2)) * 0.9;
+  float curvNorm = d2n / (d2n + 1.0);
+  float causticMod = mix(1.6, 0.7, clamp01(uCoherence));
+  float caustic = curvNorm * crestGate * causticMod * soft
+    * (0.3 + 0.35 * uAmpPat) * (0.5 + 0.6 * clamp01(uVelocity)) * uLightGate;
+  col = min(col + vec3(255.0) * caustic, vec3(255.0));
+
   float wa = (0.26 + 0.1 * uAmpPat + 0.54 * v + 0.55 * sand * uAmpPat) * soft;
   outColor = vec4(col / 255.0, min(wa, 1.0));
 }`;
@@ -588,6 +581,7 @@ function initGL() {
       'uMEnv', 'uPresence', 'uAmpPat', 'uAmp', 'uSwell',
       'uRipA', 'uRipC', 'uRipT', 'uRipN', 'uRipCl', 'uColC', 'uCT', 'uST', 'uCN', 'uSN',
       'uGEnv', 'uPSh', 'uTexPow', 'uTexSalt', 'uSandSig', 'uGain', 'uMid', 'uPal', 'uDeep', 'uWhite',
+      'uCoherence', 'uVelocity', 'uLightGate',
     ];
     const u = {};
     for (const nm of names) u[nm] = gl.getUniformLocation(prog, nm);
@@ -676,6 +670,33 @@ const C_CYAN = [34, 211, 238];
 const C_INDIGO = [129, 140, 248];
 const C_WHITE = [238, 249, 255];
 
+// Temperatura de color de la luz de cresta, ligada a la frecuencia REAL
+// (mejora de luz/variables 2026-09-02): antes C_WHITE era fijo para
+// cualquier Hz — la "luz" de la placa no reflejaba de ningún modo el tono
+// que se está escuchando. Grave (~40 Hz) tira a ámbar cálido; agudo
+// (~900 Hz+) tira a azul-violeta frío; 220 Hz (la referencia física de todo
+// el módulo, ver REF_F) es EXACTAMENTE C_WHITE, así que el aspecto por
+// defecto no cambia. Heurística de percepción (no un blackbody real), en la
+// misma línea que el resto de las capas "cinematic" del renderer.
+const WARM_WHITE = [255, 236, 208];
+const COOL_WHITE = [214, 229, 255];
+function crestColorFor(f) {
+  if (f <= REF_F) {
+    const t = clamp01((REF_F - f) / (REF_F - 40));
+    return [
+      C_WHITE[0] + (WARM_WHITE[0] - C_WHITE[0]) * t,
+      C_WHITE[1] + (WARM_WHITE[1] - C_WHITE[1]) * t,
+      C_WHITE[2] + (WARM_WHITE[2] - C_WHITE[2]) * t,
+    ];
+  }
+  const t = clamp01((f - REF_F) / (900 - REF_F));
+  return [
+    C_WHITE[0] + (COOL_WHITE[0] - C_WHITE[0]) * t,
+    C_WHITE[1] + (COOL_WHITE[1] - C_WHITE[1]) * t,
+    C_WHITE[2] + (COOL_WHITE[2] - C_WHITE[2]) * t,
+  ];
+}
+
 // Granulometría propia de cada plato: cada gota usa su propia mezcla de sal
 // y su propio campo capilar — como tres experimentos de cimática montados
 // con polvos distintos. Frecuencias entre sí irracionales evitan la rejilla
@@ -713,7 +734,7 @@ export class CymaticsRenderer {
     this._drops = [];
     for (let i = 0; i < 3; i++) {
       const c = document.createElement('canvas');
-      this._drops.push({ canvas: c, ctx: c.getContext('2d'), img: null, res: 0, rad: null, radK: -1, pending: null });
+      this._drops.push({ canvas: c, ctx: c.getContext('2d'), img: null, res: 0, rad: null, radK: -1, radM: null, radN: null, pending: null });
     }
     // Transición entre frecuencias: al cambiar el modo de una gota (p. ej.
     // al pasar de un estado a otro) el patrón anterior se desvanece mientras
@@ -724,12 +745,84 @@ export class CymaticsRenderer {
     this._lastKey = ['', '', ''];
     this._lastP = [null, null, null];
     this._morph = [null, null, null];
+    // Compuerta de estabilidad para la luz derivada (auditoría P7 2026-09-03
+    // — reportado en vivo: "la cymática se vuelve loca al cambiar de
+    // frecuencia, da saltos como tirones"). CAUSA: el modo dominante (m,n)
+    // se elige por búsqueda de resonancia más cercana — un número ENTERO —
+    // así que aunque la frecuencia suavizada (visBase) cambie de forma
+    // continua, el modo salta en escalones discretos al cruzar un límite de
+    // resonancia. El especular (dEdTh) y la cáustica (d2EdTh2) son derivadas
+    // 1ª y 2ª del patrón, escaladas por m y m² respectivamente — mucho más
+    // sensibles a ese salto discreto que el color base. Si además la
+    // frecuencia sigue cambiando MIENTRAS un fundido cruzado ya está en
+    // curso, el "modo nuevo" del fundido se recalcula en vivo cuadro a
+    // cuadro (para que el fundido no se congele a mitad de camino) y puede
+    // volver a saltar sin arrancar un fundido propio — eso es el "tirón".
+    // FIX: en vez de tocar esa arquitectura de fundido (riesgo alto), se
+    // amortigua la luz derivada específicamente: se apaga al instante en
+    // cuanto el modo cambia (radKey, ver más abajo) y se recupera suave
+    // (~0,6s) una vez que el patrón deja de moverse — la luz derivada solo
+    // vive plena sobre un patrón ya asentado, nunca sobre uno en pleno salto.
+    this._lightGate = [1, 1, 1];
+    // Frecuencia "retenida" por gota, específica para la BÚSQUEDA de modo y
+    // sus amplitudes de detuning (auditoría P7 2026-09-03 — reportado en
+    // vivo: sigue habiendo pestañeos/cambios erráticos en saltos grandes de
+    // frecuencia, se pidió explícitamente que reaccione "como un líquido").
+    // CAUSA raíz encontrada: el modo dominante (m,n) es un ENTERO elegido
+    // por resonancia más cercana a `d.f`; la tabla radial (textura, con el
+    // Bessel J real por modo) se reconstruye de a tramos en varios cuadros
+    // ("por tramos... para no congelar el render"), y CUALQUIER cambio de
+    // modo a mitad de esa construcción la ABORTA y arranca de cero — pero
+    // uM[]/uJ[] (subidos al shader cada cuadro) siguen la BÚSQUEDA EN VIVO,
+    // no la textura ya construida. En un salto grande, `d.f` (ya suavizado
+    // por pBase, τ=1,5s) igual atraviesa varios límites de resonancia más
+    // rápido de lo que la textura tarda en reconstruirse (~130ms) — cada
+    // cruce reinicia la construcción, así que uM/uJ terminan describiendo un
+    // modo que la textura todavía no tiene: ángulo y radio desincronizados,
+    // que es justo la "forma errática" reportada, no un simple parpadeo.
+    // FIX: una SEGUNDA capa de suavizado (más lenta, τ≈1s), aplicada nada
+    // más que a la frecuencia que alimenta la búsqueda de modo/amplitudes —
+    // no a pBase en sí, que sigue afinando el resto con su propio ritmo. El
+    // modo no puede moverse más rápido de lo que la textura puede seguirle
+    // el paso, y el resultado es continuo (EMA, no una espera-y-salta): se
+    // siente como líquido asentándose, no como un interruptor.
+    this._heldF = [null, null, null];
+    // Modo (m, n) actualmente ASENTADO por gota (fix "sigue dando saltos",
+    // 2026-09-03) — NO leer esto de `buf.radM`/`radN`: `_ensureDrop` los
+    // resetea a null cada vez que cambia la resolución del búfer (`resD`, que
+    // se recalcula cada fotograma vía `_resMul` y puede driftear en pleno
+    // cambio de frecuencia, justo cuando construir la tabla nueva es más
+    // probable que mueva el frame time). Este campo se actualiza SOLO cuando
+    // una construcción termina de comprometerse (ver más abajo, junto a
+    // `buf.radK = pend.key`), nunca en `_ensureDrop`, así sobrevive a
+    // cambios de resolución y sigue sirviendo de punto de partida real para
+    // `modeStepToward`.
+    this._curMode = [null, null, null];
+    // FEATURE (2026-09-08, "hagamos que se interpole" — pedido explícito
+    // tras "va bien y luego salta"/"también salta al solo reproducir un
+    // preset"): cuando el salto real de modo es grande, en vez de ir directo
+    // del modo viejo al nuevo en un solo fundido, se pasa por 1-3 resonancias
+    // REALES intermedias en el camino (ver `_computeModeWaypoints` más abajo)
+    // — cada una es un modo (m,n) físico de verdad, con sus propios pétalos y
+    // anillos, no una interpolación matemática inventada de la geometría.
+    // Cola de espera por gota: cuando no está vacía, el siguiente ciclo de
+    // fundido saca el próximo waypoint en vez de volver a buscar desde cero.
+    this._waypointQueue = [[], [], []];
     // Energía de la vibración (0..1): sube cuando suena y decae cuando no,
     // modelando la constante de tiempo con que el agua real responde a la
     // excitación y se calma al cortarla. El patrón de Faraday solo emerge
     // por encima del umbral de aceleración, como en un experimento real.
     this._energy = 0;
     this._lastT = 0;
+    // Volumen suavizado (Parte B, auditoría 2026-09-08): el volumen real
+    // entraba como multiplicador instantáneo de ampPattern (auditoría
+    // 2026-08-29) — un salto 0%→100% se reflejaba en el mismo fotograma. Ver
+    // su uso más abajo (render()): relaja con el mismo modelo de
+    // amortiguación que el resto del plato (τ = 1/γ(f), tiempo REAL, sin
+    // SLOWMO_K — no envuelve ninguna oscilación visible que necesite
+    // acompañar la cámara lenta), no un τ inventado aparte. null hasta el
+    // primer fotograma (arranca en el volumen real, sin salto desde 0).
+    this._volState = null;
     // Fase de precesión integrada por modo (3 gotas × 9 modos rotables):
     // cada modo acumula su propia fase angular integrando su velocidad cada
     // fotograma — la precesión es lenta, decorrelada entre modos y puede
@@ -763,11 +856,29 @@ export class CymaticsRenderer {
     // -------------------------------------------------------------------------
     // PHASE 3: Render Mode
     // 'cinematic'  — Full artistic rendering (all layers: grain, harmonic mD,
-    //                evo() modulation, rotation, color palette). Default.
+    //                evo() modulation, rotation, ripples, shimmer, color
+    //                palette). Default.
     // 'scientific' — Only physically-derived layers (Bessel eigenmodes, modal
     //                pattern with detuning). No grain, no mD harmonics, no
-    //                arbitrary evo() modulation. Colors are monochrome.
-    //                Use to validate the physical model independently.
+    //                evo() modulation, no rotation/precession (rotSpeed()
+    //                returns 0), no radial ripple waves (ripAmp/ripTravel/
+    //                ripIn/ripCol), no shimmer (shim*). Colors are
+    //                monochrome. FIX (auditoría 2026-09-08): before this
+    //                fix, ampDom/ampS1/ampS2 had their own breathing sines
+    //                OUTSIDE evo() that weren't gated, and rotSpeed()/rip*/
+    //                shim* ran unconditionally in every mode — 'scientific'
+    //                looked scientific but still moved/rippled/shimmered
+    //                artistically. All of those are now gated here too, so
+    //                this mode is safe to use for validating the physical
+    //                model independently (a static frame is expected: real
+    //                Faraday precession is far too slow to see live anyway,
+    //                see rotSpeed()'s own comment).
+    //                Remaining known gap: `coherence`/`velocity`/`complexity`
+    //                still modulate amplitudes/lighting even in this mode —
+    //                those come from the neural model, not from cymatics
+    //                heuristics, and are out of scope for this fix (see
+    //                NeuralToVisualMapper's own VISUAL/'visual metaphor'
+    //                labeling in docs/scientific-model.md).
     // -------------------------------------------------------------------------
     this._renderMode = 'cinematic';
   }
@@ -828,6 +939,8 @@ export class CymaticsRenderer {
     d.rip = new Float32Array(res * res * 4);
     d.ripK = -1;
     d.radK = -1;
+    d.radM = null;
+    d.radN = null;
     d.pending = null;
   }
 
@@ -861,22 +974,23 @@ export class CymaticsRenderer {
   _uploadDropGL(i, pend) {
     const gd = this._glDrops[i];
     if (!this._gl || !gd) return;
-    const gl = this._gl.gl;
     const res = pend.res;
-    if (this._glRes !== res) {
-      this._glRes = res;
-      this._gl.canvas.width = res * 3;
-      this._gl.canvas.height = res;
-      gl.viewport(0, 0, res * 3, res);
-      for (const g of this._glDrops) {
-        this._deleteTex(g.texA);
-        this._deleteTex(g.texB);
-        this._deleteTex(g.texC);
-        g.texA = null;
-        g.texB = null;
-        g.texC = null;
-      }
-    }
+    // FIX (2026-09-12, "apagón" tras varios cambios de frecuencia rápidos):
+    // el lienzo GL compartido (tamaño, viewport) y la liberación de
+    // fundidos en curso ahora se resuelven ANTES de este punto, una sola
+    // vez por fotograma, apenas se conoce el `glResAll` de ESE fotograma
+    // (ver render(), justo después de calcularlo) — no acá, atado a que
+    // justo ESTA gota termine su construcción por tramos. Antes, si ninguna
+    // gota llegaba a terminar antes de que `glResAll` volviera a crecer
+    // (típico arrastrando el slider rápido), el lienzo real quedaba más
+    // chico que el `resD` que el loop de dibujo ya estaba usando para el
+    // viewport — recortando la mitad inferior de cada gota. `res` (de
+    // `pend.res`, la resolución que tenía `glResAll` cuando ESTA gota
+    // arrancó su construcción) puede ya no ser la MÁS reciente para cuando
+    // termina — no importa: el shader arma la UV con `uRes` normalizado, así
+    // que subir una textura a una resolución distinta de la actual del
+    // lienzo se sigue viendo bien (ligeramente distinta densidad interna,
+    // nunca corrupto).
     const packed = packGL(pend.rad, res);
     // La textura A lleva la J0 del MODO (argScale cambia con m, n), así que
     // también se re-suben por modo, no solo por resolución: antes solo se
@@ -900,6 +1014,72 @@ export class CymaticsRenderer {
     }
     gd.texB = this._makeTex(res, packed[1]);
     gd.texC = this._makeTex(res, packed[2]);
+  }
+
+  // FEATURE (2026-09-08, "hagamos que se interpole"): calcula el camino de
+  // resonancias REALES entre el modo viejo y el nuevo, muestreando la
+  // frecuencia resonante a pasos regulares entre fCenter(viejo) y
+  // fCenter(nuevo) y buscando el modo físico más cercano en cada paso —
+  // exactamente lo mismo que hace la búsqueda normal (`selectModeWithFallback`),
+  // solo que evaluada en varios puntos intermedios en vez de uno solo. Cada
+  // punto del camino es un modo (m,n) real y completo — la gota lo va a
+  // renderizar con SUS propios pétalos y anillos reales, no una geometría
+  // interpolada a mano. Los pasos duplicados/consecutivos-iguales se
+  // descartan (ver dedupe abajo) y el objetivo final siempre queda como
+  // último elemento, así el camino termina exactamente donde ya terminaba
+  // antes de este feature.
+  _computeModeWaypoints(mOld, nOld, mNew, nNew) {
+    const fOld = modeOmega(mOld, nOld, PHYS_A) / Math.PI;
+    const fNew = modeOmega(mNew, nNew, PHYS_A) / Math.PI;
+    // FIX (2026-09-12, "es demasiado grande el cambio" — confirmado tras el
+    // fix de arriba: el camino ya no salta de pétalos al azar, pero para un
+    // salto grande (ej. 190→963 Hz) igual pasaba por 3-4 paradas reales
+    // distintas a lo largo de ~30s — aunque cada una progresa bien, ver
+    // TANTOS cambios de forma seguidos se sigue sintiendo como "demasiado".
+    // Bajado de 3 a 1 punto intermedio muestreado: como mucho una resonancia
+    // real en el medio además del destino final (2 tramos en vez de hasta
+    // 4), y la duración total baja de ~30s a ~18-24s en los saltos más
+    // extremos — se lee como UNA reorganización grande en vez de una
+    // cadena de cambios. El acotado a m∈[mOld,mNew] de arriba sigue
+    // aplicando igual: un tramo más grande en n (más anillos de una vez)
+    // se ve como crecimiento suave, no como cambio de forma, mientras m no
+    // se salga del rango.
+    const STEPS = 1; // puntos intermedios muestreados
+    // FIX (2026-09-12, "cambia entre formas erráticamente" — reportado en
+    // una transición real, ej. 190→963 Hz): antes cada punto intermedio
+    // buscaba el modo m∈[2,6] (o el fallback m∈[0,1]) más afinado a esa
+    // frecuencia SIN mirar qué tan lejos quedaba m del rango [mOld,mNew] —
+    // la densidad de resonancias no es uniforme, así que el más afinado en
+    // una frecuencia intermedia podía tener un m totalmente distinto al de
+    // ambos extremos (medido: 190→963 Hz pasaba por m=5 y m=1 en el medio,
+    // aunque el viejo y el nuevo modo eran m=3 y m=2 — la cantidad de
+    // pétalos subía y bajaba de golpe en vez de progresar). Esto SIEMPRE
+    // estuvo así (no es una regresión de esta sesión) — quedaba parcialmente
+    // tapado mientras el fundido se cortaba antes de tiempo (ver el fix de
+    // "sigue pasando en ciertos puntos de la transición" un poco más
+    // arriba en el archivo); al dejar que el fundido corra completo, cada
+    // parada del camino se ve entera, incluida esta. Acotar la búsqueda de
+    // cada parada intermedia a m∈[mLo,mHi] (el rango que YA cubren los dos
+    // extremos reales) impide que un punto intermedio "se escape" a un m
+    // fuera de ese rango — el número de anillos (n) sigue variando libre
+    // para cubrir la distancia real en frecuencia, que es lo que se lee
+    // como progresión suave en vez de salto de pétalos.
+    const mLo = Math.min(mOld, mNew);
+    const mHi = Math.max(mOld, mNew);
+    const waypoints = [];
+    let last = { m: mOld, n: nOld };
+    for (let k = 1; k <= STEPS; k++) {
+      const fMid = fOld + (fNew - fOld) * (k / (STEPS + 1));
+      const found = selectModeWithFallback(Math.PI * Math.max(1, fMid), PHYS_A, fMid, { mMin: mLo, mMax: mHi });
+      if (found.m !== last.m || found.n !== last.n) {
+        waypoints.push({ m: found.m, n: found.n });
+        last = { m: found.m, n: found.n };
+      }
+    }
+    if (!waypoints.length || last.m !== mNew || last.n !== nNew) {
+      waypoints.push({ m: mNew, n: nNew });
+    }
+    return waypoints;
   }
 
   // Libera las texturas de la flor anterior al terminar una transición.
@@ -926,7 +1106,7 @@ export class CymaticsRenderer {
    *   pulse: 0..1, fase del latido real (1 = justo en el pulso)
    */
   render(ctx, w, h, params) {
-    const { base = 220, beat = 6, pulse = 0.5, colors, playing = true, condition = 'binaural' } = params;
+    const { base = 220, beat = 6, pulse = 0.5, colors, playing = true, condition = 'binaural', volume = 0.6, wave = 'sine' } = params;
     // Condiciones con batido real (binaural/AM): la placa respira con el
     // latido. Las demás (tono puro, ruido, silencio) respiran a ritmo natural.
     const rhythmicCond = () => condition === 'binaural' || condition === 'amplitude-modulation';
@@ -945,6 +1125,28 @@ export class CymaticsRenderer {
     if (this._lastT === 0) this._lastT = t;
     const dt = Math.min(0.1, t - this._lastT);
     this._lastT = t;
+
+    // FIX (2026-09-08, "que la transición sea real" — apagón inicial
+    // reportado y grabado en vivo: el patrón aparece, casi se apaga y
+    // reaparece con otra forma en los primeros ~10s, SIN que el usuario
+    // haya tocado nada). Causa raíz: `_physicsState.baseFrequency` (de
+    // donde sale `pBase`, que alimenta `d.f` → `_dropF` → `_heldF` → la
+    // búsqueda de modo) arrancaba SIEMPRE en 220 Hz fijo en el constructor,
+    // sin importar la frecuencia real seleccionada — cada carga de página
+    // tenía que ATRAVESAR ese hueco (220→190, 220→963, lo que sea) a
+    // través de TRES filtros EMA encadenados (baseFrequency 1,5s → _dropF
+    // 1,5s → _heldF 1s), cruzando de paso 1-3 límites de resonancia reales
+    // en el camino — cada cruce reconstruía el patrón desde cero, y eso es
+    // el "apagón y reaparición con otra forma" grabado, no una transición
+    // real. Mismo criterio que `_heldF` (que sí ya arrancaba "caliente",
+    // ver su comentario en el constructor): en el primer fotograma,
+    // `physicsState`/`physicsTarget`.baseFrequency arrancan directo en la
+    // frecuencia REAL en vez de gatear un viaje artificial desde 220.
+    if (!this._physicsWarm) {
+      this._physicsWarm = true;
+      this._physicsState.baseFrequency = base;
+      this._physicsTarget.baseFrequency = base;
+    }
 
     // SILENCE control: no hay estímulo → la placa no se excita (agua en
     // calma). Las demás condiciones mantienen la energía de vibración.
@@ -976,9 +1178,26 @@ export class CymaticsRenderer {
         none:                   { coherence: 0.5, velocity: 0.2, complexity: 0.3 },
       };
       const ct = CT[condition] || CT.binaural;
-      this._physicsTarget.coherence     = ct.coherence;
-      this._physicsTarget.velocity      = ct.velocity;
-      this._physicsTarget.complexity    = ct.complexity;
+      // FIX (auditoría 2026-08-29): antes esto pisaba _physicsTarget con
+      // CT[condition] a secas, descartando lo que updatePhysicsState() acaba
+      // de escribir desde el modelo neuronal real (NeuralToVisualMapper) —
+      // el "acople neuronal" documentado era código muerto mientras sonaba.
+      // Ahora CT[condition] es el ANCLA de régimen (qué tan coherente/rápida/
+      // compleja es la placa para ESTA condición experimental) y el modelo
+      // neuronal real modula alrededor de esa ancla según cuánto se desvíe
+      // del reposo neutro (0.5) — arousal/relajación/fatiga sí cambian
+      // visiblemente coherencia/velocidad/complejidad en vivo, sin que dejen
+      // de reconocerse las condiciones (binaural sigue siendo más ordenado
+      // que ruido, etc.), porque la desviación se aplica sobre el ancla, no
+      // en lugar de ella.
+      const NEUTRAL = 0.5;
+      const NEURAL_INFLUENCE = 0.5;
+      const nCoherence  = this._physicsTarget.coherence;
+      const nVelocity   = this._physicsTarget.velocity;
+      const nComplexity = this._physicsTarget.complexity;
+      this._physicsTarget.coherence     = clamp01(ct.coherence  + (nCoherence  - NEUTRAL) * NEURAL_INFLUENCE);
+      this._physicsTarget.velocity      = clamp01(ct.velocity   + (nVelocity   - NEUTRAL) * NEURAL_INFLUENCE);
+      this._physicsTarget.complexity    = clamp01(ct.complexity + (nComplexity - NEUTRAL) * NEURAL_INFLUENCE);
       this._physicsTarget.baseFrequency = base;
       this._physicsState.coherence     += (this._physicsTarget.coherence     - this._physicsState.coherence)     * emaK;
       this._physicsState.velocity      += (this._physicsTarget.velocity      - this._physicsState.velocity)      * emaK;
@@ -997,6 +1216,8 @@ export class CymaticsRenderer {
     const coherence = this._physicsState.coherence;
     const velocity  = this._physicsState.velocity;
     const pBase     = this._physicsState.baseFrequency;
+    // Blanco de cresta templado por la frecuencia real (ver crestColorFor).
+    const crestColor = crestColorFor(pBase);
 
     // Transición suave 0.18..0.85 (el reposo 0.38 queda a ~22% de amplitud).
     let pat;
@@ -1011,6 +1232,28 @@ export class CymaticsRenderer {
       const pe = playing ? pulse : 0.5;
       ampPattern *= 0.55 + 0.45 * (0.5 + 0.5 * Math.cos(TWO_PI * pe));
     }
+    // Volumen real → intensidad visible del patrón (auditoría 2026-08-29):
+    // antes subir/bajar el volumen no cambiaba nada en cimática. No se lleva
+    // a 0 total en volumen mínimo (0.35 de piso) porque esto es una
+    // visualización, no un medidor de nivel — a volumen bajo la flor sigue
+    // reconocible, solo más tenue.
+    // FIX (Parte B): era un multiplicador instantáneo — un salto 0%→100% de
+    // volumen se reflejaba en el mismo fotograma en la amplitud del campo.
+    // Relaja con τ = 1/γ(pBase): el MISMO modelo de amortiguación que el
+    // resto del sistema (gammaAt), sin ningún factor de cámara lenta —
+    // SLOWMO_K existe para que la envolvente de un modo acompañe su propia
+    // oscilación mostrada en cámara lenta (así no se rompe su Q, ver la nota
+    // de SLOWMO_K en plate-field.js); el volumen no envuelve ninguna
+    // oscilación visible, es un multiplicador escalar puro, así que su
+    // inercia es en tiempo REAL (~0,04-0,17 s según banda) — deja de ser un
+    // salto instantáneo sin introducir un retraso perceptible de UI. Mismo
+    // criterio que el fundido cruzado de modo (MORPH_BLEND_K, ver arriba y
+    // la nota de "colisionador de frecuencias" junto a tauOld/tauNew): ese
+    // fundido tampoco envuelve una oscilación, así que tampoco lleva SLOWMO_K.
+    const volTarget = clamp01(volume);
+    if (this._volState == null) this._volState = volTarget;
+    else this._volState += (volTarget - this._volState) * (1 - Math.exp(-dt / (1 / gammaAt(pBase))));
+    ampPattern *= 0.35 + 0.65 * this._volState;
     const alive = 0.12 + 0.88 * env * env;
     const pulseEff = playing ? pulse : 0.5;
     const gain = 0.08 + 0.04 * ampPattern;
@@ -1040,24 +1283,19 @@ export class CymaticsRenderer {
     // maps it to the nearest physical eigenmode. These are distinct quantities.
     // En PURE TONE no hay batido: la gota central se afina a la resonancia
     // de la propia portadora — el plato vibra en un único modo estacionario.
-    const ws_beat = Math.PI * Math.max(1, rhythmicCond() ? beat : base); // sub-harmonic of beat
-    let bestD_beat = Infinity;
-    let m_beat = 2, n_beat = 1;
-    for (let mm = 2; mm <= 6; mm++) {
-      for (let n2 = 1; n2 <= 6; n2++) {
-        const w = modeOmega(mm, n2, PHYS_A);
-        const dd = Math.abs(w - ws_beat);
-        if (dd < bestD_beat) { bestD_beat = dd; m_beat = mm; n_beat = n2; }
-      }
-    }
-    // The center drop's "frequency" is set to the resonant frequency of the
-    // nearest eigenmode (ω_res / π → f_res), NOT the beat frequency itself.
-    // This correctly represents a physically resonant mode near the stimulus.
-    const ws_res_beat = modeOmega(m_beat, n_beat, PHYS_A);
-    const f_center = ws_res_beat / Math.PI; // resonant frequency (Hz) of the mode
+    // FIX (auditoría 2026-09-08, Parte A): este mapeo beat→autovalor
+    // (antes inline acá) es exactamente la misma búsqueda de modo que el
+    // bucle "PHASE 8" de más abajo, solo con nMax=6 en vez de
+    // MAX_RADIAL_MODE. Extraído a core/plate-field.js:resonantModeForBeat()
+    // — misma fórmula, mismo resultado, una sola implementación.
+    const beatMode = resonantModeForBeat(rhythmicCond() ? beat : base, PHYS_A);
+    const m_beat = beatMode.m;
+    const n_beat = beatMode.n;
+    const ws_res_beat = beatMode.omega;
+    const f_center = beatMode.fCenter; // resonant frequency (Hz) of the mode
 
     // Store dominant mode for HUD display
-    this._physicsState.dominantMode = { m: m_beat, n: n_beat, omega: ws_res_beat, detuning: ws_res_beat - ws_beat };
+    this._physicsState.dominantMode = { m: m_beat, n: n_beat, omega: ws_res_beat, detuning: beatMode.detuning };
 
     const dropR = R * 0.27;
     const step = dropR * 2.2;
@@ -1083,7 +1321,15 @@ export class CymaticsRenderer {
     // se afinan GRADUALMENTE con la misma EMA (τ = 1,5 s) que el resto de la
     // física — los modos dominantes se reorganizan poco a poco, sin que el
     // patrón salte de golpe. El ruido conserva su vaivén sobre el valor suave.
-    if (!this._dropF) this._dropF = [pBase, pBase, pBase];
+    // FIX (2026-09-08, "que la transición sea real"): igual que
+    // physicsState.baseFrequency más arriba — arrancar en `pBase` para las
+    // tres gotas por igual era otro hueco artificial, en particular para la
+    // gota del latido (drops[1]): su objetivo real es `f_center` (el modo
+    // resonante del LATIDO, típicamente muy distinto de `pBase`, la
+    // portadora), así que arrancaba con el mismo problema — un viaje falso
+    // desde `pBase` hasta `f_center` cruzando modos que no son el natural
+    // de esa gota. Cada gota arranca ahora en SU propio objetivo real.
+    if (!this._dropF) this._dropF = [drops[0].f, drops[1].f, drops[2].f];
     for (let i = 0; i < 3; i++) {
       this._dropF[i] += (drops[i].f - this._dropF[i]) * emaK;
       drops[i].f = Math.max(0.5, this._dropF[i]);
@@ -1099,16 +1345,17 @@ export class CymaticsRenderer {
     // VISUALIZATION MODEL (not physical): evo() is an artistic amplitude
     // oscillation with no physical derivation. In real cymatics, modal
     // amplitudes are determined by excitation power and damping quality factor Q,
-    // not arbitrary sinusoidal envelopes. This function is kept because it
-    // produces a visually compelling, dynamic pattern that suggests modal
-    // coupling without claiming to simulate it. It is labeled here explicitly.
-    // PHASE 3: disabled entirely in Scientific Mode.
-    const evo = sciMode
-      ? (_period, _phase) => 1 // PHYSICAL ONLY: no artistic amplitude modulation
-      : (period, phase) =>
-          1 +
-          0.42 * Math.sin((TWO_PI * t) / period + phase) +
-          0.18 * Math.sin((TWO_PI * t) / (period * 0.14) + phase * 1.7);
+    // not arbitrary sinusoidal envelopes.
+    // FIX (2026-09-08, "es inestable" — el patrón nunca quedaba quieto en
+    // reposo): esto solo se apagaba en sciMode ("PHASE 3: disabled entirely
+    // in Scientific Mode"); en el modo cinematográfico normal seguía
+    // oscilando el peso de CADA capa armónica ±42% en ciclos de minutos MÁS
+    // ±18% en ciclos de ~30s, indefinidamente, aunque la frecuencia
+    // estuviera perfectamente fija — eso es lo que se leía como "sigue
+    // cambiando de forma solo". El usuario pidió expresamente que el
+    // patrón quede quieto salvo cuando la frecuencia/latido REAL cambian.
+    // Se aplica ahora la misma rama neutral que ya usaba sciMode, siempre.
+    const evo = (_period, _phase) => 1; // PHYSICAL ONLY: no artistic amplitude modulation
 
     // Física por gota: cada gota se afina al modo angular (m, n) cuya
     // resonancia cae más cerca de la excitación ω_s = π·f, como se afina un
@@ -1173,82 +1420,183 @@ export class CymaticsRenderer {
     const ampBeat = new Array(n);
     const rotBeat = new Array(n);
     const phaseBeat = new Array(n);
-    // Precesión NATURAL del patrón (no un giro de reloj): en cimática real
-    // la flor casi no rota — se desliza despacio y con vaivén, como el
-    // batido entre los modos degenerados ±m de una cuenca ligeramente
-    // desafiinada. La dirección la da el signo del desafiño δ de cada gota,
-    // la magnitud crece con |δ| (un plato justo en resonancia sostiene el
-    // patrón casi quieto; desafiinado, deriva) y responde al latido que se
-    // oye: los estados de sueño quedan casi inmóviles y gamma se mueve apenas
-    // más vivo. Dos ondas lentas incommensurables hacen que el patrón frene,
-    // acelere y a veces invierta el sentido — nunca un giro uniforme.
-    // beatFactor: modulates precession speed using the binaural beat (stimulus)
-    // and neural velocity (model). This is a visual metaphor — faster beats
-    // → slightly livelier rotation — but is not a derived physical quantity.
-    // The factor 1/8 provides approximate normalization over typical beat ranges.
-    const beatFactor = Math.max(0.55, Math.min(1.45, beat / 8)) * (0.5 + velocity);
-    // Velocidad angular instantánea de un modo (rad/s). La precesión real de
-    // Faraday es lentísima (una vuelta cada ~10-25 min) y la dirección NO es
-    // fija: la deriva cruza por cero y el patrón a veces invierte el sentido.
-    // El desafiño solo matiza la magnitud; la semilla de fase distinta por
-    // modo decorrela el giro de cada capa (no giran en bloque).
-    const rotSpeed = (delta, phase) => {
-      const detune = 0.6 + Math.min(0.8, Math.abs(delta) / 80);
-      const wander =
-        Math.sin(TWO_PI * 0.011 * t + phase) +
-        0.55 * Math.sin(TWO_PI * 0.017 * t + phase * 2.3) +
-        0.3 * Math.sin(TWO_PI * 0.031 * t + phase * 5.1);
-      return 0.014 * beatFactor * detune * (0.5 + 0.75 * wander) * (0.2 + velocity * 1.5);
-    };
+    // FIX (2026-09-08, "es inestable" — el patrón nunca quedaba quieto en
+    // reposo): esto era una precesión continua del patrón (velocidad ∝ al
+    // desafiño δ de cada gota, modulada por `beatFactor`/una heurística
+    // `wander` de tres senos incommensurables) que antes solo se apagaba en
+    // sciMode — en modo cinematográfico seguía girando el patrón
+    // indefinidamente, sumado a evo()/las respiraciones sueltas de más
+    // arriba, parte de lo reportado como "sigue cambiando solo". Ahora
+    // devuelve 0 siempre — patrón sin precesión salvo que la frecuencia/
+    // latido real cambien.
+    const rotSpeed = () => 0;
+    // Forma de onda real → peso de las capas de detalle mandala (auditoría
+    // 2026-08-29): antes cambiar sine↔square no cambiaba nada visualmente.
+    // Una cuadrada/sierra tiene más armónicos reales que una senoidal, así
+    // que refuerza más la filigrana interna (mD1..mD5); senoidal es la base
+    // (1, sin cambio de comportamiento previo).
+    const WAVE_RICHNESS = { sine: 1, triangle: 1.15, square: 1.4, sawtooth: 1.45 };
+    const waveRichness = WAVE_RICHNESS[wave] || 1;
     for (let i = 0; i < n; i++) {
       const d = drops[i];
-      const ws = Math.PI * d.f; // ω_s = π·f (respuesta subarmónica)
+      // Ver _heldF en el constructor: la búsqueda de modo y sus amplitudes
+      // de detuning usan esta versión con inercia extra de d.f, NUNCA d.f
+      // crudo — así el modo no puede saltar más rápido de lo que la textura
+      // puede reconstruirse.
+      if (this._heldF[i] == null) this._heldF[i] = d.f;
+      else this._heldF[i] += (d.f - this._heldF[i]) * (1 - Math.exp(-dt / 1.0));
+      const df = this._heldF[i];
+      const ws = Math.PI * df; // ω_s = π·f (respuesta subarmónica)
       let m = 2;
       let nn = 1;
       let delta = 0;
-      if (i === 1) {
+      // CANDADO de modo (fix estructural 2026-09-03 — el _heldF de arriba
+      // solo retrasa la búsqueda, no la detiene: en un salto grande `df`
+      // sigue cruzando varios límites de resonancia MIENTRAS la tabla
+      // radial del modo anterior todavía se construye por tramos, así que
+      // uM[]/uJ[] (que siguen la búsqueda EN VIVO) terminan describiendo un
+      // modo que la textura ya construida no tiene — de ahí el parpadeo/
+      // desaparición reportados, no un simple salto. FIX real: mientras haya
+      // una construcción sin terminar (buf.pending) O un fundido cruzado en
+      // curso (this._morph, ~7s) para esta gota, no perseguir un nuevo
+      // objetivo — usar el MISMO modo ya construido/en construcción para
+      // todo (radKey, amplitudes, uniformes). Recién cuando la tabla termina
+      // Y el fundido anterior también asentó se vuelve a buscar el modo más
+      // cercano al `df` de ESE momento. Así cada transición es una sola,
+      // completa, en serie con la anterior, y nunca se pisan dos a la vez
+      // (que era la otra fuente del mismo desajuste: un segundo objetivo
+      // podía empezar a construirse mientras el fundido del primero todavía
+      // no terminaba de asentarse) — el patrón se transforma de a un modo
+      // por vez, como líquido, en vez de perseguir un objetivo que nunca
+      // alcanza.
+      const bufI = this._drops[i];
+      // FIX (Parte B): reemplaza el fundido de duración fija (`.b`, 1→0 en
+      // ~7s) por relajación exponencial independiente por peso — ya no hay
+      // un final duro, así que "sigue en transición" se mide por lo mismo
+      // que ya usa el shader para decidir si la rama vieja aporta algo
+      // (uOldW > 0.02, ver GL_FS más abajo), no por un contador de progreso.
+      const morphingI = this._morph[i] && this._morph[i].oldW > 0.02;
+      const lockSrc = bufI && (bufI.pending || (morphingI && bufI.radM != null)) ? (bufI.pending || bufI) : null;
+      if (lockSrc) {
+        m = lockSrc.mDom != null ? lockSrc.mDom : lockSrc.radM;
+        nn = lockSrc.nDom != null ? lockSrc.nDom : lockSrc.radN;
+        delta = modeOmega(m, nn, PHYS_A) - ws;
+      } else if (i === 1) {
         // Gota del latido: pétalos ∝ frecuencia del latido (2 a 5) y un
-        // par de anillos extra para que se lea como un pequeño mandala.
-        m = Math.min(5, Math.max(2, 1 + Math.floor(d.f / 8)));
-        nn = Math.min(6, ringsFor(d.f) + 2);
+        // par de anillos extra para que se lea como un pequeño mandala. No
+        // elige modo por búsqueda de ω (no hay "escalera" de la cual dar un
+        // paso) — la fórmula es directa.
+        // FIX (2026-09-08, "no es estable" / colisionador de frecuencias):
+        // esto daba UN paso de ±1 en m y ±1 en nn por ciclo de transición en
+        // vez de ir directo a (mTarget, nTarget) — ver la misma nota, mucho
+        // más detallada, junto al fix equivalente de la rama de abajo
+        // (antes con `modeStepToward`). Mismo defecto aquí: con el candado
+        // de modo (lockSrc arriba) sirviendo UN paso por ciclo completo de
+        // fundido (no por fotograma), un objetivo a varios pasos de
+        // distancia encadenaba una transición tras otra — el patrón nunca
+        // paraba de cambiar. Sin motivo para seguir troceando el salto: el
+        // fundido cruzado de la Parte B ya relaja la flor vieja y la nueva
+        // de forma INDEPENDIENTE (no un cross-dissolve de pesos
+        // complementarios), así que ir directo al objetivo no produce el
+        // "salto brusco entre dos flores muy distintas" que el paso a paso
+        // evitaba originalmente (ver la nota de Parte B en
+        // core/plate-field.js, junto a `modeStepToward`, que ya señalaba
+        // esto como código potencialmente en desuso).
+        m = Math.min(5, Math.max(2, 1 + Math.floor(df / 8)));
+        nn = Math.min(6, ringsFor(df) + 2);
         delta = modeOmega(m, nn, PHYS_A) - ws;
       } else {
-        // PHASE 8: Improved mode selection for carrier drops.
-        // Primary search: angular modes m ∈ [2, 6] that produce the petal
-        // (flower) patterns characteristic of Faraday waves.
-        // Fallback: if the best m≥2 mode is detuned by more than 2·Γ(f),
-        // extend the search to m=0 (concentric rings) and m=1 (one-arm
-        // spiral). These are physical Bessel modes that appear in real cymatics
-        // at very low excitation frequencies where no m≥2 mode is near resonance.
-        let bestD = Infinity;
-        for (let mm = 2; mm <= 6; mm++) {
-          for (let n2 = 1; n2 <= 10; n2++) {
-            const ww = modeOmega(mm, n2, PHYS_A);
-            const dd = Math.abs(ww - ws);
-            if (dd < bestD) {
-              bestD = dd;
-              m = mm;
-              nn = n2;
-              delta = ww - ws;
-            }
+        // PHASE 8: Improved mode selection for carrier drops. Primary
+        // search: angular modes m ∈ [2, 6] que producen los pétalos
+        // característicos de Faraday. Fallback: si el mejor modo m≥2 queda
+        // desafinado más de 2·Γ(f), extiende a m=0 (anillos concéntricos) y
+        // m=1 (espiral de un brazo) — modos de Bessel físicos reales que
+        // aparecen en cimática real a frecuencias muy bajas.
+        // FIX (auditoría 2026-09-08, Parte A — "una sola cimática, dos
+        // cámaras"): este bucle (y el de FIX P1 más abajo, y el que usaba
+        // modeStepToward) reimplementaban la MISMA búsqueda de modo tres
+        // veces en este archivo. Extraído a
+        // core/plate-field.js:selectModeWithFallback() — una sola
+        // implementación que además usarán la vista 3D (Parte D) y el
+        // validador cruzado FDTD↔modal (Parte E). Comportamiento idéntico
+        // (incluido el MAX_RADIAL_MODE de la auditoría anterior sobre 963 Hz
+        // — ver el comentario en plate-field.js).
+        const found = selectModeWithFallback(ws, PHYS_A, df);
+        // FEATURE (2026-09-08, "hagamos que se interpole" — pedido tras "va
+        // bien y luego salta"/"también salta al solo reproducir un
+        // preset"): si ya hay un camino de resonancias en cola para esta
+        // gota (armado la vez anterior que se detectó un salto grande), el
+        // siguiente ciclo de fundido saca el PRÓXIMO waypoint en vez de
+        // volver a buscar desde cero — así el patrón pasa de verdad por
+        // cada resonancia real en el camino, una transición completa por
+        // waypoint, en vez de un solo salto grande entre el modo viejo y el
+        // final. Si la cola está vacía Y el objetivo recién encontrado está
+        // lejos del modo asentado, se arma el camino ahora (ver
+        // `_computeModeWaypoints`) y se consume el primer paso ya mismo.
+        const curI = this._curMode[i];
+        // FIX (2026-09-12, "al poner una frecuencia sola... se volvió
+        // errática" — cambia de forma sola bastante después de haber
+        // dejado de tocar nada): la cola de waypoints se drenaba siempre
+        // que tuviera algo, SIN mirar si `found` (el objetivo real para el
+        // `df` de AHORA) seguía siendo el mismo objetivo con el que se armó
+        // la cola. Si el usuario cambiaba de frecuencia otra vez mientras
+        // un barrido anterior todavía estaba a mitad de camino, el código
+        // seguía persiguiendo el objetivo VIEJO y abandonado hasta drenar
+        // toda la cola — recién ahí notaba el objetivo nuevo. Con varios
+        // pasos en cola (cada uno con su propia construcción+fundido, unos
+        // segundos cada uno), eso significa varios cambios de forma
+        // "espontáneos" bastante después de la última interacción real,
+        // persiguiendo una frecuencia que el usuario ya había dejado atrás.
+        // Fix: si el último paso de la cola ya no coincide con `found`, la
+        // cola quedó obsoleta — se descarta y se recalcula fresco contra
+        // el objetivo real de este fotograma.
+        if (this._waypointQueue[i].length) {
+          const last = this._waypointQueue[i][this._waypointQueue[i].length - 1];
+          if (last.m !== found.m || last.n !== found.n) {
+            this._waypointQueue[i] = [];
           }
         }
-        // PHASE 8 fallback: extend to m=0,1 if detuning exceeds 2·Γ.
-        const twoGamma = 2 * gammaAt(d.f);
-        if (bestD > twoGamma) {
-          for (let mm = 0; mm <= 1; mm++) {
-            for (let n2 = 1; n2 <= 10; n2++) {
-              const ww = modeOmega(mm, n2, PHYS_A);
-              const dd = Math.abs(ww - ws);
-              if (dd < bestD) {
-                bestD = dd;
-                m = mm;
-                nn = n2;
-                delta = ww - ws;
-              }
-            }
-          }
+        if (this._waypointQueue[i].length) {
+          const wp = this._waypointQueue[i].shift();
+          m = wp.m;
+          nn = wp.n;
+        } else if (
+          curI &&
+          Math.abs(curI.m - found.m) + Math.abs(curI.n - found.n) >= WAYPOINT_MODE_DIST_MIN
+        ) {
+          const path = this._computeModeWaypoints(curI.m, curI.n, found.m, found.n);
+          const first = path.shift();
+          m = first.m;
+          nn = first.n;
+          this._waypointQueue[i] = path;
+        } else {
+          m = found.m;
+          nn = found.n;
         }
+        delta = modeOmega(m, nn, PHYS_A) - ws;
+        // FIX (2026-09-08, "no es estable" / colisionador de frecuencias):
+        // esto daba UN solo paso hacia el objetivo (`modeStepToward`) en vez
+        // de comprometerlo directo — con una portadora aguda (ej. 963 Hz) el
+        // objetivo real puede estar a n≈17 mientras el modo asentado ronda
+        // n≈6: UN paso por transición completa, con el candado de modo
+        // arriba sirviendo un paso por CICLO (no por fotograma, cada ciclo
+        // dura toda la construcción + el fundido), significaba encadenar
+        // ~10-30 transiciones sucesivas — medido con un harness que
+        // reproduce esta máquina de estados fuera del navegador: para
+        // df=963 nunca convergía en 60s simulados, seguía cambiando de modo
+        // cada ~4s indefinidamente. Ese es el "no es estable"/"sigue
+        // cambiando solo" reportado, no un artefacto del harness. El
+        // step-por-transición era un remanente del sistema de fundido
+        // cruzado ANTERIOR a la Parte B (cross-dissolve de pesos
+        // complementarios, donde saltar directo entre dos flores muy
+        // distintas se leía como un corte) — la propia nota de Parte B junto
+        // a `modeStepToward` en core/plate-field.js ya señalaba que, con la
+        // relajación física independiente (oldW/newW ya no complementarios),
+        // esta función podía haber quedado sin motivo real ("código
+        // potencialmente muerto a revisar"). Confirmado: sin ella, el salto
+        // se ve como una única recomposición (la flor vieja se apaga, la
+        // nueva crece, ambas se superponen durante el fundido) en vez de una
+        // cadena de saltos intermedios que nunca para.
       }
       mDom[i] = m;
       nDom[i] = nn;
@@ -1256,29 +1604,41 @@ export class CymaticsRenderer {
       // concentración) ganan riqueza interna: cuanto menor es m, más peso
       // llevan las capas de detalle mandala (2m/3m/4m…) para que la flor
       // se lea definida y llena, nunca un dibujo escueto y desdibujado.
-      const rich = 1 + (6 - Math.min(6, m)) * 0.15;
+      const rich = (1 + (6 - Math.min(6, m)) * 0.15) * waveRichness;
       // La filigrana responde al latido: en cada pulso el detalle mandala
       // surge (los pétalos se llenan de subestructura) y entre latidos se
       // retira — la ESTRUCTURA varía con el sonido, no solo el brillo.
       // Modulated by coherence: high coherence -> structured pulses, low coherence -> chaotic
-      const detailPulse = (0.55 + 0.9 * pulseEff) * (0.5 + coherence);
+      // FIX (2026-09-12, "sigue titilando"): rango pico/valle bajado de 2.64x
+      // a 1.67x — el detalle sigue surgiendo/retirándose con el latido real
+      // (mismo pulseEff, sin tocar el timing), solo con menos contraste.
+      const detailPulse = (0.75 + 0.5 * pulseEff) * (0.5 + coherence);
       // Anillos de fondo siempre presentes y con peso alto: son los que
       // definen la estructura de los patrones simples, y respiran.
-      amp0[i] = 0.8 * (1 + 0.16 * Math.sin(TWO_PI * 0.17 * t + d.p0 * 1.9)) * coherence;
+      // PHASE 3 (cierre de deuda de sciMode): la respiración senoidal de
+      // abajo es la misma heurística visual que evo() ya apaga en otros
+      // lados — vivía suelta acá, fuera de evo(), y por eso sobrevivía en
+      // modo científico. Gateada igual que el resto.
+      // FIX (2026-09-08, "es inestable"): la respiración senoidal suelta de
+      // acá (fuera de evo(), por eso sobrevivía a su neutralización) ya
+      // estaba gateada a 1 en sciMode; ahora siempre. `coherence` se
+      // conserva — responde al estado real de audio/sesión, no es
+      // vagabundeo artístico inventado.
+      amp0[i] = 0.8 * 1 * coherence;
       // La flor dominante es la protagonista: peso máximo para que el
       // patrón se lea limpio y definido. Las capas de detalle mandala
       // (2m/3m/4m…) quedan como filigrana sutil dentro de los pétalos, sin
       // recargar el conjunto. Su amplitud respira (la flor crece y se
       // encoge) y los vecinos se mueven en contrafase: la forma varía y
       // oscila continuamente, como ondas que chocan y se reorganizan.
-      ampDom[i] =
-        1.0 *
-        evo(240, d.p0 * 1.1) *
-        (1 + 0.24 * Math.sin(TWO_PI * 0.14 * t + d.p0 * 2.4) +
-          0.12 * Math.sin(TWO_PI * 0.33 * t + d.p0 * 5.2));
+      // FIX (2026-09-08, "es inestable"): mismo caso que amp0 — esta
+      // respiración senoidal suelta (fuera de evo(), por eso sobrevivía a
+      // su neutralización) ya estaba gateada a 1 en sciMode; ahora siempre.
+      ampDom[i] = 1.0 * evo(240, d.p0 * 1.1) * 1;
       // Precesión integrada: la fase ya incluye la evolución temporal.
-      // NOISE: precesión turbulenta — las flores se agitan sin rumbo fijo.
-      rotDom[i] = this._rotPhase[i * 9 + 0] + (condition === 'noise' ? 0.35 * Math.sin(t * 11.3 + d.p0 * 3.1) + 0.25 * Math.sin(t * 17.7 + d.p0 * 7.7) : 0);
+      // NOISE: precesión turbulenta — las flores se agitan sin rumbo fijo
+      // (heurística visual, apagada en sciMode igual que rotSpeed()).
+      rotDom[i] = this._rotPhase[i * 9 + 0] + (!sciMode && condition === 'noise' ? 0.35 * Math.sin(t * 11.3 + d.p0 * 3.1) + 0.25 * Math.sin(t * 17.7 + d.p0 * 7.7) : 0);
       phaseDom[i] = d.p0 * 1.3;
       // Modos secundarios: los dos vecinos angulares más cercanos en
       // resonancia (dentro de m±2), con amplitud de Lorentz y suelo mínimo.
@@ -1300,14 +1660,11 @@ export class CymaticsRenderer {
       // pétalos de forma gradual — como cuando el plato real cae entre dos
       // resonancias y el patrón se reorganiza.
       // PHASE 8: Pass drop frequency to lorentz() so Γ is frequency-dependent.
-      ampS1[i] =
-        (0.16 + 0.26 * lorentz(d1, d.f)) *
-        evo(170, d.p0 * 1.6) *
-        (1 + 0.45 * Math.sin(TWO_PI * 0.14 * t + d.p0 * 2.4 + Math.PI)); // contrafase con la flor
-      ampS2[i] =
-        (0.1 + 0.18 * lorentz(d2, d.f)) *
-        evo(300, d.p0 * 2.2) *
-        (1 + 0.35 * Math.sin(TWO_PI * 0.21 * t + d.p0 * 4.6));
+      // FIX (2026-09-08, "es inestable"): mismo caso que ampDom — el factor
+      // de contrafase/respiración vivía fuera de evo(), ya gateado a 1 en
+      // sciMode; ahora siempre.
+      ampS1[i] = (0.16 + 0.26 * lorentz(d1, df)) * evo(170, d.p0 * 1.6) * 1;
+      ampS2[i] = (0.1 + 0.18 * lorentz(d2, df)) * evo(300, d.p0 * 2.2) * 1;
       rotS1[i] = this._rotPhase[i * 9 + 1];
       rotS2[i] = this._rotPhase[i * 9 + 2];
       phaseS1[i] = d.p0 * 1.7;
@@ -1332,7 +1689,7 @@ export class CymaticsRenderer {
         // Capa 2m (el doble de pétalos): filigrana sutil (~¼ del peso de la
         // flor) que dibuja puntas internas sin competir con la flor.
         // PHASE 8: Pass drop frequency to lorentz() for frequency-dependent Γ.
-        ampD1[i] = (0.16 + 0.06 * lorentz(modeOmega(m2, nn, PHYS_A) - ws, d.f)) * evo(200, d.p0 * 2.7) * rich * detailPulse;
+        ampD1[i] = (0.16 + 0.06 * lorentz(modeOmega(m2, nn, PHYS_A) - ws, df)) * evo(200, d.p0 * 2.7) * rich * detailPulse;
         rotD1[i] = this._rotPhase[i * 9 + 3];
         phaseD1[i] = d.p0 * 2.6 + 0.5;
       } else {
@@ -1343,7 +1700,7 @@ export class CymaticsRenderer {
       if (m3 >= 1 && !sciMode) {
         // Capa 3m (el triple de pétalos): filigrana fina de tercer nivel,
         // discreta, para no recargar la flor.
-        ampD2[i] = (0.1 + 0.045 * lorentz(modeOmega(m3, nn, PHYS_A) - ws, d.f)) * evo(260, d.p0 * 3.3) * rich * detailPulse;
+        ampD2[i] = (0.1 + 0.045 * lorentz(modeOmega(m3, nn, PHYS_A) - ws, df)) * evo(260, d.p0 * 3.3) * rich * detailPulse;
         rotD2[i] = this._rotPhase[i * 9 + 4];
         phaseD2[i] = d.p0 * 3.1 + 1.1;
       } else {
@@ -1356,7 +1713,7 @@ export class CymaticsRenderer {
       const m4 = m * 4 <= 16 ? m * 4 : -1;
       mD3[i] = m4;
       if (m4 >= 1 && !sciMode) {
-        ampD3[i] = (0.055 + 0.03 * lorentz(modeOmega(m4, nn, PHYS_A) - ws, d.f)) * evo(330, d.p0 * 3.8) * rich * detailPulse;
+        ampD3[i] = (0.055 + 0.03 * lorentz(modeOmega(m4, nn, PHYS_A) - ws, df)) * evo(330, d.p0 * 3.8) * rich * detailPulse;
         rotD3[i] = this._rotPhase[i * 9 + 5];
         phaseD3[i] = d.p0 * 3.6 + 1.6;
       } else {
@@ -1369,7 +1726,7 @@ export class CymaticsRenderer {
       const m5 = m * 5 <= 18 ? m * 5 : -1;
       mD4[i] = m5;
       if (m5 >= 1 && !sciMode) {
-        ampD4[i] = (0.04 + 0.02 * lorentz(modeOmega(m5, nn, PHYS_A) - ws, d.f)) * evo(380, d.p0 * 4.3) * rich;
+        ampD4[i] = (0.04 + 0.02 * lorentz(modeOmega(m5, nn, PHYS_A) - ws, df)) * evo(380, d.p0 * 4.3) * rich;
         rotD4[i] = this._rotPhase[i * 9 + 6];
         phaseD4[i] = d.p0 * 4.1 + 2.0;
       } else {
@@ -1382,7 +1739,7 @@ export class CymaticsRenderer {
       const m6 = m * 6 <= 18 ? m * 6 : -1;
       mD5[i] = m6;
       if (m6 >= 1 && !sciMode) {
-        ampD5[i] = (0.028 + 0.015 * lorentz(modeOmega(m6, nn, PHYS_A) - ws, d.f)) * evo(430, d.p0 * 4.8) * rich;
+        ampD5[i] = (0.028 + 0.015 * lorentz(modeOmega(m6, nn, PHYS_A) - ws, df)) * evo(430, d.p0 * 4.8) * rich;
         rotD5[i] = this._rotPhase[i * 9 + 7];
         phaseD5[i] = d.p0 * 4.6 + 2.4;
       } else {
@@ -1395,10 +1752,10 @@ export class CymaticsRenderer {
       // y cierran de forma bien visible, con oleadas lentas — la
       // respiración crece y mengua, no es un latido constante — como el
       // batido real entre modos casi degenerados que va y viene.
-      // PHASE 3: ampBeat (counter-rotating degenerate mode visual proxy) is disabled in sciMode
-      ampBeat[i] = sciMode ? 0 : 
-        0.72 * evo(290, d.p0 * 2.9) *
-        (0.4 + 0.6 * Math.sin(TWO_PI * 0.07 * t + d.p0 * 4.0));
+      // FIX (2026-09-08, "es inestable"): mismo caso que amp0/ampDom — el
+      // seno suelto (período ~14s, fuera del alcance de evo()) ya se
+      // apagaba en sciMode; ahora siempre.
+      ampBeat[i] = 0;
       rotBeat[i] = this._rotPhase[i * 9 + 8];
       phaseBeat[i] = d.p0 * 1.9 + 0.7;
 
@@ -1464,48 +1821,40 @@ export class CymaticsRenderer {
     // dos trenes de ondas reales cruzándose.
     const ripCol = new Array(n);
     const cosCol = new Array(n);
-    // Viveza de la vibración: reproduciendo el agua "vibra" con un temblor
-    // fino (6-12 % por modo); en pausa se atenúa para que la pantalla se
-    // calme al interrumpir la sesión.
-    const vib = 0.3 + 0.7 * alive;
     for (let i = 0; i < n; i++) {
       const d = drops[i];
       // Vibración viva: cada modo tiembla a su propio ritmo con dos
       // frecuencias desincronizadas (las líneas nodales se mueven y el
       // patrón oscila, pero siguen nítidas porque se redibujan cada
       // fotograma — el agua vibra, no se difumina).
-      shim0[i] =
-        1 +
-        0.16 * vib * Math.sin(TWO_PI * 0.55 * t + d.p0 * 0.9) +
-        0.08 * vib * Math.sin(TWO_PI * 1.13 * t + d.p0 * 3.3);
-      shimDom[i] =
-        1 +
-        0.22 * vib * Math.sin(TWO_PI * 0.62 * t + d.p0 * 1.6) +
-        0.1 * vib * Math.sin(TWO_PI * 1.27 * t + d.p0 * 4.4);
-      shimS1[i] = 1 + 0.24 * vib * Math.sin(TWO_PI * 0.78 * t + d.p0 * 2.9);
-      shimS2[i] = 1 + 0.26 * vib * Math.sin(TWO_PI * 0.83 * t + d.p0 * 3.7);
-      shimD1[i] = 1 + 0.3 * vib * Math.sin(TWO_PI * 0.9 * t + d.p0 * 4.3);
-      shimD2[i] = 1 + 0.27 * vib * Math.sin(TWO_PI * 0.97 * t + d.p0 * 5.1);
-      shimD3[i] = 1 + 0.24 * vib * Math.sin(TWO_PI * 1.03 * t + d.p0 * 5.9);
-      shimBeat[i] = 1 + 0.28 * vib * Math.sin(TWO_PI * 0.33 * t + d.p0 * 2.4);
-      // Ondas radiales estacionarias + dos viajeras opuestas: los anillos
-      // ondulan hacia dentro y hacia fuera a la vez — la onda que nace en
-      // el centro y la que rebota del borde se cruzan e interfieren, como
-      // en un experimento real. Las dos viajeras NO tienen amplitud fija:
-      // crecen y menguan alternadas (desfase 2,1 rad), de modo que el tren
-      // saliente domina un instante y el entrante el siguiente — el choque
-      // recorre el radio y se ve la colisión moverse por los anillos, en
-      // vez de una ondulación uniforme. Cada pulso del latido dispara una
-      // oleada más fuerte (el impacto se siente en el agua).
-      const surf = TWO_PI * 0.11 * t + d.p0 * 2.7;
-      const pulseRip = 0.5 + 0.9 * pulseEff;
-      ripAmp[i] = 0.2 * alive * (0.5 + 0.6 * pulseEff);
+      // FIX (2026-09-08, "es inestable" — parpadeo reportado): shim* es
+      // puramente heurístico (senos con frecuencias/fases elegidas a ojo,
+      // sin relación con ninguna ecuación de movimiento) y hasta este fix
+      // solo se gateaba a 1 en sciMode — en cinematográfico este temblor
+      // fino (períodos de ~0,8 a 3s) seguía activo siempre, contribuyendo
+      // al parpadeo/destello reportado. Gateado a 1 (sin temblor) siempre,
+      // igual que evo().
+      shim0[i] = 1;
+      shimDom[i] = 1;
+      shimS1[i] = 1;
+      shimS2[i] = 1;
+      shimD1[i] = 1;
+      shimD2[i] = 1;
+      shimD3[i] = 1;
+      shimBeat[i] = 1;
+      // FIX (2026-09-08, "es inestable"): estas cuatro ondas radiales
+      // (estacionaria, dos viajeras opuestas y nodo de colisión) son
+      // heurísticas visuales puras — ninguna sale de resolver la ecuación
+      // de onda ni de un modo de Bessel (ver el comentario de
+      // fillRipRows()/kRip2 más abajo) — y `surf`/`ripCol` avanzan con `t`
+      // sin ligarse a ningún evento real, así que ondulaban el patrón cada
+      // ~9s indefinidamente aunque nada cambiara. Ya se apagaban en
+      // sciMode; ahora siempre, igual que evo()/shim*.
+      ripAmp[i] = 0;
       ripCos[i] = Math.cos(TWO_PI * 0.5 * t + d.p0 * 1.1);
-      ripTravel[i] = 0.17 * alive * pulseRip * (0.5 + 0.5 * Math.cos(surf));
-      ripIn[i] = 0.17 * alive * pulseRip * (0.5 + 0.5 * Math.cos(surf + 2.1));
-      // El nodo de colisión es la interferencia de DOS ondas; sin batido
-      // (tono puro/ruido/silencio) apenas asoma.
-      ripCol[i] = (rhythmicCond() ? 0.11 : 0.045) * alive * (0.4 + 0.6 * Math.sin(TWO_PI * 0.09 * t + d.p0 * 1.7));
+      ripTravel[i] = 0;
+      ripIn[i] = 0;
+      ripCol[i] = 0;
       cosCol[i] = Math.cos(TWO_PI * 0.07 * t + d.p0 * 1.3);
     }
     // Amplitud general: el patrón brilla con el latido real (pulseEff) y
@@ -1515,9 +1864,11 @@ export class CymaticsRenderer {
     // se ve como una oleada de brillo que recorre el agua; en pausa
     // (pulseEff = 0.5) la amplitud queda estable.
     const amp = (0.6 + 0.4 * pulseEff) * ampPattern;
-    // Oleada lenta de energía: la superficie entera crece y mengua suavemente
-    // (~0,07 Hz, ±18 %), como el agua real balanceándose en la cuenca.
-    const swell = 1 + 0.16 * Math.sin(TWO_PI * 0.09 * t + 1.7);
+    // FIX (2026-09-08, "es inestable"): esta oleada global de brillo
+    // (período ~11s, ±16%, sin gateo de sciMode) mismo caso que evo()/
+    // shim*/rip* — un vagabundeo continuo sin ligarse a ningún evento real.
+    // Neutralizada.
+    const swell = 1;
 
     // ----- Plato: gradiente oscuro + borde -------------------------------
     const dish = ctx.createRadialGradient(cx, cy, R * 0.15, cx, cy, R);
@@ -1554,12 +1905,64 @@ export class CymaticsRenderer {
         maxNeed = Math.max(maxNeed, Math.max(nDom[i] * 16, dropR * 2));
       }
       glResAll = Math.max(48, Math.min(320, Math.round(maxNeed * this._resMul)));
+      // FIX (2026-09-12, "apagón" tras varios cambios de frecuencia seguidos
+      // y rápidos — ej. arrastrar el slider): `glResAll` se recalcula cada
+      // fotograma a partir del `nDom` que se está BUSCANDO ahora mismo (no
+      // el último confirmado), así que puede seguir creciendo fotograma a
+      // fotograma mientras la búsqueda de modo todavía no se asienta —
+      // típico durante un arrastre rápido, donde cada paso reinicia la
+      // construcción por tramos antes de que la anterior termine (ver
+      // `radKey !== buf.pending.key` más abajo). Redimensionar el lienzo GL
+      // solo ocurría en `_uploadDropGL`, cuando ALGÚN drop terminaba su
+      // construcción — si ninguno llega a terminar antes de que `glResAll`
+      // vuelva a crecer, el `gl.viewport(i*resD, 0, resD, resD)` de más
+      // abajo (que usa el `resD` FRESCO de este mismo fotograma) dibuja más
+      // alto que el lienzo real todavía sin agrandar — recortando la mitad
+      // inferior de cada gota (visto en vivo: un "medio círculo" que luego
+      // se completa solo). Redimensionar acá, ANTES del loop de dibujo, para
+      // que el lienzo real SIEMPRE tenga el tamaño que el resto del
+      // fotograma va a asumir — nunca vaya por detrás.
+      if (glResAll !== this._glRes) {
+        this._glRes = glResAll;
+        this._gl.canvas.width = glResAll * 3;
+        this._gl.canvas.height = glResAll;
+        this._gl.gl.viewport(0, 0, glResAll * 3, glResAll);
+        // FIX (2026-09-12, "sigue pasando en ciertos puntos de la
+        // transición" — regresión del fix anterior): al escribir el fix de
+        // arriba copié del código viejo de `_uploadDropGL` la costumbre de
+        // cancelar cualquier fundido en curso (`_releaseMorphTex` + null)
+        // cada vez que cambia la resolución — ahí tenía sentido porque ESE
+        // código a continuación BORRABA las texturas viejas de las que un
+        // fundido dependía (`texAold/texBold/texCold`), y había que soltar
+        // la referencia antes de borrar el objeto GL. Acá arriba NO se borra
+        // ninguna textura — solo se redimensiona el lienzo compartido. Y
+        // `glResAll` no cambia solo cuando cambia el modo de alguna gota:
+        // `_resMul` (el escalador adaptativo de calidad, más abajo,
+        // `_frameEMA`) se ajusta ±1,5%/fotograma cada vez que el fotograma
+        // anterior quedó fuera de la banda de rendimiento objetivo — algo
+        // que pasa seguido bajo carga (ej. justo durante una transición
+        // grande, con más detalle mandala dibujándose). Cada vez que ese
+        // ajuste cruzaba un entero de `Math.round(maxNeed*_resMul)`,
+        // `glResAll` cambiaba en ±1 SIN que ningún modo hubiera cambiado —
+        // y este bloque cancelaba el fundido en curso en cada uno de esos
+        // frames, produciendo un corte duro (salta de golpe al 100% de la
+        // flor nueva) exactamente "en ciertos puntos" de una transición
+        // larga, no al principio ni al final. Cancelar acá ya no hace
+        // falta: ninguna textura de la que dependa un fundido se toca en
+        // este bloque, así que el fundido puede seguir su curso normal
+        // aunque el lienzo cambie de tamaño bajo él (misma razón por la que
+        // el fix de "sigue titilando" tampoco necesitó tocar texturas
+        // ajenas: el shader arma la UV con `uRes` normalizado).
+      }
     }
     // En pausa profunda (sin patrón y sin transición en curso) no hay nada
     // que calcular píxel a píxel: se dibuja una lente de agua quieta, barata,
     // y se ahorra toda la CPU del bucle (batería y fluidez del resto de la
     // página). Al volver a sonar, el patrón emerge desde el agua limpia.
-    const anyMorph = this._morph.some((m) => m && m.b > 0);
+    // FIX (Parte B): mismo criterio que morphingI/alreadyMorphing — sin
+    // final duro, "en transición" se mide por el mismo umbral que usa el
+    // shader (uOldW > 0.02).
+    const anyMorph = this._morph.some((m) => m && m.oldW > 0.02);
     if (ampPattern < 0.02 && !anyMorph) {
       for (const d of drops) {
         const lg = ctx.createRadialGradient(d.x, cy, 0, d.x, cy, dropR);
@@ -1615,7 +2018,17 @@ export class CymaticsRenderer {
       // se calculan una sola vez por (resolución, modo) y por fotograma el
       // bucle solo evalúa los cosenos — con esto se puede subir la
       // resolución del buffer (nitidez) sin perder 60 FPS.
-      const argScale = ZP_BY_M[mDom[i]][nDom[i] - 1] / half;
+      // FIX (auditoría 2026-09-08, hallado al mover esto a plate-field.js):
+      // esto indexaba ZP_BY_M directo en vez de pasar por zeroFor(). La
+      // tabla solo tiene 10 filas por columna; desde que MAX_RADIAL_MODE
+      // subió a 24 (auditoría anterior, fix del preset 963 Hz) la búsqueda
+      // de modo SÍ puede devolver n>10 para portadoras agudas (963 Hz
+      // eligió m=2,n=17 — medido en esa misma auditoría), y este acceso
+      // directo daba `undefined` → argScale = NaN → tabla radial entera
+      // rota (NaN se propaga a todos los cosenos) para esa gota. zeroFor()
+      // ya tiene el fallback de McMahon para n>10; esto simplemente no lo
+      // usaba.
+      const argScale = zeroFor(mDom[i], nDom[i]) / half;
       // La clave de caché incluye TODOS los modos almacenados: dos estados
       // pueden compartir el modo dominante (m, n) — y por tanto argScale —
       // pero tener vecinos o detalles distintos, y entonces la tabla radial
@@ -1630,15 +2043,64 @@ export class CymaticsRenderer {
       // cruzado), la placa se reordena con una oleada y la nueva se
       // asienta — sin saltos, sin parpadeos ni vacíos.
       if (radKey !== this._lastKey[i]) {
+        // Ver _lightGate en el constructor: se apaga al instante ante
+        // CUALQUIER cambio de modo (incluso si alreadyMorphing impide
+        // arrancar un fundido nuevo abajo) — es justo ese caso, un cambio de
+        // modo sin fundido propio, el que producía el "tirón" reportado.
+        this._lightGate[i] = 0;
         const lp = this._lastP[i];
-        const alreadyMorphing = this._morph[i] && this._morph[i].b > 0;
+        // FIX (Parte B): "sigue en transición" ya no es `.b > 0` (duración
+        // fija) — ver morphingI arriba, mismo criterio.
+        const alreadyMorphing = this._morph[i] && this._morph[i].oldW > 0.02;
         if (lp && lp.res === resD && !alreadyMorphing) {
           const gd = this._gl ? this._glDrops[i] : null;
+          // FIX (Parte B): cada flor relaja con SU PROPIO τ, derivado de la
+          // frecuencia de resonancia física de su propio modo (m, n) — no de
+          // `df`/`heldF` (la excitación), que es la misma para las dos y no
+          // distinguiría sus tiempos de decaimiento. τ = MORPH_BLEND_K/γ(fCentro):
+          // ver la nota de MORPH_BLEND_K en plate-field.js — sin ningún factor
+          // de blend, γ (6-25 rad/s, real de una onda capilar en agua) da
+          // τ≈0,04-0,17s, un salto casi instantáneo en vez de una mezcla.
+          // FIX (2026-09-08, "colisionador de frecuencias"): esto usaba
+          // SLOWMO_K (330, el factor de CÁMARA LENTA de una oscilación
+          // visible, ver Parte D) en vez de MORPH_BLEND_K (10) — un fundido
+          // cruzado no envuelve ninguna oscilación, así que no le corresponde
+          // ese factor (mismo criterio que ya usa el suavizado de volumen más
+          // abajo). Con SLOWMO_K el peor caso llegaba a ~220s con el modo
+          // BLOQUEADO todo ese tiempo (ver MAX_MORPH_AGE_S arriba) — de ahí
+          // el reporte de transiciones que se sienten congeladas y después
+          // saltan de golpe.
+          const fCenterOld = modeOmega(lp.mDom, lp.nDom, PHYS_A) / Math.PI;
+          const fCenterNew = modeOmega(mDom[i], nDom[i], PHYS_A) / Math.PI;
+          // FIX (2026-09-08, "va bien y luego salta" / "se queda pegado y
+          // después salta de golpe" — reportado específicamente para saltos
+          // GRANDES de frecuencia): el τ de arriba solo depende de la
+          // frecuencia resonante de cada modo (gammaAt), nunca de cuán
+          // DISTINTOS son el modo viejo y el nuevo. Un salto grande (ej.
+          // 190→963 Hz) no se resuelve en un solo paso — el candado de modo
+          // sirve un paso por ciclo de fundido, y como `_heldF` (τ=1s) suele
+          // llegar a su objetivo final ANTES de que el primer fundido
+          // (τ hasta ~1,7s, ~6,7s para asentar del todo) termine de soltar
+          // el candado, el segundo paso ya encuentra el objetivo REAL, muy
+          // lejos del primer paso intermedio — un salto de m/n grande
+          // (medido en vivo: n=5→n=17) que, aunque técnicamente se funde
+          // igual de "suave" que cualquier otro, cambia tanto la silueta que
+          // se lee como un salto en vez de una reorganización. `distScale`
+          // alarga el fundido en proporción a cuánto cambia el modo (m, n)
+          // — un cambio grande de forma se ve reorganizarse durante más
+          // tiempo, en vez de comprimirse en la misma duración que un
+          // cambio chico. Acotado a 3× para no repetir el error de
+          // SLOWMO_K (un fundido sin techo real).
+          const modeDist = Math.abs(lp.mDom - mDom[i]) + Math.abs(lp.nDom - nDom[i]);
+          const distScale = 1 + Math.min(MORPH_DIST_SCALE_MAX - 1, modeDist * 0.15);
           this._morph[i] = {
-            b: 1,
+            oldW: 1,
+            newW: 0,
+            tauOld: (MORPH_BLEND_K * distScale) / gammaAt(fCenterOld),
+            tauNew: (MORPH_BLEND_K * distScale) / gammaAt(fCenterNew),
+            age: 0,
             p: lp,
             radP: buf.rad,
-            newStart: null,
             // Texturas de la flor anterior para el fundido cruzado en GPU:
             // la J0 vieja se captura AQUÍ (al arrancar el fundido), para que
             // la flor que se desvanece conserve sus anillos durante toda la
@@ -1650,13 +2112,36 @@ export class CymaticsRenderer {
         }
         this._lastKey[i] = radKey;
       }
+      // Recuperación gradual de _lightGate (~0,6s) hacia 1 — el apagado de
+      // arriba es instantáneo, la vuelta es suave para que el reflejo/
+      // cáustica se "enciendan" gradualmente sobre el patrón ya asentado,
+      // en vez de reaparecer de golpe.
+      this._lightGate[i] += (1 - this._lightGate[i]) * (1 - Math.exp(-dt / 0.6));
       // Instantánea del patrón de este fotograma: si el modo cambia en el
       // próximo, esta instantánea se convierte en la flor que se desvanece.
+      // FIX (2026-09-08, "no se ve la metamorfosis"/"corte instantáneo, sin
+      // mezcla" — confirmado con introspección en vivo, `_morph[i].oldW`
+      // quedaba en NaN desde el primer fotograma de CADA transición): a esta
+      // instantánea le faltaba `nDom` — solo se guardaba `mDom`. Más abajo,
+      // `fCenterOld = modeOmega(lp.mDom, lp.nDom, PHYS_A)` recibía
+      // `lp.nDom === undefined`, así que `fCenterOld` daba NaN, `tauOld`
+      // (MORPH_BLEND_K/gammaAt(fCenterOld)) daba NaN, y `oldW` se corrompía a
+      // NaN en la primera actualización de CADA fundido. `NaN > 0.02` es
+      // siempre falso en el shader (uOldW) — la flor VIEJA dejaba de aportar
+      // nada desde el instante cero, así que nunca se veía mezclada con la
+      // nueva: la "flor nueva creciendo sola" se percibía como un corte
+      // duro, no como el agua reorganizándose. Además `NaN > 0.02` también
+      // es falso en `alreadyMorphing` (candado de modo), así que el candado
+      // quedaba roto tras la PRIMERA transición de cada gota — de ahí
+      // también los reinicios de fundido encadenados cada ~2s medidos en
+      // vivo. Con `nDom` presente, `oldW` decae normal (1→0 en su propio τ)
+      // y el candado vuelve a funcionar.
       this._lastP[i] = {
         res: resD,
         p0: d.p0,
         argScale,
         mDom: mDom[i],
+        nDom: nDom[i],
         mS1: mS1[i],
         mS2: mS2[i],
         mD1: mD1[i],
@@ -1697,6 +2182,7 @@ export class CymaticsRenderer {
             res: resD,
             argScale,
             mDom: mDom[i],
+            nDom: nDom[i],
             mS1: mS1[i],
             mS2: mS2[i],
             mD1: mD1[i],
@@ -1736,6 +2222,12 @@ export class CymaticsRenderer {
         if (pend.rows >= pend.res) {
           buf.rad = pend.rad;
           buf.radK = pend.key;
+          buf.radM = pend.mDom;
+          buf.radN = pend.nDom;
+          // Ver _curMode en el constructor: este es el ÚNICO lugar donde se
+          // actualiza — sobrevive a los resets de _ensureDrop porque vive en
+          // `this`, no en `buf`.
+          this._curMode[i] = { m: pend.mDom, n: pend.nDom };
           buf.rip = pend.rip;
           buf.ripK = pend.kRip;
           buf.pending = null;
@@ -1754,31 +2246,36 @@ export class CymaticsRenderer {
       const granEnv = 0.55 + 0.45 * Math.cos(gt1 + gt3);
       const powShimmer = 1 + 0.12 * Math.sin(gt2);
 
-      // Fases de la transición de frecuencia (prog 0→1, ~5 s): FUNDIDO
-      // CRUZADO — la flor anterior se desvanece mientras la nueva se
-      // despliega, y los dos pesos suman 1 en todo momento. Los patrones se
-      // superponen y los anillos del anterior se deslizan hacia los del
-      // nuevo (barrer la frecuencia en un plato real produce exactamente
-      // eso: el patrón intermedio es una superposición viva). La superficie
-      // apenas se hunde al centro (el plato se reordena) pero nunca queda
-      // vacía, y una oleada radial recorre la gota durante el cambio. La
-      // transición espera si la nueva tabla aún se está construyendo y la
-      // nueva flor arranca justo donde terminó la construcción, sin saltos.
+      // Transición al cambiar de frecuencia (Parte B, auditoría 2026-09-08):
+      // SUPERPOSICIÓN física, no fundido cruzado — cada flor (saliente y
+      // entrante) relaja de forma independiente hacia su propio objetivo con
+      // SU τ propio (derivado de su modo, ver arriba), y los pesos NO suman
+      // 1: mientras la saliente todavía decae y la entrante ya creció, las
+      // dos contribuyen a la vez a `sum` con intensidad real — el batido
+      // visible entre modos que el fundido cruzado (pesos complementarios,
+      // uno solo puede estar a plena intensidad) no podía producir. La
+      // amplitud combinada puede superar momentáneamente la de cada flor por
+      // separado (constructiva, real) — no se compensa con una ganancia
+      // artificial: es la misma curva de saturación que ya satura las
+      // crestas normales (más abajo, `tIn`/`eP`), y produce un breve
+      // realce en vez de un recorte duro.
       let morph = this._morph[i];
       if (morph) {
-        if (buf.pending) {
-          // La tabla del nuevo modo aún se construye: la flor anterior se
-          // mantiene ÍNTEGRA (sin empezar el fundido) hasta que la nueva esté
-          // lista — la transición nunca se vacía ni parpadea.
-          morph.b = Math.max(morph.b, 0.12);
-        } else if (morph.newStart == null) {
-          // La tabla nueva está lista: el fundido arranca en el punto de
-          // progreso actual para que la aparición de la flor sea continua.
-          morph.newStart = Math.min(1, 1 - morph.b);
+        if (!buf.pending) {
+          // La tabla del nuevo modo ya está lista: recién ahí arrancan las
+          // dos relajaciones — mientras se construye por tramos, la flor
+          // anterior se mantiene ÍNTEGRA (oldW=1, newW=0, sin avanzar el
+          // reloj), igual que garantizaba el fundido cruzado anterior.
+          morph.age += dt;
+          morph.newW += (1 - morph.newW) * (1 - Math.exp(-dt / morph.tauNew));
+          morph.oldW += (0 - morph.oldW) * (1 - Math.exp(-dt / morph.tauOld));
         }
-        // ~7 s en total: gradual y sin saltos (b va 1 → 0).
-        morph.b -= dt / 7.0;
-        if (morph.b <= 0 && !buf.pending) {
+        // Sin final duro (una exponencial nunca llega a 0): se libera cuando
+        // la saliente ya no aporta nada visible al shader — mismo umbral que
+        // uOldW > 0.02 en GL_FS — o, como respaldo ante un τ degenerado, al
+        // tope MAX_MORPH_AGE_S (ver su comentario: 8× el peor caso natural,
+        // nunca debería dispararse en operación normal).
+        if (!buf.pending && (morph.oldW < 0.02 || morph.age > MAX_MORPH_AGE_S)) {
           this._releaseMorphTex(i);
           this._morph[i] = null;
           morph = null;
@@ -1786,56 +2283,28 @@ export class CymaticsRenderer {
       }
       const pM = morph ? morph.p : null;
       const radP = morph ? morph.radP : null;
-      let oldW = 0;
-      let newW = 0;
-      let morphEnv = 1;
-      let burst = 0;
-      if (morph) {
-        const prog = 1 - morph.b; // 0 → 1
-        const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
-        // Fundido cruzado COMPLEMENTARIO: la flor vieja se mantiene a plena
-        // intensidad hasta que la nueva está lista y, desde ese instante,
-        // newW + oldW = 1 en todo momento (la nueva entra exactamente
-        // mientras la vieja sale): sin vacíos, sin hundimiento ni doble
-        // brillo — el patrón evoluciona de forma continua.
-        const ns = morph.newStart == null ? 0 : morph.newStart;
-        const fade = ns <= 0 ? 0 : smooth((prog - ns) / (1 - ns));
-        newW = fade;
-        oldW = 1 - fade;
-        // La superficie respira apenas en el centro del fundido (el plato se
-        // reordena) y una oleada suave recorre la gota durante el cambio.
-        const dip =
-          1 - smooth((prog - 0.35) / 0.3) * (1 - smooth((prog - 0.65) / 0.3));
-        morphEnv = 0.8 + 0.2 * dip;
-        burst = 1 + 0.7 * Math.sin(Math.PI * fade);
-      }
-      if (burst > 0) {
-        ripAmp[i] *= burst;
-        ripTravel[i] *= burst;
-        ripIn[i] *= burst;
-        ripCol[i] *= burst;
-      }
-      // Temblor del patrón anterior durante la transición: la misma
-      // oscilación que la flor nueva, con las fases propias de la vieja.
-      let shim0P = 1;
-      let shimDomP = 1;
-      let shimS1P = 1;
-      let shimS2P = 1;
-      let shimD1P = 1;
-      let shimD2P = 1;
-      let shimD3P = 1;
-      let shimBeatP = 1;
-      if (morph) {
-        const p0 = pM.p0;
-        shim0P = 1 + 0.16 * vib * Math.sin(TWO_PI * 0.55 * t + p0 * 0.9);
-        shimDomP = 1 + 0.22 * vib * Math.sin(TWO_PI * 0.62 * t + p0 * 1.6);
-        shimS1P = 1 + 0.24 * vib * Math.sin(TWO_PI * 0.78 * t + p0 * 2.9);
-        shimS2P = 1 + 0.26 * vib * Math.sin(TWO_PI * 0.83 * t + p0 * 3.7);
-        shimD1P = 1 + 0.3 * vib * Math.sin(TWO_PI * 0.9 * t + p0 * 4.3);
-        shimD2P = 1 + 0.27 * vib * Math.sin(TWO_PI * 0.97 * t + p0 * 5.1);
-        shimD3P = 1 + 0.24 * vib * Math.sin(TWO_PI * 1.03 * t + p0 * 5.9);
-        shimBeatP = 1 + 0.28 * vib * Math.sin(TWO_PI * 0.33 * t + p0 * 2.4);
-      }
+      const oldW = morph ? morph.oldW : 0;
+      const newW = morph ? morph.newW : 0;
+      // morphEnv ya no simula a mano un hundimiento/doble brillo a mitad de
+      // fundido (auditoría anterior, `dip`/`burst`): con envolventes físicas
+      // independientes ese realce lo produce la propia superposición cuando
+      // ambas pesan a la vez (ver el comentario de arriba), así que
+      // duplicarlo a mano quedaría como un efecto sobre otro. Queda en 1
+      // (identidad) para no tocar el resto del pipeline que ya lo consume.
+      const morphEnv = 1;
+      // FIX (2026-09-08, "es inestable" — parpadeo reportado): el temblor
+      // del patrón anterior durante la transición (misma oscilación shim*
+      // que la flor nueva) no tenía siquiera el gateo de sciMode que sí
+      // tiene la flor nueva — ver la nota junto a shim0/shimDom más arriba.
+      // Neutralizado igual, siempre en 1 (sin temblor).
+      const shim0P = 1;
+      const shimDomP = 1;
+      const shimS1P = 1;
+      const shimS2P = 1;
+      const shimD1P = 1;
+      const shimD2P = 1;
+      const shimD3P = 1;
+      const shimBeatP = 1;
 
       // ----- Ruta GPU (WebGL2) -------------------------------------------
       // La GPU evalúa el mismo sumatorio píxel a píxel con las texturas del
@@ -1971,7 +2440,10 @@ export class CymaticsRenderer {
           gl.uniform1f(U.uMid, mid);
           gl.uniform3fv(U.uPal, d.pal);
           gl.uniform3fv(U.uDeep, d.deep);
-          gl.uniform3fv(U.uWhite, C_WHITE);
+          gl.uniform3fv(U.uWhite, crestColor);
+          gl.uniform1f(U.uCoherence, coherence);
+          gl.uniform1f(U.uVelocity, velocity);
+          gl.uniform1f(U.uLightGate, this._lightGate[i]);
 
           gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
@@ -1982,6 +2454,16 @@ export class CymaticsRenderer {
         continue; // esta gota la dibuja la GPU
       }
 
+      // DEUDA DOCUMENTADA (auditoría de luz 2026-09-02): el rasterizador CPU
+      // de acá abajo no tiene ni el especular por pendiente (dEdTh) ni la
+      // cáustica por curvatura (d2EdTh2) que sí tiene el shader GPU (GL_FS,
+      // más arriba) — solo el blob de posición fija más abajo ("Reflejos
+      // especulares en cada gota"). Es la misma brecha ya aceptada esta
+      // sesión para el especular: se prioriza el camino GPU (WebGL2 y
+      // WebGL1, que comparten el mismo GL_FS vía glsl100()), que cubre la
+      // gran mayoría de dispositivos. Portarlo acá es mecánico si hace
+      // falta: mismo patrón que arma `sum` más abajo, con
+      // `-mDom0*mDom0*cos(...)` en vez de `cos(...)` para cada término.
       // Escalares de esta gota en variables locales: el bucle interior los
       // usa en cada píxel, así que sacarlos de los arrays (y los accesos a
       // memoria) acelera el render de forma medible. Las amplitudes ya
@@ -2041,7 +2523,27 @@ export class CymaticsRenderer {
       const cT = Math.cos(ripTph);
       const sT = Math.sin(ripTph);
       const cN = Math.cos(ripNph);
-      const bound = half * wob;
+      // FIX (deuda de verificación externa, hallado al forzar el
+      // rasterizador CPU para depurar "en 2D no parece cimática"): `sN`
+      // solo estaba declarado dentro del bloque GL (más arriba, antes del
+      // `continue` que salta esta rama cuando hay WebGL) pero se USA más
+      // abajo en `ripp` — sin WebGL esto tiraba `ReferenceError: sN is not
+      // defined` en cada frame, igual que `wob` (ver abajo). Mismo criterio
+      // que ya se aplicaba correctamente a cT/sT/cN (duplicados para esta
+      // rama): agregado acá.
+      const sN = Math.sin(ripNph);
+      // FIX (mismo hallazgo): `wob` no existe en ningún lado del archivo —
+      // la ruta GPU pasa `wobA[i]` como uniforme `uWob` (ver más abajo,
+      // `gl.uniform1f(U.uWob, wobA[i])`); esta rama CPU nunca se actualizó
+      // cuando `wobA` pasó a ser un array por gota. Con esto el rasterizador
+      // CPU dejaba de ejecutar CUALQUIER código de esta gota en adelante
+      // (la excepción abortaba el resto de la función) — no solo perdía
+      // efectos visuales menores como documenta el comentario de más abajo
+      // ("DEUDA DOCUMENTADA... sin especular ni cáustica"), sino que no
+      // dibujaba nada de nada. Afecta a cualquier navegador sin WebGL2 ni
+      // WebGL1 (raro, pero real) — nunca antes verificado porque el camino
+      // GPU siempre está disponible en desarrollo.
+      const bound = half * wobA[i];
       // PHASE 3: Disable capillary grain overlay in Scientific Mode
       const gEnv = sciMode ? 0 : granEnv;
       const pSh = powShimmer;
@@ -2195,9 +2697,9 @@ export class CymaticsRenderer {
             cb = cb0 * u + db0 * (1 - u);
           } else {
             const u = (v - 0.5) * 2;
-            cr = C_WHITE[0] * u + cr0 * (1 - u);
-            cg = C_WHITE[1] * u + cg0 * (1 - u);
-            cb = C_WHITE[2] * u + cb0 * (1 - u);
+            cr = crestColor[0] * u + cr0 * (1 - u);
+            cg = crestColor[1] * u + cg0 * (1 - u);
+            cb = crestColor[2] * u + cb0 * (1 - u);
           }
           // El polvo nodal se mezcla como plata suave teñida con el color de
           // la gota: las líneas del mandala se leen nítidas, sin motas al azar.
@@ -2238,7 +2740,12 @@ export class CymaticsRenderer {
     // El arco superior brilla con la elevación media (pulso del latido) y
     // la energía de la vibración: al pausar, la luz se apaga con el patrón
     // (la excitación física es la que ilumina la placa).
-    const ringA = (0.22 + 0.78 * pulseEff) * ampPattern;
+    // FIX (2026-09-12, "sigue titilando"): el aro LED tenía el mayor
+    // contraste pico/valle de todo el render (4.5x, 0.22->1.0) sobre un
+    // trazo brillante cian a hasta ~12.5Hz — lee como estroboscopio, no como
+    // respiración. Bajado a 1.82x (0.55->1.0); pulseEff y su timing exacto
+    // con el audio real no cambian, solo el rango que recorre.
+    const ringA = (0.55 + 0.45 * pulseEff) * ampPattern;
     ctx.save();
     ctx.lineCap = 'round';
     // Halo exterior suave.
@@ -2263,7 +2770,9 @@ export class CymaticsRenderer {
       // da un brillo de cristal muy discreto en el borde superior.
       const hx = d.x - dropR * 0.36;
       const hy = cy - dropR * 0.44;
-      const sa = (0.11 + 0.2 * pulseEff) * ampPattern;
+      // FIX (2026-09-12, "sigue titilando"): rango bajado de 2.82x a 1.63x,
+      // mismo criterio que ringA.
+      const sa = (0.19 + 0.12 * pulseEff) * ampPattern;
       const sg = ctx.createRadialGradient(hx, hy, 0, hx, hy, dropR * 0.22);
       sg.addColorStop(0, `rgba(255,255,255,${sa.toFixed(3)})`);
       sg.addColorStop(0.3, `rgba(210,240,255,${(sa * 0.18).toFixed(3)})`);
@@ -2289,7 +2798,8 @@ export class CymaticsRenderer {
     // transición para no cortarla.
     const frameMs = performance.now() - tMs;
     this._frameEMA = this._frameEMA * 0.92 + Math.min(60, frameMs) * 0.08;
-    if (!this._morph.some((m) => m && m.b > 0)) {
+    // FIX (Parte B): mismo criterio que arriba (sin final duro).
+    if (!this._morph.some((m) => m && m.oldW > 0.02)) {
       if (this._frameEMA > 24 && this._resMul > 0.62) {
         this._resMul = Math.max(0.62, this._resMul * 0.985);
       } else if (this._frameEMA < 13 && this._resMul < 1) {

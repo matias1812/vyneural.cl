@@ -79,7 +79,8 @@ perezosa para permitirlo).
 | Decaimiento monótono bajo damping | Disipación sin fuentes |
 | Sin NaN/Infinity tras 300 pasos | Robustez numérica |
 | Clamp de amplitud tras pulso extremo | Límite no físico se respeta |
-| Dirichlet: bordes en cero | Condiciones de contorno |
+| Celdas exteriores a la máscara nunca filtran amplitud | Sanity check del array (no depende de qué BC use el borde) |
+| Frontera libre/Neumann — la fundamental coincide con el cero de J'_0 (3,8317), no con el de J_0 (2,4048) | Condición de contorno REAL del stencil (auditoría 2026-09-08: pasó de Dirichlet a Neumann; antes esto solo se comprobaba a mano) |
 
 ### Audio / estímulo
 

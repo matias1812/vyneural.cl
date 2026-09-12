@@ -124,6 +124,10 @@ class AndroidBridge(
             j.put("sound", ch.sound?.toString() ?: "null")
             j.put("vibrationEnabled", ch.shouldVibrate())
             j.put("vibrationPattern", ch.vibrationPattern?.joinToString(",") ?: "null")
+            // v8 — mismo criterio: ver el bypassDnd REAL que Android aplicó al
+            // canal, no asumir que setBypassDnd(true) en ensureChannels() bastó
+            // (requiere además el permiso ACCESS_NOTIFICATION_POLICY concedido).
+            j.put("canBypassDnd", ch.canBypassDnd())
             // Verificación cruzada: ¿el sistema global de notificaciones/canal
             // está siquiera habilitado para bloquear/silenciar por fuera del
             // permiso POST_NOTIFICATIONS?
@@ -259,6 +263,25 @@ class AndroidBridge(
                             BineuralLog.e("bridge", "open alarm channel settings fallback", e2)
                             respond("BRIDGE_ERROR", command, null)
                         }
+                    }
+                }
+                "OPEN_DND_ACCESS_SETTINGS" -> {
+                    // Acceso a la política de notificaciones (No Molestar): sin este
+                    // permiso, setBypassDnd(true) en el canal "Alarmas Vyneural" (v8,
+                    // ver NotificationHelper.kt) no tiene efecto — Android solo deja
+                    // bypasear DND a las apps que el usuario autorizó acá a mano, no
+                    // hay diálogo de permiso normal para esto. Sin data URI de package:
+                    // a diferencia de OPEN_ALARM_CHANNEL_SETTINGS, este Settings action
+                    // no soporta deep-link a una app específica — abre la lista general
+                    // donde el usuario busca "Vyneural" y activa el toggle.
+                    try {
+                        val i = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(i)
+                        respond("OK", command, null)
+                    } catch (e: Exception) {
+                        BineuralLog.e("bridge", "open DND access settings", e)
+                        respond("BRIDGE_ERROR", command, null)
                     }
                 }
                 "REQUEST_AUTOSTART_SETTINGS" -> {

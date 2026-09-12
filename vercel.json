@@ -24,6 +24,10 @@
   ],
   "rewrites": [
     {
+      "source": "/preset/:slug",
+      "destination": "/api/preset/:slug"
+    },
+    {
       "source": "/api/:path*",
       "destination": "https://vyneural-backend.onrender.com/api/:path*"
     },

@@ -60,7 +60,14 @@ object NotificationHelper {
     // llamada puede subirle la importancia de vuelta a HIGH; solo el usuario
     // puede hacerlo a mano en Ajustes, o se crea un canal nuevo. Bump a v7
     // para que el canal nazca de cero en IMPORTANCE_HIGH otra vez.
-    const val CHANNEL_ALARMS = "bineural_alarms_v7"
+    // v8: reportado otra vez "llega pero a veces sin alarma" DESPUÉS de v7 —
+    // esta vez el hueco no es importancia ni sonido nulo, es que el canal
+    // nunca pedía bypassear No Molestar (ver setBypassDnd(true) abajo). Igual
+    // que importancia/sonido, bypassDnd es un atributo de canal que Android
+    // solo aplica al CREARSE por primera vez — createNotificationChannel()
+    // sobre un canal existente no lo cambia, así que necesita ID nuevo para
+    // que los teléfonos que ya tenían v7 lo reciban.
+    const val CHANNEL_ALARMS = "bineural_alarms_v8"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.
@@ -90,6 +97,19 @@ object NotificationHelper {
                 description = "Alarmas reales de sesión (sonido de alarma + vibración)"
                 enableVibration(true)
                 setVibrationPattern(VIBRATION_ALARM)
+                // v8 — reportado de nuevo "llega pero a veces sin alarma" tras v7
+                // (que arregló la importancia bajada sola). Hueco real encontrado
+                // acá: el canal NUNCA pedía bypassear No Molestar. USAGE_ALARM ya
+                // enruta el sonido por el stream de alarma (audible aunque el
+                // ringer esté silenciado), pero en Modo Silencio Total / algunas
+                // políticas de DND de terceros eso no basta — solo bypassDnd(true)
+                // + el permiso ACCESS_NOTIFICATION_POLICY concedido hace que el
+                // canal mismo se trate como excepción de DND. Sin este flag, el
+                // comportamiento dependía 100% de la política de DND del teléfono,
+                // lo que explica el "a veces" (varía según el modo activo en cada
+                // disparo). Como sonido/importancia, bypassDnd solo se aplica al
+                // CREARSE el canal — de ahí el bump a v8 (ver arriba).
+                setBypassDnd(true)
                 // Reportado en vivo: ni el botón "Probar notificación" ni las
                 // alarmas reales sonaban/vibraban en un dispositivo — hueco
                 // real encontrado acá: RingtoneManager.getDefaultUri() puede

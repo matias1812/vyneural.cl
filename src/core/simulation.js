@@ -139,10 +139,24 @@ export class SimulationEngine {
 
   loop() {
     this.animFrame = requestAnimationFrame(this.loop);
-    
+
     const now = performance.now();
     const dt = Math.min(0.25, (now - this.lastTime) / 1000.0);
     this.lastTime = now;
+
+    // FIX (auditoría P7 2026-09-03): en segundo plano no hay nada que
+    // mostrar (drawVisual, main.js, ya se congela solo con document.hidden)
+    // ni nada real que "recuperar" audiblemente (_audioWatchdog más abajo ya
+    // se auto-apaga con document.hidden — todo su cuerpo útil queda dentro de
+    // ese guard) — así que correr el pipeline auditivo/neural/EEG/cognitivo
+    // entero acá cuadro a cuadro solo quema batería sin ningún efecto
+    // visible. _modelAcc se resetea (no se deja crecer sin límite) para que,
+    // al volver a primer plano, el próximo tick arranque con un dt real
+    // fresco en vez de un modelDt inflado por horas de acumulación oculta.
+    if (document.hidden) {
+      this._modelAcc = 0;
+      return;
+    }
 
     // ── Cadencia de la simulación científica ─────────────────────────────────
     // El pipeline (auditivo → neural → EEG → cognitivo → visual) es una
@@ -167,7 +181,17 @@ export class SimulationEngine {
     
     // Get master volumes (assume max 1.0)
     // If we have an ambient reference, grab its master volume. Otherwise use 0.
-    const binauralVol = this.audio.masterGain ? this.audio.masterGain.gain.value : 0;
+    // FIX (auditoría 2026-09-06): en modo _platformMuted (APK) masterGain.gain
+    // se fuerza a 0 A PROPÓSITO — el sonido real lo sostiene el servicio
+    // nativo, no el AudioContext web (ver audio.js setPlatformMuted()). Leído
+    // tal cual acá, perceptualStrength caía a 0 y con él pullForce en
+    // neural.js: el pipeline entero quedaba congelado en la APK mientras el
+    // usuario sí escuchaba audio real. this.audio._volume es el volumen
+    // INTENCIONADO (el que setVolume() guarda) independiente de si el nodo
+    // de ganancia está gateado a 0 por diseño.
+    const binauralVol = this.audio._platformMuted
+      ? (this.audio._volume ?? 0)
+      : (this.audio.masterGain ? this.audio.masterGain.gain.value : 0);
     const ambientVol = (this.ambient && this.ambient.active) ? this.ambient.volume : 0;
 
     // 2. AUDITORY MODEL (Phase 5)

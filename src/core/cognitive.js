@@ -3,10 +3,20 @@
 //
 // Maps the Neural Entrainment State (Phase 6) to phenomenological psychological
 // variables (arousal, attention, relaxation, flow) using:
-//   1. Yerkes-Dodson constraint: arousal and relaxation are anticorrelated via
-//      a soft mutual inhibition term (high arousal suppresses relaxation and vice versa).
+//   1. Mutual inhibition: arousal and relaxation are anticorrelated via a
+//      soft mutual suppression term (high arousal suppresses relaxation and
+//      vice versa). NOTE (fix 2026-09-06): this used to be labeled
+//      "Yerkes-Dodson constraint" — Yerkes-Dodson is the inverted-U between
+//      arousal and PERFORMANCE, not an arousal↔relaxation restriction. The
+//      mechanism itself (mutual inhibition) is a reasonable model; only the
+//      name was wrong.
 //   2. EEG band-derived updates: arousal tracks beta/gamma power; relaxation
-//      tracks alpha; attention tracks theta+alpha cross-band coherence.
+//      tracks slow-band (delta/theta/alpha) dominance over fast (beta/gamma);
+//      attention is a weighted sum of task-relevant band power (theta/alpha/
+//      beta/gamma), penalized by delta. NOTE: this weighted sum is NOT
+//      "cross-band coherence" in the EEG sense (a phase-synchrony measure
+//      between channels) — it never was, despite the old comment; it's a
+//      power-based heuristic and is labeled as such in the HUD.
 //   3. Flow as an emergent attractor (NOT a controllable target):
 //      Flow = high attention × moderate arousal × moderate relaxation.
 //      This emerges only when the brain has been in the Theta/Alpha border for
@@ -74,8 +84,6 @@ export class CognitiveStateModel {
     const f = neuralState.dominantFreq ?? 10;
     this.state.dominantFreq = f;
 
-    // Effective stimulus: habituated signal modulated by perceptual input
-    const E = adapt * (1 - fatigue * 0.6);
 
     // ── 2. EEG-derived targets for this frame ───────────────────────────────
     // These are the instantaneous "pulls" derived from the actual neural band
@@ -85,50 +93,99 @@ export class CognitiveStateModel {
     // Scales with profile target but gated by actual band power.
     const tArousal = this.params.targetArousal * (0.3 + 0.7 * (beta + gamma * 0.5));
 
-    // Relaxation target: driven by alpha power (idling rhythm).
-    // Anticorrelated with arousal via Yerkes-Dodson: relaxation is suppressed
-    // when beta/gamma are elevated (and vice versa).
-    const alphaRelax  = alpha * 1.3;
-    const betaPenalty = (beta + gamma) * 0.5; // high beta suppresses relaxation
-    const tRelaxation = Math.max(0, this.params.targetRelaxation * alphaRelax - betaPenalty);
+    // FIX (auditoría 2026-09-06): "relajación = alfa pura" condenaba a
+    // mínima relajación a cualquier preset que NO tuviera el beat cerca de
+    // 10 Hz — es decir, justo Meditación (6 Hz, Theta) y Sueño profundo
+    // (2 Hz, Delta), los presets "relajantes" que más vende la app (medido:
+    // Meditación reportaba target efectivo ≈0.07 con el perfil pidiendo
+    // 0.8). Redefinido como dominancia de bandas lentas sobre rápidas: así
+    // Theta y Delta SÍ cuentan como relajación, no solo Alfa.
+    const slowPower = delta * 0.8 + theta + alpha;
+    const fastPower = beta + gamma;
+    const tRelaxation = this.params.targetRelaxation * (slowPower / (slowPower + fastPower + 1e-6));
 
-    // Attention target: driven by frontal theta + alpha coactivation.
-    // (Theta-alpha border 6-10 Hz is associated with focused attention and
-    // working memory — Klimesch et al., 1999; Bastiaansen & Hagoort, 2003)
-    const tAttention = this.params.targetAttention * (0.4 + 0.6 * (theta * 0.6 + alpha * 0.4));
+    // FIX (auditoría 2026-09-06): "atención = theta+alpha" tenía el defecto
+    // simétrico al de relajación — Concentración y Aprendizaje (Beta/Gamma)
+    // tenían theta+alpha en ~0 y jamás podían reportar atención alta pase lo
+    // que pida el perfil. Ahora participan todas las bandas de tarea
+    // (Klimesch et al., 1999 — atención sostenida en Theta/Alpha border —
+    // más Beta/Gamma para las tareas activas) y Delta (somnolencia) resta.
+    const taskPower = theta * 0.4 + alpha * 0.3 + (beta + gamma) * 0.6;
+    const tAttention = this.params.targetAttention * Math.max(0, Math.min(1, 0.3 + 0.7 * taskPower - delta * 0.4));
 
-    // ── 3. Coupling constants ───────────────────────────────────────────────
-    // Base coupling is slower than the old linear model (~minutes to full target).
-    // Multiplied by the effective stimulus so masking/habituation slows it down.
-    const kBase  = 0.025 * E;
-    const kArous = kBase * 1.1;
-    const kAttn  = kBase * 0.9;
-    const kRelax = kBase * 0.8;
+    // ── 3. Habituación con piso + constante de seguimiento fija ─────────────
+    // FIX DE FONDO (auditoría 2026-09-06): el bug que colapsaba TODA sesión
+    // larga a cero. kBase=0.025*E multiplicaba el arrastre hacia el target,
+    // pero las pérdidas de más abajo (fatiga, inhibición mutua) NO escalaban
+    // con E — al habituarse el estímulo (E→0 por adapt=exp(-t/tau)→0), el
+    // arrastre se apagaba pero las pérdidas seguían restando indefinidamente,
+    // y las tres variables convergían a 0 sin importar el preset (medido:
+    // Meditación 40min → relax 0.07/target 0.8, arousal y attn en 0.00).
+    //
+    // Rediseño: el TARGET efectivo se desvanece hacia el basal (0.5) a
+    // medida que el estímulo se habitúa — "habituarse" pasa a significar
+    // "el efecto vuelve a lo basal", no "la variable se va a cero" — y el
+    // seguimiento usa una constante FIJA (no depende de E), así el sistema
+    // nunca se queda sin fuerza de arrastre.
+    //
+    // SUSTAINED_EFFECT_FRACTION evita que, pasados ~30-40 min, TODOS los
+    // perfiles terminen indistinguibles en el mismo basal (el mismo bug de
+    // fondo, solo que en 0.5 en vez de 0). Mide la fracción del efecto del
+    // preset que sobrevive a la habituación COMPLETA (adapt→0): a mayor
+    // valor, más se conserva el extremo pedido por el perfil; a menor
+    // valor, MÁS se comprime hacia 0.5 (es multiplicativo sobre la
+    // desviación del basal — bajarlo reduce el rango expresable, no lo
+    // aumenta). Deliberadamente NO se llama ADAPT_FLOOR como el de
+    // neural.js: ese limita una VELOCIDAD de convergencia (cualquier valor
+    // > 0 termina llegando al objetivo, solo cambia cuándo); este fija una
+    // AMPLITUD asintótica (el valor final). Incluso con el mismo nombre no
+    // serían intercambiables — el choque léxico era una trampa para el
+    // próximo que los lea juntos.
+    //
+    // 0.5 es el punto neutro ("sobrevive la mitad del efecto") y es el
+    // único valor verificado de punta a punta en este archivo — no hay
+    // dato empírico que prefiera otro número sobre este. Lo que SÍ lo
+    // calibraría: intensidad subjetiva autorreportada al final de sesiones
+    // de duración variable, comparada contra la reportada a los 5 min de
+    // la misma sesión. Sin ese dato, cualquier valor es igualmente
+    // defendible — de ahí que el HUD deba seguir etiquetando esto como
+    // heurístico, no como validado.
+    //
+    // Pendiente de mayor alcance (no resuelto acá): el basal al que decae
+    // TODO desvanece hacia 0.5 para TODOS los perfiles por igual. Para un
+    // preset de sueño eso es cuestionable en su premisa — a los 40 min el
+    // usuario probablemente está durmiendo, o sea que su arousal real bajó
+    // MÁS, no volvió al centro. La habituación al estímulo y el estado real
+    // del usuario apuntan en direcciones opuestas ahí. Arreglarlo bien
+    // requeriría que el basal dependa del perfil, no una constante global
+    // — no tocarlo sin datos para calibrar esas basales por separado.
+    const SUSTAINED_EFFECT_FRACTION = 0.5;
+    const K_TRACK = 1 / 50; // s⁻¹ — τ ≈ 50s
 
-    // ── 4. Mutual inhibition (Yerkes-Dodson soft constraint) ─────────────
-    // High arousal suppresses relaxation (and vice versa).
-    // This prevents the physically nonsensical state: arousal=1 AND relaxation=1.
-    const arousalNow   = this.state.arousal.value;
-    const relaxNow     = this.state.relaxation.value;
-    const inhibition   = 0.08; // strength of mutual suppression
-    const arousInhibit = arousalNow  * inhibition; // arousal suppresses relaxation
-    const relaxInhibit = relaxNow    * inhibition; // relaxation suppresses arousal
+    const presence = SUSTAINED_EFFECT_FRACTION + (1 - SUSTAINED_EFFECT_FRACTION) * adapt;
+    const effArousalRaw    = 0.5 + (tArousal    - 0.5) * presence;
+    const effAttentionRaw  = 0.5 + (tAttention  - 0.5) * presence;
+    const effRelaxationRaw = 0.5 + (tRelaxation - 0.5) * presence;
+
+    // ── 4. Inhibición mutua (Yerkes-Dodson mal citado en el nombre original:
+    // Yerkes-Dodson es la U invertida arousal↔rendimiento, no una restricción
+    // arousal↔relajación — el mecanismo real implementado es inhibición
+    // mutua simple, que sí es razonable como modelo) + fatiga. Aplicadas
+    // como corrección MULTIPLICATIVA al target (acotada en [0,1] por
+    // construcción) en vez de como resta abierta a la derivada — así no
+    // pueden generar una fuga que sobreviva aunque el arrastre se apague,
+    // que es exactamente el bug de arriba.
+    const arousalNow = this.state.arousal.value;
+    const relaxNow   = this.state.relaxation.value;
+    const inhibition = 0.3;
+    const effArousal    = effArousalRaw    * (1 - relaxNow   * inhibition) * (1 - fatigue * 0.3);
+    const effRelaxation = effRelaxationRaw * (1 - arousalNow * inhibition);
+    const effAttention  = effAttentionRaw  * (1 - fatigue * 0.5);
 
     // ── 5. Differential updates ─────────────────────────────────────────────
-    let dArousal    = (tArousal    - arousalNow)  * kArous * dt;
-    let dAttention  = (tAttention  - this.state.attention.value) * kAttn  * dt;
-    let dRelaxation = (tRelaxation - relaxNow)    * kRelax * dt;
-
-    // Apply fatigue penalties (high cognitive load degrades attention first).
-    // Proportional to the current level (decay rate, not constant drain):
-    // a constant drain can exceed the coupling pull and clamp the variable to
-    // exactly zero forever, emitting a boundary warning on every frame.
-    dArousal    -= fatigue * arousalNow * dt * 0.06;
-    dAttention  -= fatigue * this.state.attention.value * dt * 0.09;
-
-    // Apply mutual inhibition
-    dArousal    -= arousInhibit * relaxNow * dt * 0.3;
-    dRelaxation -= relaxInhibit * arousalNow * dt * 0.3;
+    const dArousal    = (effArousal    - arousalNow)                 * K_TRACK * dt;
+    const dAttention  = (effAttention  - this.state.attention.value) * K_TRACK * dt;
+    const dRelaxation = (effRelaxation - relaxNow)                   * K_TRACK * dt;
 
     this.state.arousal.value    = assertBounds(this.state.arousal.value    + dArousal,    0, 1, 'Cognitive Arousal');
     this.state.attention.value  = assertBounds(this.state.attention.value  + dAttention,  0, 1, 'Cognitive Attention');
@@ -159,8 +216,13 @@ export class CognitiveStateModel {
 
     // ── 7. Confidence intervals ─────────────────────────────────────────────
     // Confidence grows with sustained exposure to an effective stimulus.
-    // Decays with high masking (E low) or high fatigue.
-    const confRate = dt * 0.015 * E;
+    // NOTA (revisión externa 2026-09-06): esto usaba la E original
+    // (adapt*(1-fatigue*0.6)), que quedó huérfana cuando el acoplamiento de
+    // arriba pasó a usar `presence` (con piso ADAPT_FLOOR) — con adapt→0 en
+    // sesiones largas, confRate caía a 0 y la confianza quedaba congelada
+    // para siempre a partir de los ~20 min. Ahora sigue `presence`, con el
+    // mismo piso que ya tiene el resto del modelo: deliberado, no residual.
+    const confRate = dt * 0.015 * presence;
     this.state.arousal.confidence    = Math.min(1.0, this.state.arousal.confidence    + confRate);
     this.state.attention.confidence  = Math.min(1.0, this.state.attention.confidence  + confRate * 0.8);
     this.state.relaxation.confidence = Math.min(1.0, this.state.relaxation.confidence + confRate * 0.8);

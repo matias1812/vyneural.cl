@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "sitemap": "node scripts/generate-sitemap.mjs",
     "test": "node scripts/run-diagnostics.mjs"
   },
   "devDependencies": {

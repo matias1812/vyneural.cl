@@ -14,6 +14,12 @@ import { assertValidState, assertValidNeuralState, assertValidCognitiveState, as
 import { getProfileById, PROFILES } from '../models/profiles.js';
 import { SimulationConfig, SimulationSeed, buildExperimentRecord, MODEL_VERSION, mulberry32 } from '../core/reproducibility.js';
 import { WaveField } from '../wavefield.js';
+// FIX (auditoría 2026-09-08, Parte A): esto importaba de cymatics.js, pero
+// esa física ya no vive ahí — se extrajo a core/plate-field.js (fuente
+// única compartida por la vista 2D, la vista 3D y este validador). Mismos
+// nombres, mismos valores; solo cambió de dónde vienen.
+import { ZP_BY_M, modeOmega, gammaAt, PHYS_A, GAMMA_MIN, GAMMA_MAX, besselJ0, besselJ1, zPrimeApprox, MORPH_BLEND_K, SLOWMO_K, selectModeWithFallback } from '../core/plate-field.js';
+import { G as WAVE_G, SIGMA_RHO as WAVE_SIGMA_RHO } from '../core/wave-physics.js';
 import { buildSilentWav, ANCHOR_SECONDS } from '../core/media-anchor.js';
 import {
   evaluatePermissions,
@@ -256,7 +262,19 @@ export async function runBineuralDiagnostics() {
     }
   });
 
-  runTest('WaveField: Dirichlet BC — boundary cells remain zero', () => {
+  // RENOMBRADO (auditoría 2026-09-08, deuda de validación): esto se llamaba
+  // "Dirichlet BC — boundary cells remain zero" desde que la frontera
+  // ERA Dirichlet. step() pasó a Neumann (reflexión de gradiente nulo, ver
+  // el comentario "Reflexión de gradiente nulo" en wavefield.js:step()) pero
+  // el nombre del test nunca se actualizó — y lo que comprueba (que las
+  // celdas del BORDE DEL ARRAY, fuera de la máscara circular, sigan en 0)
+  // es cierto para CUALQUIER condición de frontera: step() fuerza u=0 fuera
+  // de mask[] sin importar Dirichlet o Neumann (ver "else { u[i] = 0; ... }"
+  // en step()). Sigue siendo una invariante útil (celdas exteriores nunca
+  // deben "filtrar" amplitud), pero no valida Neumann — eso lo hace el test
+  // siguiente, que sí mide la física de la frontera real (el borde de la
+  // máscara circular, no el borde del array).
+  runTest('WaveField: exterior-to-mask cells never leak amplitude (array-edge sanity check)', () => {
     const SIZE = 64;
     const wf = new WaveField(SIZE, { c: 0.4, damp: 0.995 });
     wf.setCircle(32, 32, 28);
@@ -270,6 +288,835 @@ export async function runBineuralDiagnostics() {
     for (let y = 0; y < SIZE; y++) {
       if (wf.u[y * SIZE] !== 0)          throw new Error(`Left edge cell (0,${y}) is non-zero.`);
       if (wf.u[y * SIZE + SIZE - 1] !== 0) throw new Error(`Right edge cell (N-1,${y}) is non-zero.`);
+    }
+  });
+
+  // NUEVO (auditoría 2026-09-08, deuda de validación real): la afirmación
+  // "la resonancia fundamental del FDTD pasó a corresponder al primer cero
+  // de J'_0 (3.8317), no al de J_0 (2.4048)" (comentario en wavefield.js,
+  // step()) se verificó a mano durante esa auditoría pero nunca quedó como
+  // test de regresión — nada impedía que una futura edición del stencil
+  // rompiera silenciosamente la frontera libre sin que ningún test lo
+  // notara. Este test mide DE VERDAD la física de la frontera:
+  //   1. Excita el centro con una gaussiana ancha y radialmente simétrica
+  //      (favorece el modo m=0, el único relevante para comparar contra
+  //      j'_{0,1} vs j_{0,1} — no hace falta descomponer en modos).
+  //   2. Deja evolver la onda sin amortiguación (damp=1) para no sesgar el
+  //      período medido, y mide el período real por cruces por cero
+  //      ascendentes en la celda central tras un breve transitorio.
+  //   3. Compara ω_medida = 2π/T contra la predicción de la ecuación de
+  //      onda simple ω = c·k (SIN dispersión gravedad-capilar — WaveField
+  //      resuelve u_tt=c²∇²u, no la ecuación de Faraday; esa dispersión
+  //      solo se usa en main.js para elegir `c(f)`, no vive en esta clase).
+  //   k_Neumann = j'_{0,1}/R = 3.8317/R (borde libre, lo que step() dice
+  //   implementar); k_Dirichlet = j_{0,1}/R = 2.4048/R (lo que era antes).
+  // Tolerancia 5%: cubre la dispersión numérica normal del stencil de 5
+  // puntos a esta resolución (medido en un experimento standalone: la
+  // discrepancia real es ~0,1-0,2%, muy por debajo del margen que usamos
+  // para absorber ruido de discretización sin acoplarnos a un valor exacto).
+  //
+  // AMPLITUD PEQUEÑA (medido, no arbitrario): con amplitud pico ~1 (dentro
+  // del rango normal de uso) la saturación tipo Stokes de step()
+  // (AMP_LIMIT·tanh(v/AMP_LIMIT), EMPIRICAL/no física — ver el comentario de
+  // step()) distorsiona el período medido hasta un 47% aunque la no
+  // linealidad por paso parezca chica, porque el error de fase se acumula a
+  // lo largo de las ~25 oscilaciones medidas. Este test busca la física
+  // LINEAL de la frontera, no la saturación no lineal, así que excita con
+  // amplitud pico 0.05 (bien dentro del régimen tanh(x)≈x) — confirmado en
+  // el mismo experimento que a esa amplitud el resultado es idéntico con o
+  // sin la saturación activa.
+  runTest("WaveField: free (Neumann) boundary — fundamental matches J'_0 zero (3.8317), not Dirichlet J_0 (2.4048)", () => {
+    const SIZE = 96;
+    const R = 40;
+    const c = 0.4;
+    const wf = new WaveField(SIZE, { c, damp: 1.0 });
+    wf.setCircle(SIZE / 2, SIZE / 2, R);
+    const cx = Math.round(SIZE / 2);
+    const cy = Math.round(SIZE / 2);
+    // Gaussiana ancha centrada: casi puramente m=0, sin usar pokeDisc (su
+    // spread por defecto es demasiado angosto y excita modos altos que
+    // contaminarían el período medido en la celda central).
+    const AMPLITUDE = 0.05;
+    const sigma = R * 0.35;
+    let sum = 0;
+    let cnt = 0;
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const i = y * SIZE + x;
+        if (!wf.mask[i]) continue;
+        const dx = x - cx;
+        const dy = y - cy;
+        const d2 = dx * dx + dy * dy;
+        wf.u[i] = AMPLITUDE * Math.exp(-d2 / (2 * sigma * sigma));
+        sum += wf.u[i];
+        cnt++;
+      }
+    }
+    // Media cero (mismo criterio físico que _seed en setCircle(): el
+    // Laplaciano de Neumann puro tiene espacio nulo u=constante — sin esto
+    // la excitación acopla al modo pistón, que no oscila y contamina el
+    // período medido en la celda central).
+    const mean = cnt > 0 ? sum / cnt : 0;
+    for (let i = 0; i < wf.n; i++) if (wf.mask[i]) wf.u[i] -= mean;
+    wf.prev.set(wf.u);
+
+    const ci = cy * SIZE + cx;
+    const samples = [];
+    const STEPS = 4000;
+    for (let s = 0; s < STEPS; s++) {
+      wf.step();
+      samples.push(wf.u[ci]);
+    }
+    const crossings = [];
+    for (let i = 1; i < samples.length; i++) {
+      if (samples[i - 1] < 0 && samples[i] >= 0) crossings.push(i);
+    }
+    if (crossings.length < 4) {
+      throw new Error(`Only ${crossings.length} zero-crossings found — not enough oscillation to measure a period.`);
+    }
+    const periods = [];
+    for (let k = 1; k < crossings.length; k++) periods.push(crossings[k] - crossings[k - 1]);
+    const avgPeriod = periods.reduce((a, b) => a + b, 0) / periods.length;
+    const omegaMeasured = (2 * Math.PI) / avgPeriod;
+    const omegaNeumann = c * (3.8317 / R);
+    const omegaDirichlet = c * (2.4048 / R);
+    const relErrNeumann = Math.abs(omegaMeasured - omegaNeumann) / omegaNeumann;
+    if (relErrNeumann > 0.05) {
+      throw new Error(
+        `Measured ω=${omegaMeasured.toFixed(6)} is ${(relErrNeumann * 100).toFixed(1)}% off the Neumann ` +
+        `prediction ω=${omegaNeumann.toFixed(6)} (Dirichlet would predict ω=${omegaDirichlet.toFixed(6)}). ` +
+        `The free-boundary stencil in step() may have regressed to (or towards) Dirichlet behavior.`
+      );
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // CYMATICS EIGENMODE PHYSICS TESTS (FASE 20 — cierra deuda de
+  // docs/validation-report.md: "no hay validación numérica de las funciones
+  // de Bessel contra valores conocidos ni del detuning". Los valores de
+  // referencia de abajo están transcritos de tablas publicadas (Abramowitz &
+  // Stegun, Tabla 9.5 — ceros de J'_m — y los mismos números aparecen como
+  // las constantes de corte de modo TE_mn en guías de onda circulares), NO
+  // copiados de ZP_BY_M — comparar la tabla contra sí misma no validaría
+  // nada.)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('Cymatics: ZP_BY_M matches published zeros of J\'_m (Abramowitz & Stegun 9.5)', () => {
+    // j'_{m,n}: n-ésimo cero de J'_m, m = 0..6, n = 1..3 (primeros tres).
+    // Nota: los ceros de J'_0 coinciden exactamente con los ceros de J_1
+    // (identidad J_0' = -J_1), lo que da una vía de verificación cruzada
+    // independiente para la fila m=0.
+    const REFERENCE = {
+      0: [3.8317, 7.0156, 10.1735],
+      1: [1.8412, 5.3314, 8.5363],
+      2: [3.0542, 6.7061, 9.9695],
+      3: [4.2012, 8.0152, 11.3459],
+      4: [5.3176, 9.2824, 12.6819],
+      5: [6.4156, 10.5199, 13.9872],
+      6: [7.5013, 11.7349, 15.2682],
+    };
+    for (const m of Object.keys(REFERENCE)) {
+      const mm = Number(m);
+      for (let n = 0; n < REFERENCE[m].length; n++) {
+        const got = ZP_BY_M[mm][n];
+        const want = REFERENCE[m][n];
+        if (Math.abs(got - want) > 1e-3) {
+          throw new Error(
+            `ZP_BY_M[${mm}][${n}] = ${got}, esperado j'_{${mm},${n + 1}} ≈ ${want} (Δ=${Math.abs(got - want).toFixed(4)})`
+          );
+        }
+      }
+    }
+  });
+
+  // NUEVO (auditoría 2026-09-08, deuda de verificación externa): besselJ0/J1
+  // tenían dos ramas — serie de potencias (x<8) y forma asintótica (x≥8) —
+  // que antes NO coincidían en el borde, por DOS bugs independientes
+  // encontrados al intentar construir una tabla de ceros de referencia de
+  // alta precisión para medir el error de zPrimeApprox (ver el comentario
+  // de zPrimeApprox más abajo):
+  //   1. La rama asintótica solo llevaba el término de orden líder (sin la
+  //      corrección O(1/x) de Abramowitz & Stegun 9.2.5) — corregido
+  //      agregando el término Q(ν,x).
+  //   2. La serie de potencias cortaba en 10 términos, insuficiente para
+  //      converger cerca de x=8 (J0(7,99) con 10 términos da 0,1836; el
+  //      valor real es 0,17399, ~5,5% de error) — corregido subiendo a 16
+  //      términos (converge a <1e-9 en todo x<8).
+  // IMPORTANTE sobre este test: comparar besselJ0(8-h) con besselJ0(8+h)
+  // con h "razonable" (ej. 0,01) NO mide el artefacto de frontera — mide
+  // sobre todo la pendiente NATURAL de J0 en ese tramo (J0'(8)≈-J1(8)≈
+  // -0,235, así que ya se espera un cambio real de ~2h·0,235 con o sin
+  // ningún bug). Confirmado empíricamente: con h=0,01 y h=0,001 la
+  // diferencia medida escala proporcional a h (es la pendiente); recién con
+  // h≲1e-5 el término de pendiente se vuelve despreciable frente al
+  // artefacto real de discontinuidad, que se estabiliza en ~2-4e-5 y deja de
+  // achicarse aunque h siga bajando — ESO es lo que este test verifica,
+  // usando un h deliberadamente minúsculo para aislarlo.
+  runTest('Cymatics: besselJ0/J1 are continuous across the series↔asymptotic branch boundary (x=8)', () => {
+    const h = 1e-6; // deliberadamente minúsculo — ver nota arriba sobre por qué un h "normal" no sirve para esto
+    const j0Below = besselJ0(8 - h);
+    const j0Above = besselJ0(8 + h);
+    const j1Below = besselJ1(8 - h);
+    const j1Above = besselJ1(8 + h);
+    const TOL = 1e-4; // ~3-5× el artefacto residual medido (~2-4e-5), muy por debajo del salto pre-fix (~3-8e-3) y muy por encima de la pendiente natural esperada a este h (~5e-7)
+    if (Math.abs(j0Above - j0Below) > TOL) {
+      throw new Error(`besselJ0 discontinuous at x=8: J0(8-h)=${j0Below}, J0(8+h)=${j0Above}, Δ=${Math.abs(j0Above - j0Below).toExponential(2)}`);
+    }
+    if (Math.abs(j1Above - j1Below) > TOL) {
+      throw new Error(`besselJ1 discontinuous at x=8: J1(8-h)=${j1Below}, J1(8+h)=${j1Above}, Δ=${Math.abs(j1Above - j1Below).toExponential(2)}`);
+    }
+  });
+
+  // NUEVO (deuda de verificación externa — investigación del error de
+  // zPrimeApprox para n>10, docs/validation-report.md FASE 20): dos
+  // críticas externas independientes estimaron el error de esta
+  // aproximación de McMahon en ~4% para m=6,n=17. Se verificó numéricamente
+  // (construyendo un buscador de ceros propio sobre la recurrencia real de
+  // Bessel, validado primero contra ZP_BY_M) que el orden de magnitud es
+  // correcto — varios % de error, creciendo con m y decreciendo con n —
+  // pero NO se pudo fijar un valor exacto de referencia confiable para
+  // m≥4 en n>~8: la MISMA recurrencia ascendente que evalúa besselJArray()
+  // acumula error creciente ahí (medido: 2,6e-2 absoluto en m=6,n=10, ya
+  // mayor que la precisión típica de una tabla publicada), un problema
+  // numérico DISTINTO del error de McMahon y que necesitaría recurrencia
+  // descendente (algoritmo de Miller) para resolverse bien — fuera de
+  // alcance de este test. Por eso este test NO fija un número de error
+  // exacto (sería anclarse a una referencia de la que no hay certeza total)
+  // y en cambio verifica solo las propiedades que SÍ se pueden garantizar
+  // sin ese trabajo adicional: la aproximación crece monótonamente con n, y
+  // el espaciado entre ceros consecutivos tiende a π (la propiedad
+  // asintótica en la que se basa, ver el comentario de zPrimeApprox).
+  runTest('Cymatics: zPrimeApprox is monotonically increasing with ~π spacing (McMahon asymptotic sanity)', () => {
+    for (let m = 0; m <= 6; m++) {
+      let prev = zPrimeApprox(m, 1);
+      for (let n = 2; n <= 24; n++) {
+        const cur = zPrimeApprox(m, n);
+        if (cur <= prev) {
+          throw new Error(`zPrimeApprox(${m}, ${n})=${cur} is not greater than zPrimeApprox(${m}, ${n - 1})=${prev}`);
+        }
+        const spacing = cur - prev;
+        if (Math.abs(spacing - Math.PI) > 1e-9) {
+          throw new Error(`zPrimeApprox(${m}, ${n}) - zPrimeApprox(${m}, ${n - 1}) = ${spacing}, expected exactly π (by construction of the formula)`);
+        }
+        prev = cur;
+      }
+    }
+  });
+
+  // Regresión (2026-09-08, "colisionador de frecuencias"): cymatics.js
+  // calculaba el τ del fundido cruzado entre modos (Parte B) con SLOWMO_K
+  // (330, el factor de cámara lenta de una oscilación VISIBLE — Parte D) en
+  // vez de MORPH_BLEND_K (una constante propia, dedicada al fundido). Con
+  // SLOWMO_K el peor caso natural (γ=GAMMA_MIN) tardaba ~4·330/6 ≈ 220s en
+  // asentar, y durante TODA esa ventana la búsqueda de modo queda bloqueada
+  // (ver lockSrc en cymatics.js) — cualquier cambio de frecuencia real que
+  // llegara mientras tanto no tenía efecto visible hasta que por fin se
+  // liberaba: el patrón se veía congelado y después saltaba de golpe. Este
+  // test fija el contrato: el peor caso de fundido (4τ en γ=GAMMA_MIN) debe
+  // quedar en el orden de unos pocos segundos, nunca minutos, y MORPH_BLEND_K
+  // debe ser una constante DISTINTA de SLOWMO_K (si algún día vuelven a
+  // coincidir por casualidad, no sería necesariamente este bug de vuelta,
+  // pero es una señal de alarma para revisar el criterio de arriba).
+  runTest('Cymatics: mode-morph blend duration stays in the few-seconds range, not minutes (SLOWMO_K vs MORPH_BLEND_K)', () => {
+    if (MORPH_BLEND_K === SLOWMO_K) {
+      throw new Error(
+        `MORPH_BLEND_K (${MORPH_BLEND_K}) equals SLOWMO_K (${SLOWMO_K}) — the mode-morph cross-fade must use its own ` +
+          'constant, decoupled from the slow-motion oscillation factor (see the note next to MORPH_BLEND_K in plate-field.js).',
+      );
+    }
+    const worstCaseTau = MORPH_BLEND_K / GAMMA_MIN; // slowest natural decay (high carrier frequencies)
+    const worstCaseFullFade = 4 * worstCaseTau; // time for oldW to decay below the 0.02 shader threshold
+    if (worstCaseFullFade > 10) {
+      throw new Error(
+        `Worst-case morph fade is ${worstCaseFullFade.toFixed(1)}s (MORPH_BLEND_K=${MORPH_BLEND_K}, GAMMA_MIN=${GAMMA_MIN}) — ` +
+          'a mode transition should settle within a few seconds, not tens of seconds or minutes: while it is mid-fade the ' +
+          'mode search stays locked (see lockSrc in cymatics.js), so a long fade makes further frequency changes look frozen ' +
+          'and then jump once it finally releases.',
+      );
+    }
+    const bestCaseTau = MORPH_BLEND_K / GAMMA_MAX; // fastest natural decay (low carrier frequencies)
+    if (4 * bestCaseTau < 0.5) {
+      throw new Error(
+        `Best-case morph fade is ${(4 * bestCaseTau).toFixed(2)}s — too abrupt to read as a blend rather than a hard cut.`,
+      );
+    }
+  });
+
+  // Regresión (2026-09-08, "no es estable" reportado DESPUÉS del fix de
+  // MORPH_BLEND_K de arriba — el problema dominante no era la duración de
+  // cada transición, era que la búsqueda de modo daba UN solo paso hacia el
+  // objetivo (`modeStepToward`) por CICLO de transición (candado de modo:
+  // un paso por fundido completo, no por fotograma). Con una portadora
+  // aguda (963 Hz necesita n≈17, ver el test de abajo) el objetivo real
+  // podía estar a 10-30 pasos del modo asentado — un harness que reproduce
+  // la máquina de estados de cymatics.js (candado + fundido + búsqueda) FUERA
+  // del navegador mostró que esto NUNCA convergía en 60s simulados para
+  // df=963 Hz fijo: seguía encadenando una transición nueva cada ~4s
+  // indefinidamente, aun sin que el usuario tocara nada más. Fix: ir directo
+  // al modo encontrado por selectModeWithFallback/la fórmula del latido, sin
+  // trocearlo — la relajación física independiente de la Parte B (oldW/newW
+  // no complementarios) no necesita el paso a paso que sí hacía falta bajo
+  // el cross-dissolve anterior (ver la nota junto a modeStepToward en
+  // plate-field.js). Este test reproduce la búsqueda real (mismas funciones
+  // que usa cymatics.js) para confirmar que, partiendo de un modo lejano,
+  // el objetivo se alcanza en UNA sola resolución, no una cadena.
+  runTest('Cymatics: mode selection reaches its target in one shot, not a chained walk (regression for "no es estable")', async () => {
+    // Mismo criterio de doble propósito que el test del menú ⋯ más arriba:
+    // (a) blindaje de texto — modeStepToward ya no debe limitar la búsqueda
+    // de modo por fotograma en cymatics.js — y (b) comportamiento real,
+    // simulando la máquina de estados con las MISMAS funciones exportadas
+    // que usa el renderer.
+    // (a) Guard de texto — solo en Node, mismo patrón que el test del menú ⋯.
+    if (typeof process !== 'undefined') {
+      const fs = await import(/* @vite-ignore */ 'node:fs');
+      const root = process.cwd();
+      const js = fs.readFileSync(root + '/src/cymatics.js', 'utf8');
+      // Solo se prohíbe IMPORTARLA o LLAMARLA — las menciones en comentarios
+      // (historial de esta misma auditoría) son intencionales y deseables.
+      if (/\bimport\s*\{[^}]*\bmodeStepToward\b/.test(js) || /\bmodeStepToward\s*\(/.test(js)) {
+        throw new Error(
+          'cymatics.js ya no debe importar/usar modeStepToward: limitar la búsqueda de modo a un paso por ciclo de ' +
+            'transición reintroduce el encadenamiento de transiciones que nunca converge (ver la nota junto a ' +
+            'MORPH_BLEND_K y modeStepToward).',
+        );
+      }
+    }
+    // (b) Comportamiento real: replica MÍNIMA de la máquina de estados de
+    // cymatics.js (candado de modo + ciclo de construcción/fundido), pero
+    // usando selectModeWithFallback/modeOmega/gammaAt REALES — si alguien
+    // reintroduce un limitador de paso en OTRA forma (no necesariamente
+    // llamado modeStepToward), esto lo atrapa igual porque mide convergencia
+    // real, no el nombre de una función.
+    // FEATURE (2026-09-08, "hagamos que se interpole"): la simulación ahora
+    // también modela la cola de waypoints (`_waypointQueue`/
+    // `_computeModeWaypoints` reales de cymatics.js) — un salto grande de
+    // modo se planifica DE UNA VEZ como un camino acotado (máximo 4 pasos:
+    // 3 intermedios + el objetivo final) en vez de re-buscar cuadro a
+    // cuadro, así que sigue siendo, por construcción, un proceso que
+    // termina — solo que ahora con más pasos totales (cada waypoint es su
+    // propia transición completa). El techo de "cuántas transiciones son
+    // razonables" sube para reflejar eso, pero sigue acotado: nunca debe
+    // crecer sin límite.
+    const DT = 1 / 60;
+    // FIX (2026-09-12, "cambia entre formas erráticamente"): las paradas
+    // intermedias ahora se buscan acotadas a m∈[min(mOld,mNew),
+    // max(mOld,mNew)] — ver la nota completa junto a `_computeModeWaypoints`
+    // real en cymatics.js. Esta réplica del harness necesita el mismo
+    // acotado o dejaría de simular el comportamiento real.
+    function computeWaypoints(mOld, nOld, mNew, nNew) {
+      const fOld = modeOmega(mOld, nOld, PHYS_A) / Math.PI;
+      const fNew = modeOmega(mNew, nNew, PHYS_A) / Math.PI;
+      const STEPS = 1; // debe seguir el mismo valor que _computeModeWaypoints en cymatics.js
+      const mLo = Math.min(mOld, mNew);
+      const mHi = Math.max(mOld, mNew);
+      const waypoints = [];
+      let last = { m: mOld, n: nOld };
+      for (let k = 1; k <= STEPS; k++) {
+        const fMid = fOld + (fNew - fOld) * (k / (STEPS + 1));
+        const found = selectModeWithFallback(Math.PI * Math.max(1, fMid), PHYS_A, fMid, { mMin: mLo, mMax: mHi });
+        if (found.m !== last.m || found.n !== last.n) {
+          waypoints.push({ m: found.m, n: found.n });
+          last = { m: found.m, n: found.n };
+        }
+      }
+      if (!waypoints.length || last.m !== mNew || last.n !== nNew) waypoints.push({ m: mNew, n: nNew });
+      return waypoints;
+    }
+    function simulateSingleClick(fromF, toF, seconds) {
+      let heldF = fromF;
+      let curMode = null;
+      let pendingFrames = 0;
+      let pendingMode = null;
+      let morph = null;
+      let lastKey = '';
+      let transitions = 0;
+      let queue = [];
+      const WAYPOINT_MODE_DIST_MIN = 5;
+      const nFrames = Math.round(seconds / DT);
+      for (let i = 0; i < nFrames; i++) {
+        const t = i * DT;
+        const target = t < 1 ? fromF : toF;
+        heldF += (target - heldF) * (1 - Math.exp(-DT / 1.0));
+        const df = heldF;
+        const ws = Math.PI * df;
+        const morphingActive = morph && morph.oldW > 0.02;
+        const locked = pendingMode || (morphingActive && curMode);
+        let m, nn;
+        if (locked) {
+          m = locked.m;
+          nn = locked.n;
+        } else if (queue.length) {
+          const wp = queue.shift();
+          m = wp.m;
+          nn = wp.n;
+        } else {
+          const found = selectModeWithFallback(ws, PHYS_A, df);
+          if (curMode && Math.abs(curMode.m - found.m) + Math.abs(curMode.n - found.n) >= WAYPOINT_MODE_DIST_MIN) {
+            const path = computeWaypoints(curMode.m, curMode.n, found.m, found.n);
+            const first = path.shift();
+            m = first.m;
+            nn = first.n;
+            queue = path;
+          } else {
+            m = found.m;
+            nn = found.n;
+          }
+        }
+        const key = `${m}|${nn}`;
+        if (key !== lastKey) {
+          if (curMode && !morphingActive) {
+            const fOld = modeOmega(curMode.m, curMode.n, PHYS_A) / Math.PI;
+            const fNew = modeOmega(m, nn, PHYS_A) / Math.PI;
+            const modeDist = Math.abs(curMode.m - m) + Math.abs(curMode.n - nn);
+            const distScale = 1 + Math.min(2, modeDist * 0.15);
+            morph = {
+              oldW: 1,
+              newW: 0,
+              tauOld: (MORPH_BLEND_K * distScale) / gammaAt(fOld),
+              tauNew: (MORPH_BLEND_K * distScale) / gammaAt(fNew),
+            };
+            transitions++;
+          }
+          lastKey = key;
+        }
+        if (!pendingMode || pendingMode.m !== m || pendingMode.n !== nn) {
+          pendingMode = curMode && curMode.m === m && curMode.n === nn ? null : { m, n: nn };
+          pendingFrames = pendingMode ? 8 : 0;
+        }
+        if (pendingMode) {
+          pendingFrames--;
+          if (pendingFrames <= 0) {
+            curMode = pendingMode;
+            pendingMode = null;
+          }
+        }
+        if (morph && !pendingMode) {
+          morph.newW += (1 - morph.newW) * (1 - Math.exp(-DT / morph.tauNew));
+          morph.oldW += (0 - morph.oldW) * (1 - Math.exp(-DT / morph.tauOld));
+          if (morph.oldW < 0.02) morph = null;
+        }
+      }
+      const trueTarget = selectModeWithFallback(Math.PI * toF, PHYS_A, toF);
+      return { transitions, curMode, trueTarget: { m: trueTarget.m, n: trueTarget.n } };
+    }
+    for (const [fromF, toF] of [[220, 963], [963, 220], [7.83, 963], [220, 60]]) {
+      const { transitions, curMode, trueTarget } = simulateSingleClick(fromF, toF, 90);
+      if (curMode.m !== trueTarget.m || curMode.n !== trueTarget.n) {
+        throw new Error(
+          `Mode selection for ${fromF}→${toF} Hz never converged to the true target within 90s: settled at ` +
+            `(${curMode.m},${curMode.n}), true target is (${trueTarget.m},${trueTarget.n}) — transitions=${transitions}.`,
+        );
+      }
+      if (transitions > 20) {
+        throw new Error(
+          `Mode selection for ${fromF}→${toF} Hz took ${transitions} chained transitions to reach ` +
+            `(${trueTarget.m},${trueTarget.n}) — even with the real-resonance waypoint sweep (bounded to a few ` +
+            'waypoints per jump), this should stay bounded, not grow without limit.',
+        );
+      }
+    }
+  });
+
+  runTest('Cymatics: redirecting to a new target mid-sweep discards the stale waypoint queue instead of chasing the abandoned one (regression for "se volvió errática" on an apparently-static frequency)', () => {
+    // FIX (2026-09-12): `this._waypointQueue[i]` se drenaba siempre que
+    // tuviera algo, SIN comparar el último paso de la cola contra el
+    // objetivo REAL de ese fotograma (`found`, recalculado cada frame desde
+    // `df`). Si el usuario cambiaba de frecuencia de nuevo mientras un
+    // barrido anterior todavía estaba a mitad de camino, el código seguía
+    // persiguiendo el objetivo VIEJO y ABANDONADO hasta drenar toda la
+    // cola — el usuario, ya "quieto" en la frecuencia nueva, seguía viendo
+    // cambios de forma "espontáneos" muchos segundos después de su última
+    // interacción real. Simula: A(190Hz)→B(963Hz) a t=1s, luego B→C(220Hz)
+    // a t=8s — ANTES de que el barrido hacia B termine (~20s) — y verifica
+    // que el patrón llega al objetivo VERDADERO de C sin primero completar
+    // el viaje entero hacia B.
+    const DT = 1 / 60;
+    const STEPS = 1; // debe seguir el mismo valor que _computeModeWaypoints en cymatics.js
+    const WAYPOINT_MODE_DIST_MIN = 5;
+    function computeWaypoints(mOld, nOld, mNew, nNew) {
+      const fOld = modeOmega(mOld, nOld, PHYS_A) / Math.PI;
+      const fNew = modeOmega(mNew, nNew, PHYS_A) / Math.PI;
+      const mLo = Math.min(mOld, mNew);
+      const mHi = Math.max(mOld, mNew);
+      const waypoints = [];
+      let last = { m: mOld, n: nOld };
+      for (let k = 1; k <= STEPS; k++) {
+        const fMid = fOld + (fNew - fOld) * (k / (STEPS + 1));
+        const found = selectModeWithFallback(Math.PI * Math.max(1, fMid), PHYS_A, fMid, { mMin: mLo, mMax: mHi });
+        if (found.m !== last.m || found.n !== last.n) {
+          waypoints.push({ m: found.m, n: found.n });
+          last = { m: found.m, n: found.n };
+        }
+      }
+      if (!waypoints.length || last.m !== mNew || last.n !== nNew) waypoints.push({ m: mNew, n: nNew });
+      return waypoints;
+    }
+    function simulateRedirect(targets, switchTimes, totalSeconds) {
+      let heldF = targets[0];
+      let curMode = null;
+      let pendingFrames = 0;
+      let pendingMode = null;
+      let morph = null;
+      let lastKey = '';
+      let queue = [];
+      let reachedAbandonedTarget = false;
+      const abandoned = selectModeWithFallback(Math.PI * targets[1], PHYS_A, targets[1]);
+      const nFrames = Math.round(totalSeconds / DT);
+      let redirectSettleT = null;
+      const trueFinal = selectModeWithFallback(Math.PI * targets[targets.length - 1], PHYS_A, targets[targets.length - 1]);
+      for (let i = 0; i < nFrames; i++) {
+        const t = i * DT;
+        let target = targets[0];
+        for (let s = 0; s < switchTimes.length; s++) if (t >= switchTimes[s]) target = targets[s + 1];
+        heldF += (target - heldF) * (1 - Math.exp(-DT / 1.0));
+        const df = heldF;
+        const ws = Math.PI * df;
+        const morphingActive = morph && morph.oldW > 0.02;
+        const locked = pendingMode || (morphingActive && curMode);
+        let m, nn;
+        if (locked) {
+          m = locked.m;
+          nn = locked.n;
+        } else {
+          const found = selectModeWithFallback(ws, PHYS_A, df);
+          if (queue.length) {
+            const last = queue[queue.length - 1];
+            if (last.m !== found.m || last.n !== found.n) queue = [];
+          }
+          if (queue.length) {
+            const wp = queue.shift();
+            m = wp.m;
+            nn = wp.n;
+          } else if (curMode && Math.abs(curMode.m - found.m) + Math.abs(curMode.n - found.n) >= WAYPOINT_MODE_DIST_MIN) {
+            const path = computeWaypoints(curMode.m, curMode.n, found.m, found.n);
+            const first = path.shift();
+            m = first.m;
+            nn = first.n;
+            queue = path;
+          } else {
+            m = found.m;
+            nn = found.n;
+          }
+        }
+        const key = `${m}|${nn}`;
+        if (key !== lastKey) {
+          if (curMode && !morphingActive) {
+            const fOld = modeOmega(curMode.m, curMode.n, PHYS_A) / Math.PI;
+            const fNew = modeOmega(m, nn, PHYS_A) / Math.PI;
+            const modeDist = Math.abs(curMode.m - m) + Math.abs(curMode.n - nn);
+            const distScale = 1 + Math.min(2, modeDist * 0.15);
+            morph = {
+              oldW: 1,
+              newW: 0,
+              tauOld: (MORPH_BLEND_K * distScale) / gammaAt(fOld),
+              tauNew: (MORPH_BLEND_K * distScale) / gammaAt(fNew),
+            };
+          }
+          lastKey = key;
+        }
+        if (!pendingMode || pendingMode.m !== m || pendingMode.n !== nn) {
+          pendingMode = curMode && curMode.m === m && curMode.n === nn ? null : { m, n: nn };
+          pendingFrames = pendingMode ? 8 : 0;
+        }
+        if (pendingMode) {
+          pendingFrames--;
+          if (pendingFrames <= 0) {
+            curMode = pendingMode;
+            pendingMode = null;
+            if (t >= switchTimes[0] && curMode.m === abandoned.m && curMode.n === abandoned.n) reachedAbandonedTarget = true;
+            if (t >= switchTimes[1] && redirectSettleT == null && curMode.m === trueFinal.m && curMode.n === trueFinal.n) {
+              redirectSettleT = t;
+            }
+          }
+        }
+        if (morph && !pendingMode) {
+          morph.newW += (1 - morph.newW) * (1 - Math.exp(-DT / morph.tauNew));
+          morph.oldW += (0 - morph.oldW) * (1 - Math.exp(-DT / morph.tauOld));
+          if (morph.oldW < 0.02) morph = null;
+        }
+      }
+      return { curMode, trueFinal, redirectSettleT, reachedAbandonedTargetAfterRedirect: reachedAbandonedTarget };
+    }
+    const { curMode, trueFinal, redirectSettleT } = simulateRedirect([190, 963, 220], [1, 8], 60);
+    if (curMode.m !== trueFinal.m || curMode.n !== trueFinal.n) {
+      throw new Error(
+        `Tras redirigir de 963Hz a 220Hz a mitad de barrido, el patrón nunca llegó al objetivo real de 220Hz — quedó ` +
+          `en (${curMode.m},${curMode.n}), debería ser (${trueFinal.m},${trueFinal.n}).`,
+      );
+    }
+    if (redirectSettleT == null || redirectSettleT > 25) {
+      throw new Error(
+        `Tras redirigir a 220Hz en t=8s (antes de que el barrido hacia 963Hz terminara), tardó ` +
+          `${redirectSettleT == null ? 'más de 60s' : redirectSettleT.toFixed(1) + 's'} en asentar en el objetivo real — ` +
+          'demasiado: sugiere que primero terminó de perseguir el objetivo abandonado (963Hz) antes de atender el ' +
+          'redirect (regresión de la cola de waypoints obsoleta).',
+      );
+    }
+  });
+
+  runTest('Cymatics: mode-waypoint path never visits a petal count (m) outside the [mOld,mNew] envelope (regression for "cambia entre formas erráticamente")', () => {
+    // FIX (2026-09-12): antes, cada parada intermedia del camino de
+    // waypoints buscaba el modo mejor afinado en m∈[2,6] SIN mirar si ese m
+    // quedaba lejos de ambos extremos — para 190→963 Hz (m viejo=3, m
+    // nuevo=2) el camino real pasaba por m=5 Y m=1 en el medio: la cantidad
+    // de pétalos subía y bajaba de golpe en vez de progresar, lo que se leía
+    // como "cambia de forma erráticamente". `_computeModeWaypoints` ahora
+    // acota la búsqueda de cada parada a m∈[min(mOld,mNew),
+    // max(mOld,mNew)] — este test reimplementa esa función tal cual (mismo
+    // criterio que el resto de los tests de esta saga, no puede importar el
+    // método privado de la clase sin un canvas) y verifica que NINGÚN
+    // waypoint intermedio, para los pares de frecuencia ya cubiertos en
+    // otros tests de esta suite, quede fuera de ese rango.
+    function computeModeWaypoints(mOld, nOld, mNew, nNew) {
+      const fOld = modeOmega(mOld, nOld, PHYS_A) / Math.PI;
+      const fNew = modeOmega(mNew, nNew, PHYS_A) / Math.PI;
+      const STEPS = 1; // debe seguir el mismo valor que _computeModeWaypoints en cymatics.js
+      const mLo = Math.min(mOld, mNew);
+      const mHi = Math.max(mOld, mNew);
+      const waypoints = [];
+      let last = { m: mOld, n: nOld };
+      for (let k = 1; k <= STEPS; k++) {
+        const fMid = fOld + (fNew - fOld) * (k / (STEPS + 1));
+        const found = selectModeWithFallback(Math.PI * Math.max(1, fMid), PHYS_A, fMid, { mMin: mLo, mMax: mHi });
+        if (found.m !== last.m || found.n !== last.n) {
+          waypoints.push({ m: found.m, n: found.n });
+          last = { m: found.m, n: found.n };
+        }
+      }
+      if (!waypoints.length || last.m !== mNew || last.n !== nNew) waypoints.push({ m: mNew, n: nNew });
+      return waypoints;
+    }
+    for (const [fromF, toF] of [[190, 963], [963, 190], [220, 963], [963, 220], [7.83, 963], [220, 60]]) {
+      const from = selectModeWithFallback(Math.PI * fromF, PHYS_A, fromF);
+      const to = selectModeWithFallback(Math.PI * toF, PHYS_A, toF);
+      const mLo = Math.min(from.m, to.m);
+      const mHi = Math.max(from.m, to.m);
+      const path = computeModeWaypoints(from.m, from.n, to.m, to.n);
+      for (const wp of path) {
+        if (wp.m < mLo || wp.m > mHi) {
+          throw new Error(
+            `Waypoint (${wp.m},${wp.n}) en el camino ${fromF}→${toF} Hz tiene m=${wp.m}, fuera del rango ` +
+              `[${mLo},${mHi}] que cubren los extremos (m=${from.m} y m=${to.m}) — vuelve a producir un salto de ` +
+              'cantidad de pétalos que no progresa (regresión de "cambia entre formas erráticamente").',
+          );
+        }
+      }
+    }
+  });
+
+  // Regresión (2026-09-08, "no se ve la metamorfosis"/"corte instantáneo,
+  // sin mezcla" — confirmado en vivo con introspección directa del render:
+  // `_morph[i].oldW` se corrompía a NaN en el PRIMER fotograma de CADA
+  // fundido cruzado). Causa: la instantánea `this._lastP[i]` (usada más
+  // tarde para calcular `fCenterOld = modeOmega(lp.mDom, lp.nDom, ...)`, el
+  // centro de resonancia de la flor SALIENTE) guardaba `mDom` pero no
+  // `nDom` — `lp.nDom` era `undefined`, así que `modeOmega` devolvía NaN,
+  // `tauOld` (MORPH_BLEND_K/gammaAt(NaN)) daba NaN, y `oldW` quedaba en NaN
+  // para siempre desde la primera actualización. Efecto en cascada: (a)
+  // `NaN > 0.02` es falso en el shader, así que la flor VIEJA dejaba de
+  // aportar nada desde el instante cero — ningún fundido visible, un corte
+  // duro; (b) `NaN > 0.02` también es falso en `alreadyMorphing` (el
+  // candado que evita arrancar un segundo fundido encima del primero), así
+  // que el candado quedaba roto tras la PRIMERA transición de cada gota.
+  // Este test lee el código fuente (mismo patrón que el guard de
+  // modeStepToward más arriba) y confirma que `nDom` se guarda junto a
+  // `mDom` en esa instantánea — si alguien vuelve a separarlos, este test
+  // debe fallar antes de que llegue a producción otra vez.
+  runTest('Cymatics: the outgoing-pattern snapshot (_lastP) stores nDom, not just mDom (regression for "no se ve la metamorfosis")', async () => {
+    if (typeof process === 'undefined') return;
+    const fs = await import(/* @vite-ignore */ 'node:fs');
+    const root = process.cwd();
+    const js = fs.readFileSync(root + '/src/cymatics.js', 'utf8');
+    // Encuentra el objeto literal de `this._lastP[i] = { ... }` y confirma
+    // que incluye `nDom:` en el mismo bloque que `mDom:` — sin asumir el
+    // orden exacto de los campos, solo que ambos están dentro del MISMO
+    // objeto (entre la asignación y su cierre `};`).
+    const m = js.match(/this\._lastP\[i\]\s*=\s*\{([\s\S]*?)\n\s*\};/);
+    if (!m) {
+      throw new Error('No se encontró la asignación this._lastP[i] = { ... } en cymatics.js — ¿se movió o renombró?');
+    }
+    const body = m[1];
+    if (!/\bmDom\s*:/.test(body)) {
+      throw new Error('this._lastP[i] ya no guarda mDom — el test no puede verificar el bug sin esta referencia.');
+    }
+    if (!/\bnDom\s*:/.test(body)) {
+      throw new Error(
+        'this._lastP[i] no guarda nDom (solo mDom) — esto reintroduce el bug donde fCenterOld/tauOld dan NaN y el ' +
+          'fundido cruzado de la flor saliente nunca se ve (corte instantáneo en vez de una transición real).',
+      );
+    }
+  });
+
+  // Regresión (2026-09-08, "va bien y luego salta" / "se queda pegado y
+  // después salta de golpe" — reportado específicamente para saltos GRANDES
+  // de frecuencia, confirmado en vivo: la mezcla es suave para cambios de
+  // modo chicos pero un salto grande de (m,n) —medido n=5→n=17 para un
+  // salto real 190→963 Hz— se resolvía en la MISMA duración corta que un
+  // cambio chico, así que se leía como un salto en vez de una
+  // reorganización). El fundido ahora se alarga con `distScale` según
+  // cuánto cambia el modo, acotado por `MORPH_DIST_SCALE_MAX` — y ese
+  // mismo techo tiene que multiplicar `MAX_MORPH_AGE_S` (el respaldo de
+  // seguridad), o dispararía ANTES de que un fundido grande legítimo
+  // termine de asentar. Este test (a) confirma que existe un factor de
+  // escala ligado al cambio de modo en el punto donde arranca cada
+  // fundido, y (b) que `MAX_MORPH_AGE_S` usa ese MISMO techo, no un número
+  // suelto — si algún día se desincronizan, es exactamente el bug que
+  // reintroduciría el "salta de golpe" reportado.
+  runTest('Cymatics: morph duration scales with mode-change distance, and the safety cap tracks the same max scale (regression for "va bien y luego salta")', async () => {
+    if (typeof process === 'undefined') return;
+    const fs = await import(/* @vite-ignore */ 'node:fs');
+    const root = process.cwd();
+    const js = fs.readFileSync(root + '/src/cymatics.js', 'utf8');
+    const distScaleMatch = js.match(/const\s+MORPH_DIST_SCALE_MAX\s*=\s*(\d+(?:\.\d+)?)/);
+    if (!distScaleMatch) {
+      throw new Error(
+        'No se encontró MORPH_DIST_SCALE_MAX en cymatics.js — el fundido cruzado volvió a ignorar cuán distinto es ' +
+          'el modo viejo del nuevo, reintroduciendo "va bien y luego salta" para saltos grandes de frecuencia.',
+      );
+    }
+    const maxScale = Number(distScaleMatch[1]);
+    if (!(maxScale > 1)) {
+      throw new Error(`MORPH_DIST_SCALE_MAX es ${maxScale} — debe ser mayor a 1 para alargar el fundido en saltos grandes.`);
+    }
+    // La creación del fundido debe MULTIPLICAR por distScale (no ignorarlo).
+    if (!/tauOld:\s*\(MORPH_BLEND_K \* distScale\)/.test(js) || !/tauNew:\s*\(MORPH_BLEND_K \* distScale\)/.test(js)) {
+      throw new Error('tauOld/tauNew ya no multiplican por distScale — el fundido volvió a ser igual de corto sin importar cuán grande es el salto de modo.');
+    }
+    // El techo de seguridad tiene que incluir el MISMO MORPH_DIST_SCALE_MAX.
+    if (!/MAX_MORPH_AGE_S\s*=\s*\(8 \* MORPH_DIST_SCALE_MAX \* MORPH_BLEND_K\)/.test(js)) {
+      throw new Error(
+        'MAX_MORPH_AGE_S no multiplica por MORPH_DIST_SCALE_MAX — con un fundido grande alargado por distScale, el ' +
+          'respaldo de seguridad dispararía ANTES de que termine de asentar (mismo defecto que el bug de SLOWMO_K).',
+      );
+    }
+  });
+
+  runTest('Cymatics: beat-pulse brightness terms (ringA/sa/detailPulse) keep peak/trough contrast bounded (regression for "sigue titilando")', async () => {
+    // FIX (2026-09-12): ringA/sa/detailPulse mapean pulseEff (0..1, la fase
+    // REAL del latido, sin filtrar — eso no cambia, ver main.js) a un
+    // multiplicador de brillo/detalle. Antes de este fix, ringA recorría
+    // 0.22->1.0 (4.5x) en un trazo brillante cian a hasta ~12.5Hz — lee como
+    // estroboscopio. El fix bajó el CONTRASTE (no el timing) de las 3
+    // fórmulas. Este test lee el código fuente real y falla si alguien
+    // vuelve a subir el contraste por encima de lo razonable, o si lo
+    // aplana del todo (pulseEff dejaría de tener efecto visible).
+    if (typeof process === 'undefined') return;
+    const fs = await import(/* @vite-ignore */ 'node:fs');
+    const root = process.cwd();
+    const js = fs.readFileSync(root + '/src/cymatics.js', 'utf8');
+    const checks = [
+      { name: 'ringA', re: /const ringA = \((\d+(?:\.\d+)?) \+ (\d+(?:\.\d+)?) \* pulseEff\)/, maxRatio: 2.0 },
+      { name: 'sa', re: /const sa = \((\d+(?:\.\d+)?) \+ (\d+(?:\.\d+)?) \* pulseEff\)/, maxRatio: 2.0 },
+      { name: 'detailPulse', re: /const detailPulse = \((\d+(?:\.\d+)?) \+ (\d+(?:\.\d+)?) \* pulseEff\)/, maxRatio: 2.0 },
+    ];
+    for (const { name, re, maxRatio } of checks) {
+      const match = js.match(re);
+      if (!match) {
+        throw new Error(`No se encontró la fórmula de ${name} en cymatics.js (¿cambió de forma? este test necesita actualizarse).`);
+      }
+      const base = Number(match[1]);
+      const coef = Number(match[2]);
+      if (!(coef > 0)) {
+        throw new Error(`${name} ya no depende de pulseEff (coeficiente ${coef}) — el pulso del latido dejó de verse.`);
+      }
+      const ratio = (base + coef) / base;
+      if (ratio > maxRatio) {
+        throw new Error(
+          `${name} tiene un contraste pico/valle de ${ratio.toFixed(2)}x (base=${base}, coef=${coef}) — por encima de ${maxRatio}x, ` +
+            `vuelve a leerse como estroboscopio en latidos rápidos (regresión de "sigue titilando").`,
+        );
+      }
+    }
+  });
+
+  runTest('Cymatics: resizing the shared GL canvas does NOT cancel in-flight morphs (regression for "sigue pasando en ciertos puntos de la transición")', async () => {
+    // FIX (2026-09-12): el fix anterior (resize del lienzo compartido movido
+    // a ANTES del loop de dibujo, ver el bloque `if (glResAll !== this._glRes)`
+    // en render()) copió por costumbre del código viejo de `_uploadDropGL` la
+    // cancelación de cualquier fundido en curso cada vez que cambia la
+    // resolución — pero ese bloque nuevo NUNCA borra texturas (a diferencia
+    // del viejo), así que cancelar acá no tiene ya ninguna función
+    // protectora: solo produce un corte duro cada vez que `_resMul` (el
+    // escalador adaptativo de calidad) cruza un entero de redondeo, algo que
+    // pasa seguido bajo carga — típicamente en medio de una transición
+    // grande, no al principio ni al final. Este test lee el bloque de resize
+    // en el código fuente real y falla si alguien vuelve a poner ahí una
+    // cancelación de fundidos.
+    if (typeof process === 'undefined') return;
+    const fs = await import(/* @vite-ignore */ 'node:fs');
+    const root = process.cwd();
+    const js = fs.readFileSync(root + '/src/cymatics.js', 'utf8');
+    const m = js.match(/if \(glResAll !== this\._glRes\) \{[\s\S]*?\n      \}/);
+    if (!m) {
+      throw new Error('No se encontró el bloque de resize del lienzo GL compartido (if (glResAll !== this._glRes)) en cymatics.js — este test necesita actualizarse si cambió de forma.');
+    }
+    const codeOnly = m[0].split('\n').filter((line) => !line.trim().startsWith('//')).join('\n');
+    if (/_releaseMorphTex|this\._morph\[j\]\s*=\s*null/.test(codeOnly)) {
+      throw new Error(
+        'El bloque de resize del lienzo GL compartido vuelve a cancelar fundidos en curso — ese bloque no borra ' +
+          'texturas, así que cancelar ahí no protege nada y solo produce un corte duro cada vez que _resMul (el ' +
+          'escalador adaptativo de calidad) hace que glResAll cambie por rendimiento, no por un cambio de modo real ' +
+          '(regresión de "sigue pasando en ciertos puntos de la transición").',
+      );
+    }
+  });
+
+  runTest('Cymatics: modeOmega is monotonically increasing in k (dispersion ω²=gk+(σ/ρ)k³)', () => {
+    // A mayor número de onda, mayor frecuencia de resonancia — dispersión de
+    // gravedad-capilaridad bien orientada. Recorre m=2..6, n=1..8 en orden de
+    // k creciente (ZP_BY_M[m] ya está ordenado ascendente por construcción) y
+    // confirma que ω también lo está para cada m.
+    for (let m = 2; m <= 6; m++) {
+      let prevW = -Infinity;
+      for (let n = 1; n <= 8; n++) {
+        const w = modeOmega(m, n, PHYS_A);
+        if (w <= prevW) {
+          throw new Error(`modeOmega(${m}, ${n}) = ${w} no es mayor que el anterior (${prevW}) — dispersión mal orientada.`);
+        }
+        prevW = w;
+      }
+    }
+  });
+
+  runTest('Cymatics: modeOmega matches ω²=gk+(σ/ρ)k³ evaluated directly', () => {
+    // Recalcula ω a mano con la MISMA fórmula pero SIN pasar por ZP_BY_M (usa
+    // un k arbitrario, no un cero de Bessel) — confirma que modeOmega no
+    // tiene un error de signo o de exponente al combinar G/SIGMA_RHO en la
+    // dispersión, independiente de si la tabla de ceros es correcta. G y
+    // SIGMA_RHO se importan de wave-physics.js (no se re-derivan a mano —
+    // esos SÍ son valores de materiales/gravedad, fuera del alcance de este
+    // test; lo que se verifica aquí es la fórmula, no la física de fondo).
+    for (const k of [50, 200, 800]) {
+      const wDirect = Math.sqrt(WAVE_G * k + WAVE_SIGMA_RHO * k * k * k);
+      // modeOmega(m, n, a) = sqrt(G·k + Σ/ρ·k³) con k = ZP_BY_M[m][n-1]/a —
+      // elegir a tal que k salga exacto y comparar.
+      const a = ZP_BY_M[2][0] / k;
+      const wFn = modeOmega(2, 1, a);
+      if (Math.abs(wFn - wDirect) > wDirect * 1e-6) {
+        throw new Error(`modeOmega da ${wFn} para k=${k}, esperado ${wDirect} (fórmula ω²=gk+(σ/ρ)k³).`);
+      }
+    }
+  });
+
+  runTest('Cymatics: detuning sign convention — below resonance ⇒ delta > 0', () => {
+    const m = 3, n = 2;
+    const wRes = modeOmega(m, n, PHYS_A);
+    const belowWs = wRes * 0.7; // excitación por debajo de la resonancia
+    const aboveWs = wRes * 1.3; // excitación por encima
+    const deltaBelow = wRes - belowWs;
+    const deltaAbove = wRes - aboveWs;
+    if (!(deltaBelow > 0)) throw new Error(`delta debería ser > 0 por debajo de la resonancia, dio ${deltaBelow}`);
+    if (!(deltaAbove < 0)) throw new Error(`delta debería ser < 0 por encima de la resonancia, dio ${deltaAbove}`);
+  });
+
+  runTest('Cymatics: gammaAt is monotonically decreasing and bounded in [GAMMA_MIN, GAMMA_MAX]', () => {
+    let prevG = Infinity;
+    for (const f of [0, 10, 40, 80, 160, 320, 640, 2000]) {
+      const g = gammaAt(f);
+      if (g > GAMMA_MAX + 1e-9) throw new Error(`gammaAt(${f}) = ${g} > GAMMA_MAX (${GAMMA_MAX})`);
+      if (g < GAMMA_MIN - 1e-9) throw new Error(`gammaAt(${f}) = ${g} < GAMMA_MIN (${GAMMA_MIN})`);
+      if (g > prevG + 1e-9) throw new Error(`gammaAt(${f}) = ${g} > valor anterior (${prevG}) — debería decrecer con f.`);
+      prevG = g;
     }
   });
 

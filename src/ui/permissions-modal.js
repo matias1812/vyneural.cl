@@ -234,20 +234,28 @@ function renderPermissionState() {
     permPush.textContent = caps.push.label;
     permPush.className = 'perm-state ' + (caps.push.configured ? 'ok' : 'warn');
   }
-  // Un solo botón para las dos causas reales de "no llega/no suena": si el
+  // Un solo botón para las tres causas reales de "no llega/no suena": si el
   // permiso de notificaciones no está concedido, primero hay que resolver
-  // ESO (los ajustes del canal ni se pueden abrir bien sin él); si ya está
-  // concedido, el problema real reportado en vivo fue el canal quedando en
-  // Importancia baja (Android la baja solo al descartar notificaciones sin
-  // abrirlas) — ahí este mismo botón salta directo a esa pantalla. Antes
-  // había un botón aparte solo para esto último; se fusionó para no sumar
-  // más botones sueltos al modal (varios ya conviven acá).
+  // ESO (los ajustes del canal ni se pueden abrir bien sin él); ya concedido
+  // pero sin acceso a No Molestar, salta a ese permiso (bug reportado: llega
+  // pero a veces sin alarma — ver setBypassDnd en NotificationHelper.kt v8);
+  // con eso resuelto, el problema real reportado en vivo fue el canal
+  // quedando en Importancia baja (Android la baja solo al descartar
+  // notificaciones sin abrirlas) — ahí este mismo botón salta directo a esa
+  // pantalla. Se fusionó todo en uno para no sumar más botones sueltos al
+  // modal (varios ya conviven acá).
   const btnNotifSettings = document.getElementById('perm-notif-settings');
   if (btnNotifSettings) {
     btnNotifSettings.classList.toggle('hidden', !isNative);
+    const dndNeedsSetup = !!(caps.alarmChannel && caps.alarmChannel.supported && !caps.alarmChannel.dndBypassGranted);
     btnNotifSettings.textContent =
-      notifPerm === 'granted' ? 'Revisar sonido/vibración de alarma' : 'Abrir ajustes de notificación';
+      notifPerm !== 'granted'
+        ? 'Abrir ajustes de notificación'
+        : dndNeedsSetup
+          ? 'Permitir alarma en No Molestar'
+          : 'Revisar sonido/vibración de alarma';
     btnNotifSettings.dataset.notifGranted = notifPerm === 'granted' ? '1' : '0';
+    btnNotifSettings.dataset.dndNeedsSetup = notifPerm === 'granted' && dndNeedsSetup ? '1' : '0';
   }
   const btnExactSettings = document.getElementById('perm-exact-settings');
   if (btnExactSettings) {
@@ -309,10 +317,12 @@ function wireModal() {
     btnNotifSettings.addEventListener('click', () => {
       const b = nativeAudio();
       if (!b) return;
-      if (btnNotifSettings.dataset.notifGranted === '1') {
-        if (b.openAlarmChannelSettings) b.openAlarmChannelSettings();
-      } else if (b.openNotificationSettings) {
-        b.openNotificationSettings();
+      if (btnNotifSettings.dataset.notifGranted !== '1') {
+        if (b.openNotificationSettings) b.openNotificationSettings();
+      } else if (btnNotifSettings.dataset.dndNeedsSetup === '1') {
+        if (b.openDndAccessSettings) b.openDndAccessSettings();
+      } else if (b.openAlarmChannelSettings) {
+        b.openAlarmChannelSettings();
       }
     });
   }

@@ -68,7 +68,8 @@ fuera del pipeline de simulación.
 u_tt = c²∇²u − 2γu_t
 CFL = c·√2 < 1  (clamp a c ≤ 1/√2 ≈ 0.707)
 E = ½Σ(Δu/Δt)² + ½c²Σ|∇u|²  (decaimiento ~ E₀·damp^(2t))
-Dirichlet en borde circular (reflexión R = 1)
+Libre/Neumann en borde circular (∂u/∂n=0, celda fantasma — era Dirichlet
+antes de la auditoría 2026-09-08, ver esa fecha en wavefield.js:step())
 ```
 
 Clasificación: PHYSICAL (paso), DERIVED (CFL, energía), EMPIRICAL (factor `damp`),

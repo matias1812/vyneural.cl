@@ -361,9 +361,19 @@ aplicaron después del AUDIT.
 
 **Status:** PASS
 
-**Código relevante:** `src/wavefield.js` + tests E1 (CFL < 1, clamp c>1/√2, energía 0 en reposo, impulso → energía positiva, decaimiento monótono, sin NaN/Inf en 300 pasos, amplitud acotada, Dirichlet en bordes)
+**Código relevante:** `src/wavefield.js` + tests E1 (CFL < 1, clamp c>1/√2, energía 0 en reposo, impulso → energía positiva, decaimiento monótono, sin NaN/Inf en 300 pasos, amplitud acotada, celdas exteriores a la máscara sin fuga)
 
-**Prueba ejecutada:** E1 (8 tests de física).
+**ACTUALIZACIÓN (auditoría 2026-09-08):** el test de frontera original se
+llamaba "Dirichlet en bordes" y solo comprobaba que las celdas del borde del
+ARRAY (fuera de la máscara circular) quedaran en 0 — cierto para cualquier
+condición de contorno y por tanto sin valor discriminante, mientras que
+`step()` ya había pasado de Dirichlet a Neumann (borde libre) sin que ningún
+test lo verificara. Se agregó un test nuevo que mide la frecuencia
+fundamental real del FDTD y la compara contra el cero de Neumann J'_0=3,8317
+(en vez del cero de Dirichlet J_0=2,4048) — ver "free (Neumann) boundary" en
+`diagnostics.js`.
+
+**Prueba ejecutada:** E1 (9 tests de física).
 
 **Resultado:** estable bajo los parámetros permitidos; sin NaN/Infinity/explosiones.
 
