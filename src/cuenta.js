@@ -21,6 +21,7 @@ import {
 import { listAlarms, deleteAlarm } from './api/alarms.js';
 import { listItineraries } from './api/itineraries.js';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
+import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick } from './api/billing.js';
 import { getStatus, onStatusChange, STATUS } from './api/status.js';
 import { openFreqModal } from './ui/freq-modal.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
@@ -340,6 +341,127 @@ function setPushStatus(label, cls) {
   badge.className = `roadmap-status ${cls}`;
 }
 
+// Mismo patrón visual/de estado que setPushStatus/renderPush — pastilla
+// roadmap-status con una palabra + una frase honesta debajo. `status` es el
+// resultado de premiumStatus() (null si el pedido falló: sin conexión, no
+// "no sos premium").
+// Plan vigente (para saber qué auto-renovar) — lo guarda renderPremium() y
+// lo lee wireOneclickButtons() al activar.
+let currentPremiumPlan = null;
+
+function renderPremium(status, oneclick) {
+  const badge = $('cuenta-premium-status');
+  const text = $('cuenta-premium-text');
+  const link = $('cuenta-premium-link');
+  const ocWrap = $('cuenta-oneclick');
+  if (!badge || !text) return;
+  currentPremiumPlan = status ? status.current_plan : null;
+
+  if (!status) {
+    badge.textContent = 'Sin datos';
+    badge.className = 'roadmap-status rs-bad';
+    text.textContent = 'No se pudo consultar tu plan ahora — reintentá más tarde.';
+    if (ocWrap) ocWrap.classList.add('hidden');
+    return;
+  }
+  if (status.premium_lifetime) {
+    badge.textContent = 'De por vida';
+    badge.className = 'roadmap-status rs-live';
+    text.textContent = 'Tenés Premium de por vida: frecuencias personalizadas, alarmas e itinerarios sin límite.';
+    if (link) link.textContent = 'Ver planes';
+    // No vence — no hay nada que auto-renovar.
+    if (ocWrap) ocWrap.classList.add('hidden');
+    return;
+  }
+  if (status.is_premium && status.premium_until) {
+    const until = new Date(status.premium_until).toLocaleDateString('es-CL', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+    badge.textContent = 'Activo';
+    badge.className = 'roadmap-status rs-live';
+    text.textContent = `Tu plan Premium está activo hasta el ${until}.`;
+    if (link) link.textContent = 'Renovar';
+    renderOneclick(oneclick);
+    return;
+  }
+  if (ocWrap) ocWrap.classList.add('hidden');
+  if (status.had_premium_before) {
+    // Venció, distinto de "nunca compró" — mismo current_plan de arriba
+    // sirve para el link "Renovar" ir directo al plan correcto en /premium
+    // si más adelante se quiere; por ahora solo cambia el texto.
+    badge.textContent = 'Vencido';
+    badge.className = 'roadmap-status rs-warn';
+    text.textContent = 'Tu plan Premium venció — renová cuando quieras.';
+    if (link) link.textContent = 'Renovar';
+    return;
+  }
+  badge.textContent = 'Sin plan';
+  badge.className = 'roadmap-status rs-warn';
+  text.textContent = 'El generador básico siempre es gratis. Con Premium sumás frecuencias personalizadas, alarmas e itinerarios.';
+  if (link) link.textContent = 'Ver planes';
+}
+
+// `oneclick` es el resultado de oneclickStatus() (null si el pedido falló).
+function renderOneclick(oneclick) {
+  const wrap = $('cuenta-oneclick');
+  const text = $('cuenta-oneclick-text');
+  const activateBtn = $('cuenta-oneclick-activate');
+  const cancelBtn = $('cuenta-oneclick-cancel');
+  if (!wrap || !text || !activateBtn || !cancelBtn) return;
+  wrap.classList.remove('hidden');
+  if (oneclick && oneclick.active) {
+    const card = oneclick.card_type && oneclick.card_last_digits ? `${oneclick.card_type} •••• ${oneclick.card_last_digits}` : 'tarjeta guardada';
+    text.textContent = `Auto-renovación activa (${card}) — se va a cobrar sola antes de vencer.`;
+    activateBtn.classList.add('hidden');
+    cancelBtn.classList.remove('hidden');
+  } else {
+    text.textContent = 'Activá el cobro automático para no tener que acordarte de renovar.';
+    activateBtn.classList.remove('hidden');
+    cancelBtn.classList.add('hidden');
+  }
+}
+
+function wireOneclickButtons() {
+  const activateBtn = $('cuenta-oneclick-activate');
+  const cancelBtn = $('cuenta-oneclick-cancel');
+  if (activateBtn) {
+    activateBtn.addEventListener('click', async () => {
+      if (!currentPremiumPlan) return;
+      activateBtn.disabled = true;
+      const original = activateBtn.textContent;
+      activateBtn.textContent = 'Conectando…';
+      try {
+        const { url, token } = await inscribeOneclick(currentPremiumPlan);
+        // Transbank exige un POST real del navegador con TBK_TOKEN — mismo
+        // criterio que #webpay-form en premium.js::buyPlan.
+        const form = $('oneclick-form');
+        form.action = url;
+        $('oneclick-token').value = token;
+        form.submit();
+      } catch (err) {
+        activateBtn.disabled = false;
+        activateBtn.textContent = original;
+        alert(`No se pudo iniciar la inscripción: ${(err && err.detail) || 'reintentá en unos segundos'}`);
+      }
+    });
+  }
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', async () => {
+      if (!confirm('¿Cancelar la auto-renovación? Tu plan sigue activo hasta que venza — solo se corta el próximo cobro automático.')) return;
+      cancelBtn.disabled = true;
+      try {
+        await cancelOneclick();
+        await loadAll();
+      } catch (err) {
+        cancelBtn.disabled = false;
+        alert(`No se pudo cancelar: ${(err && err.detail) || 'reintentá en unos segundos'}`);
+      }
+    });
+  }
+}
+
 function renderPush() {
   const text = $('cuenta-push-text');
   const sub = $('cuenta-push-subscribe');
@@ -475,10 +597,12 @@ async function loadAll() {
     listItineraries(),
     pushStatus(),
     listDevices(),
+    premiumStatus(),
+    oneclickStatus(),
   ]);
   if (seq !== loadSeq) return;
 
-  const [profile, favs, freqs, alarms, its, push, devices] = results.map((r) =>
+  const [profile, favs, freqs, alarms, its, push, devices, premium, oneclick] = results.map((r) =>
     r.status === 'fulfilled' ? r.value : null,
   );
 
@@ -525,6 +649,7 @@ async function loadAll() {
     await readDeviceSubscription();
   }
   renderPush();
+  renderPremium(premium, oneclick);
 
   const failed = results.filter((r) => r.status === 'rejected').length;
   if (syncEl) {
@@ -616,8 +741,8 @@ function wireForms() {
   // Guardar frecuencias: modal compartido con el generador (misma UX).
   const freqBtn = $('cuenta-create-freq-btn');
   if (freqBtn) {
-    freqBtn.addEventListener('click', () => {
-      const ok = openFreqModal({ source: 'cuenta' });
+    freqBtn.addEventListener('click', async () => {
+      const ok = await openFreqModal({ source: 'cuenta' });
       if (ok) freqBtn.blur();
     });
   }
@@ -813,6 +938,7 @@ function init() {
   document.addEventListener('click', handleAction);
   wireForms();
   wirePushButtons();
+  wireOneclickButtons();
 
   // Tras el diálogo nativo de permisos (o volver de Ajustes) el WebView
   // reaparece: re-leer el estado real del permiso y repintar la tarjeta.

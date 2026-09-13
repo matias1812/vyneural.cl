@@ -10,6 +10,7 @@
 import { createFrequency } from '../api/frequencies.js';
 import { getAccessToken } from '../api/client.js';
 import { freqCoverSVG } from './freq-cover.js';
+import { isPremiumUser, openPremiumRequired } from './premium-gate.js';
 
 const WAVES = [
   { id: 'sine', label: 'Senoidal (suave)' },
@@ -179,7 +180,7 @@ async function onSubmit(e) {
 
 // ── API pública ────────────────────────────────────────────────────────────
 
-export function openFreqModal(opts = {}) {
+export async function openFreqModal(opts = {}) {
   injectModal();
   const modal = document.getElementById('freq-modal');
   openOpts = opts;
@@ -189,6 +190,14 @@ export function openFreqModal(opts = {}) {
   if (!getAccessToken()) {
     const auth = window.__vyneuralAuth;
     if (auth && typeof auth.open === 'function') auth.open('login');
+    return false;
+  }
+
+  // Guardar frecuencias personalizadas es Premium — con sesión pero sin
+  // plan, se avisa en vez de dejar completar el formulario para recién
+  // fallar al guardar (ver src/ui/premium-gate.js).
+  if (!(await isPremiumUser())) {
+    openPremiumRequired('Guardar frecuencias personalizadas es parte de Vyneural Premium.');
     return false;
   }
 

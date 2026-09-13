@@ -24,6 +24,10 @@ import { createNativeBridgeAdapter } from './platform/native-bridge.js';
 import { PROFILES } from './models/profiles.js';
 import { carrierBaseFor } from './core/carrier.js';
 import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js';
+// Bloqueo Premium de itinerarios (crear uno nuevo) — /rutina ya exige sesión
+// a nivel de página, así que acá solo hace falta el chequeo de plan (ver
+// src/ui/premium-gate.js, mismo criterio que el generador y /cuenta).
+import { isPremiumUser, openPremiumRequired } from './ui/premium-gate.js';
 
 // Sanitización: los nombres de frecuencias/itinerarios vienen del usuario
 // (backend), nunca se inyectan sin escapar.
@@ -884,13 +888,26 @@ function cancelEditItinerary() {
   populateItineraryDaySelect();
 }
 
+// Crear un itinerario NUEVO es Premium — editar/duplicar uno que ya existe
+// no pasa por acá (ver populateEditForm más arriba, que abre el modal
+// directo sin este chequeo: lo ya creado sigue funcionando igual, grandfathering
+// coherente con el gating del backend).
+function guardNewItinerary(onAllowed) {
+  isPremiumUser().then((premium) => {
+    if (premium) onAllowed();
+    else openPremiumRequired('Crear un itinerario es parte de Vyneural Premium.');
+  });
+}
+
 function wireItineraryForm() {
   const openBtn = document.getElementById('itinerary-open-btn');
   const modal = document.getElementById('itinerary-modal');
   if (openBtn) {
     openBtn.addEventListener('click', () => {
-      cancelEditItinerary();
-      openItineraryModal();
+      guardNewItinerary(() => {
+        cancelEditItinerary();
+        openItineraryModal();
+      });
     });
   }
   const modalClose = document.getElementById('itinerary-modal-close');
@@ -1243,7 +1260,15 @@ function wireReminderForm() {
               alarmManagerInstance.create(alarm).catch(() => {});
             }
           })
-          .catch(() => {});
+          .catch((err) => {
+            // Sigue siendo best-effort (fallas de red no dicen nada, como
+            // antes) — pero un 403 es el límite gratis de Premium, no un
+            // problema de conexión: el recordatorio quedó guardado LOCAL en
+            // este dispositivo igual, hay que avisar que no sincronizó.
+            if (err && err.status === 403) {
+              showReminderNote('Guardado en este dispositivo — sincronizar entre dispositivos es parte de Premium.');
+            }
+          });
       }
       const perm = await requestPermission();
       showReminderNote(
@@ -1312,10 +1337,12 @@ itListEl.addEventListener('click', async (e) => {
   }
   const addDayBtn = e.target.closest('[data-add-day]');
   if (addDayBtn) {
-    cancelEditItinerary();
-    const dayEl = document.getElementById('itinerary-day');
-    if (dayEl) dayEl.value = addDayBtn.dataset.addDay;
-    openItineraryModal();
+    guardNewItinerary(() => {
+      cancelEditItinerary();
+      const dayEl = document.getElementById('itinerary-day');
+      if (dayEl) dayEl.value = addDayBtn.dataset.addDay;
+      openItineraryModal();
+    });
     return;
   }
   const btn = e.target.closest('[data-reorder]');
