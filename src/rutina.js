@@ -899,6 +899,18 @@ function guardNewItinerary(onAllowed) {
   });
 }
 
+// Crear un recordatorio es Premium (antes se guardaba local con un aviso de
+// que solo la sincronización era paga — ver el catch de 403 en el submit de
+// abajo; eso quedó obsoleto, ahora se bloquea acá, antes de que el <details>
+// termine de abrirse). Los recordatorios ya creados siguen andando igual.
+function guardNewReminder(detailsEl) {
+  isPremiumUser().then((premium) => {
+    if (premium) return;
+    detailsEl.open = false;
+    openPremiumRequired('Crear un recordatorio es parte de Vyneural Premium.');
+  });
+}
+
 function wireItineraryForm() {
   const openBtn = document.getElementById('itinerary-open-btn');
   const modal = document.getElementById('itinerary-modal');
@@ -1185,6 +1197,13 @@ function wireReminderForm() {
   const daysWrap = document.getElementById('reminder-days-wrap');
   const timeEl = document.getElementById('reminder-time');
   if (!form || !stateSel) return;
+
+  const details = document.getElementById('rutina-reminder-form');
+  if (details) {
+    details.addEventListener('toggle', () => {
+      if (details.open) guardNewReminder(details);
+    });
+  }
 
   // P6 — <input type="time"> nativo con bug de conversión confirmado en
   // producción dentro del WebView de la APK; reemplazo propio en selects

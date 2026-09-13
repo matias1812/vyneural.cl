@@ -23,7 +23,6 @@ import { listItineraries } from './api/itineraries.js';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
 import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick } from './api/billing.js';
 import { getStatus, onStatusChange, STATUS } from './api/status.js';
-import { openFreqModal } from './ui/freq-modal.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
 import { requestPermission } from './notifications.js';
 import { listDevices, forgetDevice, reportDevice } from './api/devices.js';
@@ -737,21 +736,6 @@ async function handleAction(e) {
   loadAll();
 }
 
-function wireForms() {
-  // Guardar frecuencias: modal compartido con el generador (misma UX).
-  const freqBtn = $('cuenta-create-freq-btn');
-  if (freqBtn) {
-    freqBtn.addEventListener('click', async () => {
-      const ok = await openFreqModal({ source: 'cuenta' });
-      if (ok) freqBtn.blur();
-    });
-  }
-  // Tras guardar desde el modal, la lista se refresca sola.
-  document.addEventListener('vyneural:freq-saved', async () => {
-    await loadAll();
-  });
-}
-
 function wirePushButtons() {
   const sub = $('cuenta-push-subscribe');
   const unsub = $('cuenta-push-unsubscribe');
@@ -936,7 +920,6 @@ function init() {
   }
 
   document.addEventListener('click', handleAction);
-  wireForms();
   wirePushButtons();
   wireOneclickButtons();
 

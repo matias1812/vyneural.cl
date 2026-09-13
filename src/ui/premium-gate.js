@@ -1,9 +1,12 @@
 // src/ui/premium-gate.js
 // Bloqueo compartido para funciones Premium del lado del cliente — hoy: el
-// modo "Personalizado" del generador (main.js) y el modal de guardar
-// frecuencia de /cuenta (freq-modal.js). Aditivo: sin sesión no cambia nada
-// (el gesto de login existente sigue primero), y una falla de red nunca
-// bloquea a quien ya pagó (ver isPremiumUser).
+// modo "Personalizado" y los presets especiales del generador (main.js),
+// crear un itinerario nuevo y crear un recordatorio (rutina.js). Guardar
+// una frecuencia personalizada ya no tiene una entrada propia en /cuenta:
+// se crea desde el generador o desde un paso de itinerario, ambos ya
+// gateados acá mismo. Aditivo: sin sesión no cambia nada (el gesto de
+// login existente sigue primero), y una falla de red nunca bloquea a
+// quien ya pagó (ver isPremiumUser).
 
 import { getAccessToken } from '../api/client.js';
 import { premiumStatus } from '../api/billing.js';

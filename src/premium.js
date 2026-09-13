@@ -140,6 +140,10 @@ function renderPlans(plans, status) {
   const wrap = $('premium-plans');
   if (!wrap) return;
   wrap.innerHTML = '';
+  // De por vida no vence: no hay plan al que "renovar" ni nada que comprar
+  // de nuevo (el backend también lo rechaza — ver POST /payments/create —
+  // esto es solo para no ofrecer un botón que sabemos que va a fallar).
+  const lifetimeActive = !!(status && status.premium_lifetime);
   for (const key of PLAN_ORDER) {
     const plan = plans[key];
     if (!plan) continue;
@@ -166,16 +170,18 @@ function renderPlans(plans, status) {
       <ul class="cuenta-list">
         ${FEATURES.map((f) => `<li>✓ ${f}</li>`).join('')}
       </ul>
-      <button type="button" class="cuenta-btn" data-plan="${key}">
-        ${status && status.is_premium ? 'Renovar' : 'Comprar'}
+      <button type="button" class="cuenta-btn" data-plan="${key}" ${lifetimeActive ? 'disabled' : ''}>
+        ${lifetimeActive ? 'Ya la tenés' : status && status.is_premium ? 'Renovar' : 'Comprar'}
       </button>
       <p class="premium-reassurance">${REASSURANCE[key]}</p>
     `;
     wrap.appendChild(card);
   }
-  wrap.querySelectorAll('button[data-plan]').forEach((btn) => {
-    btn.addEventListener('click', () => buyPlan(btn.dataset.plan, btn));
-  });
+  if (!lifetimeActive) {
+    wrap.querySelectorAll('button[data-plan]').forEach((btn) => {
+      btn.addEventListener('click', () => buyPlan(btn.dataset.plan, btn));
+    });
+  }
 
   // Revelado festivo de los planes — una sola vez por carga, no en cada
   // re-render de renderPlans(). Se salta si el sistema pide reducir
