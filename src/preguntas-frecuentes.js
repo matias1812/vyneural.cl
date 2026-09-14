@@ -11,7 +11,7 @@ const FAQ = {
     },
     {
       q: '¿Es gratis? ¿Hay planes de pago?',
-      a: 'Es 100% gratis y no hay planes de pago. El generador funciona sin cuenta y sin registrarte. La cuenta es opcional: solo sirve para sincronizar tus favoritos y frecuencias entre dispositivos.',
+      a: 'Los 27 presets clásicos del generador son gratis para siempre, sin cuenta y sin registrarte. Los presets especiales (Schumann, 963 Hz Divino…), personalizar tu propia frecuencia a mano y guardarla son parte de Vyneural Premium (opcional, de pago), junto con alarmas e itinerarios para quien quiere integrar la práctica a su rutina diaria. La cuenta gratuita sigue sirviendo para sincronizar tus favoritos y frecuencias entre dispositivos, con o sin Premium.',
     },
     {
       q: '¿Qué es la portadora y qué es el ritmo?',

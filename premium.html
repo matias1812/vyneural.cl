@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Premium · Vyneural</title>
+    <meta
+      name="description"
+      content="Vyneural Premium: frecuencias personalizadas, alarmas e itinerarios para integrar las ondas binaurales a tu rutina diaria. El generador básico siempre es gratis."
+    />
+    <meta name="author" content="Vyneural" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0b0d1a" />
+    <link rel="canonical" href="https://www.vyneural.cl/premium" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Vyneural" />
+    <meta property="og:title" content="Vyneural Premium" />
+    <meta
+      property="og:description"
+      content="Frecuencias personalizadas, alarmas e itinerarios para tu rutina diaria. Los 27 presets clásicos del generador siguen siendo gratis, sin cuenta."
+    />
+    <meta property="og:url" content="https://www.vyneural.cl/premium" />
+    <meta property="og:image" content="https://www.vyneural.cl/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="es_ES" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Vyneural Premium" />
+    <meta
+      name="twitter:description"
+      content="Frecuencias personalizadas, alarmas e itinerarios para integrar Vyneural a tu día a día."
+    />
+    <meta name="twitter:image" content="https://www.vyneural.cl/og.png" />
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "Vyneural Premium",
+        "description": "Frecuencias personalizadas, alarmas e itinerarios para integrar las ondas binaurales a tu rutina diaria.",
+        "inLanguage": "es",
+        "url": "https://www.vyneural.cl/premium",
+        "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
+      }
+    </script>
+    <!-- Precios placeholder (ver backvyneural/backend/app/billing/plans.py,
+         TODO(negocio): definir valores reales) — actualizar acá en el mismo
+         commit que ahí cuando se fijen los precios finales, para que Google
+         nunca muestre un precio que ya no es el real. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "Vyneural Premium",
+        "description": "Frecuencias personalizadas, alarmas e itinerarios para integrar las ondas binaurales a tu rutina diaria.",
+        "brand": { "@type": "Brand", "name": "Vyneural" },
+        "offers": {
+          "@type": "AggregateOffer",
+          "priceCurrency": "CLP",
+          "lowPrice": "2990",
+          "highPrice": "49990",
+          "offerCount": "3",
+          "url": "https://www.vyneural.cl/premium",
+          "availability": "https://schema.org/InStock"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="starfield" aria-hidden="true"></canvas>
+
+    <header class="site-nav">
+      <a class="site-brand" href="/">
+        <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
+        Vyneural
+      </a>
+      <button class="nav-toggle" id="nav-toggle" aria-label="Abrir menú" aria-expanded="false">☰</button>
+      <nav class="site-links" id="site-links" aria-label="Navegación principal">
+        <a href="/">Generador</a>
+        <a href="/beneficios">Beneficios</a>
+        <a href="/sobre-nosotros">Sobre nosotros</a>
+        <a href="/privacidad">Privacidad</a>
+        <a href="/rutina">Tu rutina</a>
+        <a href="/cuenta">Mi cuenta</a>
+      </nav>
+    </header>
+
+    <main>
+      <nav class="breadcrumbs" aria-label="Migajas de pan">
+        <a href="/">Inicio</a><span class="sep">›</span><span aria-current="page">Premium</span>
+      </nav>
+
+      <header class="page-hero">
+        <span class="page-kicker">Vyneural Premium</span>
+        <h1>Llevá tu práctica al día a día.</h1>
+        <p class="page-lead">
+          Los 27 presets clásicos del generador siguen siendo gratis, sin cuenta, para
+          siempre. Premium suma lo que hace falta para integrarlo a tu rutina: los
+          presets especiales (Schumann, 963 Hz Divino…), personalizar tu propia
+          frecuencia y guardarla, alarmas y un itinerario completo — pensado para quien
+          busca productividad, estudiantes que necesitan concentrarse, y quienes usan
+          Vyneural para meditar o dormir mejor cada día.
+        </p>
+      </header>
+
+      <div class="page-body">
+        <div class="page-card hidden" id="premium-gate">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
+          <h2>Elegí un plan y creá tu cuenta al pagar</h2>
+          <p>
+            Mirá los planes libremente acá abajo. Para comprar necesitás una cuenta
+            (Premium se ata a tu cuenta para que te siga en todos tus dispositivos) — te
+            la pedimos recién al tocar "Comprar", es gratis e instantánea.
+          </p>
+          <div class="cuenta-gate-actions">
+            <button type="button" class="hero-cta" id="premium-login-btn">Iniciar sesión</button>
+            <button type="button" class="hero-cta hero-cta-ghost" id="premium-register-btn">Crear cuenta</button>
+          </div>
+        </div>
+
+        <div id="premium-content">
+          <div class="page-card hidden" id="premium-active-banner">
+            <p id="premium-active-text"></p>
+          </div>
+
+          <div class="card-grid" id="premium-plans">
+            <p class="cuenta-empty">Cargando planes…</p>
+          </div>
+
+          <div class="auth-error hidden" id="premium-error" role="alert"></div>
+        </div>
+
+        <div class="page-note">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <div>
+            <strong>Pago seguro con Webpay (Transbank):</strong> nunca vemos ni guardamos
+            los datos de tu tarjeta — todo el pago ocurre en el sitio de Transbank. El
+            plan mensual y el anual se renuevan solos por default (se guarda tu tarjeta
+            de forma segura en Transbank); podés cancelar la auto-renovación cuando
+            quieras desde tu cuenta sin perder lo que ya pagaste. El de por vida no vence.
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="site-brand" href="/">
+            <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
+            Vyneural
+          </a>
+          <p>
+            Frecuencias binaurales generadas en tiempo real en tu navegador con la
+            Web Audio API.
+          </p>
+        </div>
+        <div class="footer-col">
+          <h3>Explora</h3>
+          <a href="/">Generador</a>
+          <a href="/beneficios">Beneficios</a>
+          <a href="/rutina">Tu rutina</a>
+          <a href="/hoja-de-ruta">Hoja de ruta</a>
+        </div>
+        <div class="footer-col">
+          <h3>Sitio</h3>
+          <a href="/sobre-nosotros">Sobre nosotros</a>
+          <a href="/privacidad">Privacidad</a>
+          <a href="/cuenta">Mi cuenta</a>
+          <a class="social-link" href="https://www.instagram.com/vyneural.cl/" target="_blank" rel="noopener noreferrer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/></svg> Instagram</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© <span data-year>2026</span> Vyneural · Web Audio API · Vite</span>
+      </div>
+      <p class="footer-disclaimer">
+        Las ondas binaurales son una herramienta de relajación y no sustituyen el consejo
+        médico. Usa audífonos: sin ellos no se produce el efecto binaural.
+      </p>
+    </footer>
+
+    <!-- Form real hacia Transbank — Webpay exige un POST de navegador con
+         token_ws, no un fetch/redirect. Se completa y envía por JS
+         (ver src/premium.js::buyPlan), nunca se muestra. Solo para "De por
+         vida" (pago único, sin nada que auto-renovar). -->
+    <form id="webpay-form" method="POST" action="" class="hidden">
+      <input type="hidden" name="token_ws" id="webpay-token" />
+    </form>
+
+    <!-- Mensual/Anual compran vía Oneclick Mall (ver src/premium.js::buyPlan):
+         la auto-renovación es el default ahora, no un paso aparte después —
+         mismo form que ya usaba /cuenta para activarla (src/cuenta.js). -->
+    <form id="oneclick-form" method="POST" action="" class="hidden">
+      <input type="hidden" name="TBK_TOKEN" id="oneclick-token" />
+    </form>
+
+    <script type="module" src="/src/site.js"></script>
+    <script type="module" src="/src/premium.js"></script>
+  </body>
+</html>

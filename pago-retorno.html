@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Confirmar correo · Vyneural</title>
+    <title>Resultado del pago · Vyneural</title>
     <meta
       name="description"
-      content="Confirmá tu correo de Vyneural para activar tu cuenta y sincronizar tus favoritos y rutinas."
+      content="Resultado de tu pago de Vyneural Premium."
     />
     <meta name="author" content="Vyneural" />
     <meta name="robots" content="noindex" />
     <meta name="theme-color" content="#0b0d1a" />
-    <link rel="canonical" href="https://www.vyneural.cl/verificar" />
+    <link rel="canonical" href="https://www.vyneural.cl/pago-retorno" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon.svg" />
@@ -26,29 +26,23 @@
       <nav class="site-links" id="site-links" aria-label="Navegación principal">
         <a href="/">Generador</a>
         <a href="/premium">Premium</a>
-        <a href="/beneficios">Beneficios</a>
         <a href="/sobre-nosotros">Sobre nosotros</a>
         <a href="/privacidad">Privacidad</a>
-        <a href="/hoja-de-ruta">Hoja de ruta</a>
-        <a href="/codigo-abierto">Código abierto</a>
       </nav>
     </header>
 
     <main>
       <header class="page-hero">
-        <span class="page-kicker">Confirmación de correo</span>
-        <h1>Activá tu cuenta</h1>
+        <span class="page-kicker">Vyneural Premium</span>
+        <h1>Resultado del pago</h1>
       </header>
 
       <div class="page-body">
         <div class="page-card verify-card">
           <p class="rm-emoji" aria-hidden="true">⏳</p>
-          <h2 id="verify-title">Confirmando…</h2>
-          <p id="verify-text">Estamos verificando tu correo.</p>
-          <div id="verify-actions" class="cuenta-gate-actions">
-            <button type="button" class="hero-cta" id="verify-login">Ir al generador</button>
-          </div>
-          <p class="verify-note" id="verify-note"></p>
+          <h2 id="pago-title">Un momento…</h2>
+          <p id="pago-text">Estamos revisando el resultado de tu pago.</p>
+          <div id="pago-actions" class="cuenta-gate-actions"></div>
         </div>
       </div>
     </main>
@@ -62,16 +56,14 @@
           </a>
           <p>
             Frecuencias binaurales generadas en tiempo real en tu navegador con la
-            Web Audio API. Sin cuentas, sin grabaciones, sin servidores.
+            Web Audio API.
           </p>
         </div>
         <div class="footer-col">
           <h3>Explora</h3>
           <a href="/">Generador</a>
-          <a href="/beneficios">Beneficios</a>
+          <a href="/premium">Premium</a>
           <a href="/privacidad">Privacidad</a>
-          <a href="/hoja-de-ruta">Hoja de ruta</a>
-          <a href="/codigo-abierto">Código abierto</a>
         </div>
         <div class="footer-col">
           <h3>Sitio</h3>
@@ -89,6 +81,6 @@
       </p>
     </footer>
     <script type="module" src="/src/site.js"></script>
-    <script type="module" src="/src/verificar.js"></script>
+    <script type="module" src="/src/pago-retorno.js"></script>
   </body>
 </html>

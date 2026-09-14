@@ -23,6 +23,7 @@ const SITE = 'https://www.vyneural.cl';
 // nueva (como estudiar.html/dormir.html/etc.), agrégala acá también.
 const STATIC_PAGES = [
   { loc: '/', changefreq: 'weekly', priority: '1.0' },
+  { loc: '/premium', changefreq: 'weekly', priority: '0.9' },
   { loc: '/que-son-las-ondas-binaurales', changefreq: 'monthly', priority: '0.9' },
   { loc: '/beneficios', changefreq: 'monthly', priority: '0.9' },
   { loc: '/estudiar', changefreq: 'monthly', priority: '0.8' },

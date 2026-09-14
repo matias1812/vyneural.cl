@@ -60,6 +60,7 @@
       <button class="nav-toggle" id="nav-toggle" aria-label="Abrir menú" aria-expanded="false">☰</button>
       <nav class="site-links" id="site-links" aria-label="Navegación principal">
         <a href="/">Generador</a>
+        <a href="/premium">Premium</a>
         <a href="/beneficios">Beneficios</a>
         <a href="/sobre-nosotros">Sobre nosotros</a>
         <a href="/privacidad">Privacidad</a>
@@ -129,6 +130,22 @@
             </div>
           </div>
 
+          <div class="page-card" id="cuenta-premium-card">
+            <div class="rutina-head">
+              <h3>💎 Premium</h3>
+              <span class="roadmap-status rs-warn" id="cuenta-premium-status">Consultando…</span>
+            </div>
+            <p id="cuenta-premium-text" class="rutina-hint">Consultando tu plan…</p>
+            <a href="/premium" class="cuenta-btn" id="cuenta-premium-link">Ver planes</a>
+
+            <div class="cuenta-oneclick hidden" id="cuenta-oneclick">
+              <p id="cuenta-oneclick-text" class="rutina-hint"></p>
+              <button type="button" class="cuenta-btn hidden" id="cuenta-oneclick-activate">Activar cobro automático</button>
+              <button type="button" class="cuenta-btn hidden" id="cuenta-oneclick-update-card">Actualizar tarjeta</button>
+              <button type="button" class="cuenta-btn cuenta-btn-danger hidden" id="cuenta-oneclick-cancel">Cancelar</button>
+            </div>
+          </div>
+
           <div class="card-grid">
             <div class="page-card">
               <h3>⭐ Favoritos en la nube</h3>
@@ -142,8 +159,10 @@
             <div class="page-card">
               <h3>🎚️ Mis frecuencias</h3>
               <ul class="cuenta-list" id="cuenta-freqs"></ul>
-              <p class="cuenta-empty" id="cuenta-freqs-empty">Sin frecuencias guardadas.</p>
-              <button type="button" class="cuenta-btn" id="cuenta-create-freq-btn">＋ Guardar una frecuencia personalizada</button>
+              <p class="cuenta-empty" id="cuenta-freqs-empty">
+                Sin frecuencias guardadas. Se crean desde el modo "Personalizado" del
+                <a href="/">generador</a> o al armar un paso de tu <a href="/rutina">itinerario</a>.
+              </p>
             </div>
           </div>
 
@@ -288,6 +307,14 @@
         conduces o manejas maquinaria.
       </p>
     </footer>
+
+    <!-- Form real hacia Transbank (inscripción de tarjeta Oneclick Mall) —
+         mismo criterio que #webpay-form en premium.html: Transbank exige un
+         POST real del navegador, nunca un fetch. Se completa y envía por JS
+         (ver src/cuenta.js::activateOneclick), nunca se muestra. -->
+    <form id="oneclick-form" method="POST" action="" class="hidden">
+      <input type="hidden" name="TBK_TOKEN" id="oneclick-token" />
+    </form>
 
     <!-- Confirmación de desactivar cuenta: pide la contraseña de nuevo (mismo
          criterio que cambiar contraseña) antes de una acción que no podés

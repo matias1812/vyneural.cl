@@ -276,10 +276,23 @@ export async function request(path, { method = 'GET', body, retry = true } = {})
   }
 
   if (res.status < 200 || res.status >= 300) {
-    let detail = `error ${res.status}`;
+    // Solo un string real (HTTPException(detail="...") a mano) cuenta como
+    // mensaje presentable — todo el resto de la app espera exactamente eso
+    // de .detail (ver el patrón `(err && err.detail) || 'mensaje propio'`
+    // repetido en cuenta.js/premium.js/rutina.js/etc.). Antes, un error de
+    // validación de Pydantic (que FastAPI manda como una LISTA de objetos,
+    // no un string) se convertía acá con JSON.stringify() en un string
+    // "válido" — typeof detail === 'string' daba true, así que ese bloque
+    // JSON crudo terminaba mostrándose directo en pantalla en vez de caer
+    // en el mensaje amigable de cada pantalla. Dejando .detail sin definir
+    // en ese caso (y cuando no hay body/detail del todo), cada caller cae
+    // en su propio fallback como ya estaba escrito — .message sigue
+    // teniendo algo razonable para logs/consola vía el `|| 'error ${status}'`
+    // del constructor de ApiError, eso no cambia.
+    let detail;
     try {
       const j = res.text ? JSON.parse(res.text) : null;
-      if (j && j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+      if (j && typeof j.detail === 'string') detail = j.detail;
     } catch (_) {
       /* sin cuerpo JSON */
     }
