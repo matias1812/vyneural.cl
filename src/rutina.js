@@ -24,10 +24,6 @@ import { createNativeBridgeAdapter } from './platform/native-bridge.js';
 import { PROFILES } from './models/profiles.js';
 import { carrierBaseFor } from './core/carrier.js';
 import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js';
-// Bloqueo Premium de itinerarios (crear uno nuevo) — /rutina ya exige sesión
-// a nivel de página, así que acá solo hace falta el chequeo de plan (ver
-// src/ui/premium-gate.js, mismo criterio que el generador y /cuenta).
-import { isPremiumUser, openPremiumRequired } from './ui/premium-gate.js';
 
 // Sanitización: los nombres de frecuencias/itinerarios vienen del usuario
 // (backend), nunca se inyectan sin escapar.
@@ -888,38 +884,13 @@ function cancelEditItinerary() {
   populateItineraryDaySelect();
 }
 
-// Crear un itinerario NUEVO es Premium — editar/duplicar uno que ya existe
-// no pasa por acá (ver populateEditForm más arriba, que abre el modal
-// directo sin este chequeo: lo ya creado sigue funcionando igual, grandfathering
-// coherente con el gating del backend).
-function guardNewItinerary(onAllowed) {
-  isPremiumUser().then((premium) => {
-    if (premium) onAllowed();
-    else openPremiumRequired('Crear un itinerario es parte de Vyneural Premium.');
-  });
-}
-
-// Crear un recordatorio es Premium (antes se guardaba local con un aviso de
-// que solo la sincronización era paga — ver el catch de 403 en el submit de
-// abajo; eso quedó obsoleto, ahora se bloquea acá, antes de que el <details>
-// termine de abrirse). Los recordatorios ya creados siguen andando igual.
-function guardNewReminder(detailsEl) {
-  isPremiumUser().then((premium) => {
-    if (premium) return;
-    detailsEl.open = false;
-    openPremiumRequired('Crear un recordatorio es parte de Vyneural Premium.');
-  });
-}
-
 function wireItineraryForm() {
   const openBtn = document.getElementById('itinerary-open-btn');
   const modal = document.getElementById('itinerary-modal');
   if (openBtn) {
     openBtn.addEventListener('click', () => {
-      guardNewItinerary(() => {
-        cancelEditItinerary();
-        openItineraryModal();
-      });
+      cancelEditItinerary();
+      openItineraryModal();
     });
   }
   const modalClose = document.getElementById('itinerary-modal-close');
@@ -1198,13 +1169,6 @@ function wireReminderForm() {
   const timeEl = document.getElementById('reminder-time');
   if (!form || !stateSel) return;
 
-  const details = document.getElementById('rutina-reminder-form');
-  if (details) {
-    details.addEventListener('toggle', () => {
-      if (details.open) guardNewReminder(details);
-    });
-  }
-
   // P6 — <input type="time"> nativo con bug de conversión confirmado en
   // producción dentro del WebView de la APK; reemplazo propio en selects
   // (ver ui/apk-time-picker.js). Web/desktop sigue con el input nativo.
@@ -1279,15 +1243,7 @@ function wireReminderForm() {
               alarmManagerInstance.create(alarm).catch(() => {});
             }
           })
-          .catch((err) => {
-            // Sigue siendo best-effort (fallas de red no dicen nada, como
-            // antes) — pero un 403 es el límite gratis de Premium, no un
-            // problema de conexión: el recordatorio quedó guardado LOCAL en
-            // este dispositivo igual, hay que avisar que no sincronizó.
-            if (err && err.status === 403) {
-              showReminderNote('Guardado en este dispositivo — sincronizar entre dispositivos es parte de Premium.');
-            }
-          });
+          .catch(() => {});
       }
       const perm = await requestPermission();
       showReminderNote(
@@ -1356,12 +1312,10 @@ itListEl.addEventListener('click', async (e) => {
   }
   const addDayBtn = e.target.closest('[data-add-day]');
   if (addDayBtn) {
-    guardNewItinerary(() => {
-      cancelEditItinerary();
-      const dayEl = document.getElementById('itinerary-day');
-      if (dayEl) dayEl.value = addDayBtn.dataset.addDay;
-      openItineraryModal();
-    });
+    cancelEditItinerary();
+    const dayEl = document.getElementById('itinerary-day');
+    if (dayEl) dayEl.value = addDayBtn.dataset.addDay;
+    openItineraryModal();
     return;
   }
   const btn = e.target.closest('[data-reorder]');

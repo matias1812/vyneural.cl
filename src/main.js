@@ -82,9 +82,6 @@ import { syncFavoriteToCloud, syncUnfavoriteFromCloud } from './api/fav-sync.js'
 // #custom-save-freq más abajo) — ya no un modal aparte, para tener toda la
 // config del panel personalizado en un solo lugar bajo el reproductor.
 import { createFrequency, listFrequencies } from './api/frequencies.js';
-// Bloqueo Premium del modo Personalizado (aditivo): mismo criterio en el
-// generador y en /cuenta, ver src/ui/premium-gate.js.
-import { isPremiumUser, openPremiumRequired } from './ui/premium-gate.js';
 // Alarmas en la nube (P6-FEAT-001): la alarma del generador se sincroniza al
 // backend cuando hay sesión, para que el scheduler server-side pueda enviar
 // el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
@@ -814,32 +811,7 @@ const cards = STATES.map((s) => {
     <span class="card-freqs">${f1} Hz · ${f2} Hz</span>
     <span class="card-desc">${s.desc}</span>
   `;
-  card.addEventListener('click', () => {
-    // "Personalizado" (elegir tu propia base/ritmo a mano) y los presets
-    // "especiales" (Schumann, Schumann 14,3, 963 Hz Divino — premiumOnly en
-    // profiles.js) son Premium. Único punto de entrada a estos estados: acá.
-    // Re-tocar la tarjeta ya activa NO se gatea de nuevo (ver comentario de
-    // selectState sobre "re-tocar la tarjeta" como gesto legítimo).
-    if ((s.custom || s.premiumOnly) && selected.id !== s.id) {
-      if (!getAccessToken()) {
-        const auth = window.__vyneuralAuth;
-        if (auth && typeof auth.open === 'function') auth.open('login');
-        return;
-      }
-      isPremiumUser().then((premium) => {
-        if (premium) {
-          selectState(s);
-          return;
-        }
-        const msg = s.custom
-          ? 'Personalizar tu propia frecuencia es parte de Vyneural Premium.'
-          : `"${s.name}" es parte de Vyneural Premium.`;
-        openPremiumRequired(msg);
-      });
-      return;
-    }
-    selectState(s);
-  });
+  card.addEventListener('click', () => selectState(s));
   const star = card.querySelector('.card-star');
   star.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -5183,13 +5155,19 @@ function applyGoalFilter(goal) {
     const empty = ![...sub.children].some((c) => !c.classList.contains('filtered-out'));
     section.classList.toggle('empty', empty);
   });
-  // Filtrar categorías es solo mirar — nunca cambia lo que está elegido/
-  // sonando. Antes, si el estado activo quedaba fuera del filtro, se
-  // auto-seleccionaba el primero visible (perdías tu elección solo por
-  // curiosear otra categoría); además eso llamaba a selectState() directo,
-  // salteándose el gate de Premium del click de la tarjeta (ver más abajo)
-  // — filtrar a "Especiales" sin ser Premium auto-encendía un preset
-  // bloqueado. Ahora el filtro no toca `selected` en absoluto.
+  // Si el estado elegido quedó oculto, elegir el primero visible.
+  const hidden =
+    goal === 'favs'
+      ? !favorites.has(selected.id)
+      : goal === 'destacados'
+        ? !selected.featured
+        : goal && goalOf(selected).id !== goal;
+  if (hidden) {
+    const firstVisible = cards.find((c) => !c.classList.contains('filtered-out'));
+    if (firstVisible) {
+      selectState(STATES.find((st) => st.id === firstVisible.dataset.id));
+    }
+  }
 }
 goalFilter.addEventListener('click', (e) => {
   const chip = e.target.closest('.band-chip');

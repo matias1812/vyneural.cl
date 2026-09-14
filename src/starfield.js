@@ -14,7 +14,6 @@ export function initStarfield() {
   let h = 0;
   let stars = [];
   let shooting = [];
-  let fireworks = [];
   let speed = 0.35;
   let scrollBoost = 0;
   let lastY = window.scrollY;
@@ -63,31 +62,6 @@ export function initStarfield() {
     onScroll._t = setTimeout(() => (scrollBoost = 0), 250);
   }
   window.addEventListener('scroll', onScroll, { passive: true });
-
-  const FIREWORK_COLORS = ['#a78bfa', '#f472b6', '#38bdf8', '#fbbf24', '#4ade80'];
-
-  // Ráfaga festiva (planes Premium: "comprá" o revelado de precios) — reusa
-  // el mismo canvas/loop del viaje espacial en vez de un sistema de
-  // partículas DOM aparte, para que se sienta parte del mismo universo.
-  // xFrac/yFrac: origen en fracción del viewport (0..1).
-  function spawnFireworks(xFrac = 0.5, yFrac = 0.35) {
-    const cx = w * xFrac;
-    const cy = h * yFrac;
-    const color = FIREWORK_COLORS[Math.floor(Math.random() * FIREWORK_COLORS.length)];
-    const count = 22;
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
-      const vel = 2.4 + Math.random() * 2.2;
-      fireworks.push({
-        x: cx,
-        y: cy,
-        vx: Math.cos(angle) * vel,
-        vy: Math.sin(angle) * vel,
-        life: 1,
-        color,
-      });
-    }
-  }
 
   function spawnShooting() {
     shooting.push({
@@ -199,28 +173,6 @@ export function initStarfield() {
       ctx.stroke();
     }
 
-    // Partículas de fuegos artificiales: se frenan con drag, caen con
-    // gravedad leve y se apagan — solo existen si algo llamó a
-    // spawnFireworks() (planes Premium), el viaje espacial normal no las usa.
-    for (let i = fireworks.length - 1; i >= 0; i--) {
-      const f = fireworks[i];
-      f.vx *= 0.965;
-      f.vy = f.vy * 0.965 + 0.045;
-      f.x += f.vx;
-      f.y += f.vy;
-      f.life -= 0.014;
-      if (f.life <= 0) {
-        fireworks.splice(i, 1);
-        continue;
-      }
-      ctx.globalAlpha = Math.max(0, f.life);
-      ctx.fillStyle = f.color;
-      ctx.beginPath();
-      ctx.arc(f.x, f.y, 2.4 * f.life + 0.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-
     if (!paused) requestAnimationFrame(frame);
   }
 
@@ -248,6 +200,5 @@ export function initStarfield() {
       paused = !!p;
       if (!paused) requestAnimationFrame(frame);
     },
-    spawnFireworks,
   };
 }
