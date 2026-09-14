@@ -89,8 +89,8 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
             .setProductType(productType)
             .build()
         val params = QueryProductDetailsParams.newBuilder().setProductList(listOf(product)).build()
-        billingClient.queryProductDetailsAsync(params) { billingResult, productDetailsList ->
-            val details = productDetailsList.firstOrNull()
+        billingClient.queryProductDetailsAsync(params) { billingResult, productDetailsResult ->
+            val details = productDetailsResult.productDetailsList.firstOrNull()
             if (billingResult.responseCode != BillingClient.BillingResponseCode.OK || details == null) {
                 onResult(JSONObject().put("error", "producto no encontrado: $productId (${billingResult.debugMessage})"))
                 return@queryProductDetailsAsync

@@ -49,12 +49,14 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/cuenta-Cn-H3Y0M.js"></script>
-    <link rel="modulepreload" href="./assets/site-Ew6omuwz.js">
+    <script type="module" src="./assets/cuenta-DG0_FV2y.js"></script>
+    <link rel="modulepreload" href="./assets/site-CkmZIKa7.js">
     <link rel="modulepreload" href="./assets/preload-helper-Dp1pzeXC.js">
-    <link rel="modulepreload" href="./assets/alarms-iAH6S0Og.js">
-    <link rel="modulepreload" href="./assets/freq-cover-DphhMTGC.js">
-    <link rel="stylesheet" href="./assets/site-Dr2FX3Jw.css">
+    <link rel="modulepreload" href="./assets/alarms-Btf6HZl-.js">
+    <link rel="modulepreload" href="./assets/freq-cover-B_kPcinn.js">
+    <link rel="modulepreload" href="./assets/billing-CWE79Y_1.js">
+    <link rel="modulepreload" href="./assets/confirm-modal-eBx4xGlb.js">
+    <link rel="stylesheet" href="./assets/site-CnyBHObB.css">
   </head>
   <body>
     <header class="site-nav">
@@ -66,12 +68,11 @@
       <button class="nav-toggle" id="nav-toggle" aria-label="Abrir menú" aria-expanded="false">☰</button>
       <nav class="site-links" id="site-links" aria-label="Navegación principal">
         <a href="/">Generador</a>
+        <a href="/premium">Premium</a>
         <a href="/beneficios">Beneficios</a>
         <a href="/sobre-nosotros">Sobre nosotros</a>
         <a href="/privacidad">Privacidad</a>
-        <a href="/hoja-de-ruta">Hoja de ruta</a>
         <a href="/codigo-abierto">Código abierto</a>
-        <a href="/rutina">Tu rutina</a>
       </nav>
     </header>
 
@@ -135,6 +136,22 @@
             </div>
           </div>
 
+          <div class="page-card" id="cuenta-premium-card">
+            <div class="rutina-head">
+              <h3>💎 Premium</h3>
+              <span class="roadmap-status rs-warn" id="cuenta-premium-status">Consultando…</span>
+            </div>
+            <p id="cuenta-premium-text" class="rutina-hint">Consultando tu plan…</p>
+            <a href="/premium" class="cuenta-btn" id="cuenta-premium-link">Ver planes</a>
+
+            <div class="cuenta-oneclick hidden" id="cuenta-oneclick">
+              <p id="cuenta-oneclick-text" class="rutina-hint"></p>
+              <button type="button" class="cuenta-btn hidden" id="cuenta-oneclick-activate">Activar cobro automático</button>
+              <button type="button" class="cuenta-btn hidden" id="cuenta-oneclick-update-card">Actualizar tarjeta</button>
+              <button type="button" class="cuenta-btn cuenta-btn-danger hidden" id="cuenta-oneclick-cancel">Cancelar</button>
+            </div>
+          </div>
+
           <div class="card-grid">
             <div class="page-card">
               <h3>⭐ Favoritos en la nube</h3>
@@ -148,8 +165,10 @@
             <div class="page-card">
               <h3>🎚️ Mis frecuencias</h3>
               <ul class="cuenta-list" id="cuenta-freqs"></ul>
-              <p class="cuenta-empty" id="cuenta-freqs-empty">Sin frecuencias guardadas.</p>
-              <button type="button" class="cuenta-btn" id="cuenta-create-freq-btn">＋ Guardar una frecuencia personalizada</button>
+              <p class="cuenta-empty" id="cuenta-freqs-empty">
+                Sin frecuencias guardadas. Se crean desde el modo "Personalizado" del
+                <a href="/">generador</a> o al armar un paso de tu <a href="/rutina">itinerario</a>.
+              </p>
             </div>
           </div>
 
@@ -264,7 +283,6 @@
           <a href="/beneficios">Beneficios</a>
           <a href="/como-usar">Cómo usar</a>
           <a href="/descargar">Descargar APK (Android)</a>
-          <a href="/rutina">Tu rutina</a>
           <a href="/hoja-de-ruta">Hoja de ruta</a>
           <a href="/codigo-abierto">Código abierto</a>
         </div>
@@ -295,6 +313,14 @@
       </p>
     </footer>
 
+    <!-- Form real hacia Transbank (inscripción de tarjeta Oneclick Mall) —
+         mismo criterio que #webpay-form en premium.html: Transbank exige un
+         POST real del navegador, nunca un fetch. Se completa y envía por JS
+         (ver src/cuenta.js::activateOneclick), nunca se muestra. -->
+    <form id="oneclick-form" method="POST" action="" class="hidden">
+      <input type="hidden" name="TBK_TOKEN" id="oneclick-token" />
+    </form>
+
     <!-- Confirmación de desactivar cuenta: pide la contraseña de nuevo (mismo
          criterio que cambiar contraseña) antes de una acción que no podés
          deshacer vos mismo. -->
@@ -315,6 +341,6 @@
         </form>
       </div>
     </div>
-
+
   </body>
 </html>

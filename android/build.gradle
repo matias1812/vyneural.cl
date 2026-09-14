@@ -2,7 +2,7 @@
 // Requiere: Android Studio (JDK 17 incluido). No es necesario un backend.
 plugins {
     id 'com.android.application' version '8.2.2' apply false
-    id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
+    id 'org.jetbrains.kotlin.android' version '2.1.0' apply false
     // FCM (recordatorios reales incluso con la app cerrada/matada — ver
     // VyneuralMessagingService.kt): requiere el archivo google-services.json
     // en android/app/ (ya provisto, no es secreto).

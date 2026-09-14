@@ -3,19 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Restablecer contraseña · Vyneural</title>
+    <title>Resultado de la inscripción · Vyneural</title>
     <meta
       name="description"
-      content="Restablecé tu contraseña de Vyneural con el enlace recibido por correo."
+      content="Resultado de la activación de la auto-renovación de Vyneural Premium."
     />
     <meta name="author" content="Vyneural" />
     <meta name="robots" content="noindex" />
     <meta name="theme-color" content="#0b0d1a" />
-    <link rel="canonical" href="https://www.vyneural.cl/restablecer" />
+    <link rel="canonical" href="https://www.vyneural.cl/oneclick-retorno" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
     <link rel="apple-touch-icon" href="./icon.svg" />
-    <script type="module" src="./assets/restablecer-DjlZ_XOB.js"></script>
+    <script type="module" src="./assets/oneclick-retorno-DpproGYW.js"></script>
     <link rel="modulepreload" href="./assets/site-CkmZIKa7.js">
     <link rel="stylesheet" href="./assets/site-CnyBHObB.css">
   </head>
@@ -29,48 +29,23 @@
       <nav class="site-links" id="site-links" aria-label="Navegación principal">
         <a href="/">Generador</a>
         <a href="/premium">Premium</a>
-        <a href="/beneficios">Beneficios</a>
         <a href="/sobre-nosotros">Sobre nosotros</a>
         <a href="/privacidad">Privacidad</a>
-        <a href="/codigo-abierto">Código abierto</a>
       </nav>
     </header>
 
     <main>
       <header class="page-hero">
-        <span class="page-kicker">Recuperación de cuenta</span>
-        <h1>Creá una contraseña nueva</h1>
+        <span class="page-kicker">Vyneural Premium</span>
+        <h1>Auto-renovación</h1>
       </header>
 
       <div class="page-body">
         <div class="page-card verify-card">
-          <p class="rm-emoji" aria-hidden="true">🔑</p>
-
-          <form id="reset-form" class="cuenta-form" novalidate>
-            <label for="reset-password">Contraseña nueva
-              <input id="reset-password" name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="128" />
-            </label>
-            <small class="auth-hint" style="margin-top: -8px">Mínimo 8 caracteres, con letras y números.</small>
-            <label for="reset-confirm">Repetir contraseña
-              <input id="reset-confirm" name="confirm" type="password" autocomplete="new-password" required />
-            </label>
-            <div class="auth-error hidden" id="reset-error" role="alert"></div>
-            <button type="submit" class="cuenta-btn" id="reset-submit">Guardar contraseña nueva</button>
-          </form>
-
-          <div id="reset-done" class="verify-card" hidden>
-            <p class="rm-emoji" aria-hidden="true">✅</p>
-            <h2>Contraseña actualizada</h2>
-            <p>
-              Ya podés iniciar sesión con tu contraseña nueva. Por seguridad, cerramos
-              la sesión en todos tus dispositivos.
-            </p>
-            <div class="cuenta-gate-actions">
-              <button type="button" class="hero-cta" id="reset-to-login">Iniciar sesión</button>
-            </div>
-          </div>
-
-          <p class="verify-note" id="reset-note"></p>
+          <p class="rm-emoji" aria-hidden="true">⏳</p>
+          <h2 id="oc-title">Un momento…</h2>
+          <p id="oc-text">Estamos revisando el resultado de la inscripción.</p>
+          <div id="oc-actions" class="cuenta-gate-actions"></div>
         </div>
       </div>
     </main>
@@ -84,16 +59,14 @@
           </a>
           <p>
             Frecuencias binaurales generadas en tiempo real en tu navegador con la
-            Web Audio API. Sin cuentas, sin grabaciones, sin servidores.
+            Web Audio API.
           </p>
         </div>
         <div class="footer-col">
           <h3>Explora</h3>
           <a href="/">Generador</a>
-          <a href="/beneficios">Beneficios</a>
+          <a href="/premium">Premium</a>
           <a href="/privacidad">Privacidad</a>
-          <a href="/hoja-de-ruta">Hoja de ruta</a>
-          <a href="/codigo-abierto">Código abierto</a>
         </div>
         <div class="footer-col">
           <h3>Sitio</h3>

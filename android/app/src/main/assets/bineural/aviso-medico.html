@@ -1,87 +1,221 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Aviso Médico · Vyneural</title>
-<meta name="description" content="Aviso médico de Vyneural: las ondas binaurales no son un tratamiento médico. Precauciones de uso, volumen seguro y cuándo consultar a un profesional." />
-<link rel="canonical" href="https://www.vyneural.cl/aviso-medico" />
-<link rel="icon" href="/icon.svg" type="image/svg+xml" />
-<style>
-:root { --bg:#0b0d1a; --surface:rgba(255,255,255,.05); --border:rgba(255,255,255,.09); --text:#eef0ff; --text-dim:#9aa0c3; --accent:#a78bfa; --accent-soft:rgba(167,139,250,.16); }
-* { box-sizing:border-box; margin:0; padding:0; }
-body { font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; background:radial-gradient(1200px 600px at 80% -10%,rgba(167,139,250,.18),transparent 60%),radial-gradient(900px 500px at 10% 110%,rgba(96,165,250,.15),transparent 60%),var(--bg); color:var(--text); min-height:100vh; min-height:100dvh; overflow-x:clip; -webkit-font-smoothing:antialiased; line-height:1.65; }
-.wrap { max-width:760px; margin:0 auto; padding:28px 20px 64px; }
-header.site { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 0 10px; border-bottom:1px solid var(--border); }
-.brand { display:flex; align-items:center; gap:9px; color:var(--text); text-decoration:none; font-weight:700; font-size:18px; }
-.brand-ico { width:34px; height:34px; border-radius:10px; background:var(--accent-soft); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--accent); }
-.back { color:var(--text-dim); text-decoration:none; font-size:14px; padding:8px 12px; border:1px solid var(--border); border-radius:999px; transition:all .15s ease; }
-.back:hover { color:var(--text); border-color:var(--accent); background:var(--accent-soft); }
-h1 { font-size:28px; margin:34px 0 6px; }
-.updated { color:var(--text-dim); font-size:13px; margin-bottom:26px; }
-h2 { font-size:18px; margin:30px 0 10px; color:var(--accent); }
-p { color:var(--text-dim); margin-bottom:12px; }
-ul,ol { color:var(--text-dim); margin:0 0 14px 22px; }
-li { margin-bottom:6px; }
-strong { color:var(--text); }
-.card { background:var(--accent-soft); border:1px solid rgba(167,139,250,.35); border-radius:14px; padding:18px 20px; margin:18px 0; color:var(--text); font-weight:600; }
-footer { margin-top:44px; padding-top:20px; border-top:1px solid var(--border); display:flex; flex-wrap:wrap; gap:14px; font-size:13px; color:var(--text-dim); }
-footer a { color:var(--text-dim); text-decoration:none; }
-footer a:hover { color:var(--text); }
-@media (max-width:480px){ h1{font-size:23px;} .wrap{padding:20px 16px 48px;} }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <header class="site">
-    <a class="brand" href="/">
-      <span class="brand-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
-      Vyneural
-    </a>
-    <a class="back" href="/">← Volver al generador</a>
-  </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aviso médico · Vyneural</title>
+    <meta
+      name="description"
+      content="Aviso médico de Vyneural: las ondas binaurales son una herramienta de relajación, no un dispositivo médico. No diagnostican ni tratan ninguna condición. Precauciones antes de usarlas."
+    />
+    <meta name="author" content="Vyneural" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0b0d1a" />
+    <link rel="canonical" href="https://www.vyneural.cl/aviso-medico" />
 
-  <h1>Aviso Médico</h1>
-  <p class="updated">Última actualización: 14 de agosto de 2026</p>
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Vyneural" />
+    <meta property="og:title" content="Aviso médico · Vyneural" />
+    <meta
+      property="og:description"
+      content="Las ondas binaurales son una herramienta de relajación, no un dispositivo médico. Precauciones antes de usarlas."
+    />
+    <meta property="og:url" content="https://www.vyneural.cl/aviso-medico" />
+    <meta property="og:image" content="https://www.vyneural.cl/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="es_ES" />
 
-  <div class="card">Las ondas binaurales no son un tratamiento médico. Vyneural no diagnostica, trata, cura ni previene ninguna enfermedad ni condición de salud.</div>
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Aviso médico · Vyneural" />
+    <meta
+      name="twitter:description"
+      content="Las ondas binaurales son una herramienta de relajación, no un dispositivo médico."
+    />
+    <meta name="twitter:image" content="https://www.vyneural.cl/og.png" />
 
-  <h2>Qué son las ondas binaurales</h2>
-  <p>Las ondas binaurales son un fenómeno <strong>perceptivo</strong>: cuando cada oído recibe una frecuencia ligeramente distinta, el cerebro percibe un latido de la diferencia entre ambas. Por ejemplo, 200 Hz en un oído y 206 Hz en el otro producen la percepción de un latido de 6 Hz.</p>
-  <p>Se usan como herramienta de relajación, meditación o concentración. Los estudios existentes muestran resultados <strong>variables y preliminares</strong>: algunas personas reportan relajación o mejor concentración, pero la evidencia no respalda afirmaciones de que estas frecuencias induzcan estados cerebrales o psicológicos garantizados.</p>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
 
-  <h2>Precauciones de uso</h2>
-  <ul>
-    <li><strong>Audífonos obligatorios:</strong> sin audífonos estéreo el efecto binaural no se produce.</li>
-    <li><strong>Volumen seguro:</strong> mantengas el volumen a un nivel cómodo. La exposición a volumen alto daña la audición de forma irreversible.</li>
-    <li><strong>No conduzcas ni operes maquinaria</strong> durante ni justo después de una sesión: la relajación profunda reduce los reflejos.</li>
-    <li><strong>Detené la sesión</strong> si sentís mareos, náuseas, ansiedad, dolor de cabeza o cualquier molestia.</li>
-    <li><strong>No la uses como reemplazo del sueño</strong> si sufrís de insomnio crónico: consultá a un profesional.</li>
-  </ul>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "Aviso médico",
+        "inLanguage": "es",
+        "url": "https://www.vyneural.cl/aviso-medico",
+        "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
+      }
+    </script>
+    <script type="module" src="./assets/site-CkmZIKa7.js"></script>
+    <link rel="stylesheet" href="./assets/site-CnyBHObB.css">
+  </head>
+  <body>
+    <header class="site-nav">
+      <a class="site-brand" href="/">
+        <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
+        Vyneural
+      </a>
+      <button class="nav-toggle" id="nav-toggle" aria-label="Abrir menú" aria-expanded="false">☰</button>
+      <nav class="site-links" id="site-links" aria-label="Navegación principal">
+        <a href="/">Generador</a>
+        <a href="/premium">Premium</a>
+        <a href="/beneficios">Beneficios</a>
+        <a href="/sobre-nosotros">Sobre nosotros</a>
+        <a href="/privacidad">Privacidad</a>
+        <a href="/codigo-abierto">Código abierto</a>
+      </nav>
+    </header>
 
-  <h2>Cuándo consultar a un profesional</h2>
-  <p>Consultá a un médico o profesional de la salud antes de usar Vyneural si:</p>
-  <ul>
-    <li>Tenés antecedentes de <strong>epilepsia</strong> o convulsiones (incluida sensibilidad a estímulos rítmicos o fotosensibles).</li>
-    <li>Tenés <strong>acúfenos</strong> (zumbidos) o pérdida auditiva.</li>
-    <li>Estás en tratamiento por un <strong>trastorno del sueño, ansiedad o depresión</strong>.</li>
-    <li>Usás <strong>marcapasos u otros dispositivos médicos implantados</strong>.</li>
-    <li>Estás <strong>embarazada</strong> y tenés dudas sobre el uso de estímulos sonoros rítmicos.</li>
-  </ul>
+    <main>
+      <nav class="breadcrumbs" aria-label="Migajas de pan">
+        <a href="/">Inicio</a><span class="sep">›</span><span aria-current="page">Aviso médico</span>
+      </nav>
 
-  <h2>Honestidad sobre los efectos</h2>
-  <p>Vyneural muestra en su panel científico la diferencia entre lo <strong>medido</strong>, lo <strong>simulado</strong>, lo <strong>estimado</strong> y lo <strong>heurístico</strong>. Los estados que ves en pantalla (relajación, atención, fatiga) son <strong>simulaciones de un modelo</strong>, no mediciones de tu cerebro. La única forma de conocer tu respuesta real es la experiencia personal, con precaución.</p>
+      <header class="page-hero">
+        <span class="page-kicker">Borrador — en revisión</span>
+        <h1>Aviso médico</h1>
+        <p class="page-lead">
+          Resumen en una frase: las ondas binaurales son una herramienta de relajación y
+          concentración, no un tratamiento ni un dispositivo médico. No sustituyen el consejo de un
+          profesional de la salud.
+        </p>
+      </header>
 
-  <footer>
-    <a href="/">Generador</a>
-    <a href="/descargar">Descargar APK</a>
-    <a href="/privacidad">Privacidad</a>
-    <a href="/terminos">Términos</a>
-    <a href="/aviso-medico">Aviso médico</a>
-    <a href="/cookies">Cookies</a>
-    <a href="https://github.com/matias1812/vyneural.cl" target="_blank" rel="noopener noreferrer">GitHub</a>
-    <span>© 2026 Vyneural</span>
-  </footer>
-</div>
-</body>
+      <div class="page-body">
+        <div class="page-note">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <div>
+            <strong>Primera versión, para dejar de tener el link roto.</strong> El contenido está
+            redactado con criterio general y conservador, pero conviene que lo revise alguien con
+            formación en salud antes de considerarlo definitivo — sobre todo la lista de
+            precauciones, que hoy es genérica y no un listado clínico exhaustivo.
+          </div>
+        </div>
+
+        <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>Qué son las ondas binaurales (y qué no son)</h2>
+        <p>
+          Cuando cada oído escucha un tono de frecuencia ligeramente distinta, el cerebro percibe un
+          tercer "pulso" a la diferencia entre ambas — eso es una onda binaural. Se usan
+          informalmente como apoyo para relajarse, concentrarse o conciliar el sueño. Podés leer más
+          en <a href="/que-son-las-ondas-binaurales">qué son las ondas binaurales</a>.
+        </p>
+        <p>
+          <strong>Vyneural no es un dispositivo médico, no diagnostica, no trata ni cura ninguna
+          condición de salud física o mental.</strong> Es una herramienta de bienestar y relajación,
+          igual que la música o los sonidos ambientales. La evidencia científica sobre sus efectos
+          es limitada y variable según la persona — no prometemos resultados específicos.
+        </p>
+
+        <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></span>Cómo usarlas de forma segura</h2>
+        <ul>
+          <li><strong>Necesitás audífonos.</strong> El efecto binaural depende de que cada oído
+            reciba un tono distinto — con parlantes no funciona igual, y puede sonar simplemente
+            como un tono raro.</li>
+          <li><strong>Volumen moderado.</strong> Empezá con un volumen bajo y subilo solo si hace
+            falta. No hay ningún beneficio en escucharlo fuerte.</li>
+          <li><strong>Nunca mientras conducís, operás maquinaria o hacés algo que requiera tu
+            atención plena.</strong> Las sesiones pensadas para relajación profunda o sueño pueden
+            darte sueño de verdad.</li>
+          <li><strong>Escuchá a tu cuerpo.</strong> Si sentís molestia, mareo o cualquier síntoma
+            que no esperabas, dejá de usarlo.</li>
+        </ul>
+
+        <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>Cuándo consultar a un profesional antes de usarlo</h2>
+        <p>
+          Consultá con un médico antes de usar Vyneural (o cualquier estimulación auditiva
+          rítmica) si:
+        </p>
+        <ul>
+          <li>Tenés epilepsia, antecedentes de convulsiones o cualquier condición que pueda ser
+            sensible a estímulos rítmicos.</li>
+          <li>Estás embarazada — no hay suficiente evidencia sobre sus efectos en el embarazo.</li>
+          <li>Usás un marcapasos u otro dispositivo médico implantado.</li>
+          <li>Tenés una condición psiquiátrica activa, especialmente si involucra disociación,
+            ansiedad severa o trastornos del sueño diagnosticados.</li>
+          <li>Sos menor de edad — un adulto responsable debería supervisar el uso.</li>
+        </ul>
+        <p>
+          Esta lista es orientativa, no exhaustiva. Ante la duda, la consulta con un profesional de
+          la salud siempre pesa más que cualquier cosa que diga esta página.
+        </p>
+
+        <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></span>No reemplaza atención médica de urgencia</h2>
+        <p>
+          Si estás atravesando una crisis de salud física o mental, contactá a los servicios de
+          emergencia de tu país o a un profesional de la salud — Vyneural no es, ni pretende ser, un
+          sustituto de eso en ningún caso.
+        </p>
+
+        <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></span>Cambios en este aviso</h2>
+        <p>
+          Si cambiamos algo importante, actualizamos esta página y la fecha de abajo.
+        </p>
+
+        <div class="page-card">
+          <h3>✉️ Contacto</h3>
+          <p>
+            ¿Preguntas sobre este aviso? Usá la burbuja 🐞 (abajo a la derecha, en cualquier
+            página) para escribirnos.
+            Última actualización: <time datetime="2026-09-13">13 de septiembre de 2026</time>.
+          </p>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="site-brand" href="/">
+            <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
+            Vyneural
+          </a>
+          <p>
+            Frecuencias binaurales generadas en tiempo real en tu navegador o en la app Android.
+            Sin anuncios, sin seguimiento entre sitios: tu audio se queda en tu dispositivo y tus
+            datos, solo si creás cuenta.
+          </p>
+        </div>
+        <div class="footer-col">
+          <h3>Explora</h3>
+          <a href="/">Generador</a>
+          <a href="/que-son-las-ondas-binaurales">Qué son las ondas binaurales</a>
+          <a href="/beneficios">Beneficios</a>
+          <a href="/como-usar">Cómo usar</a>
+          <a href="/descargar">Descargar APK (Android)</a>
+          <a href="/hoja-de-ruta">Hoja de ruta</a>
+          <a href="/codigo-abierto">Código abierto</a>
+        </div>
+        <div class="footer-col">
+          <h3>Estados</h3>
+          <a href="/#states-grid">Meditación</a>
+          <a href="/#states-grid">Sueño profundo</a>
+          <a href="/#states-grid">Concentración</a>
+          <a href="/#states-grid">Resonancia Schumann</a>
+        </div>
+        <div class="footer-col">
+          <h3>Sitio</h3>
+          <a href="/sobre-nosotros">Sobre nosotros</a>
+          <a href="/privacidad">Privacidad</a>
+          <a href="/terminos">Términos y condiciones</a>
+          <a href="/aviso-medico">Aviso médico</a>
+          <a href="/cookies">Cookies</a>
+          <a href="/sobre-nosotros#contacto">Contacto</a>
+          <a class="social-link" href="https://www.instagram.com/vyneural.cl/" target="_blank" rel="noopener noreferrer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/></svg> Instagram</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© <span data-year>2026</span> Vyneural · Hecho con <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> · Web Audio API · Vite</span>
+        <span>Desplegado con Vercel</span>
+        <a class="footer-social" href="https://www.instagram.com/vyneural.cl/" target="_blank" rel="noopener noreferrer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/></svg> @vyneural.cl</a>
+      </div>
+      <p class="footer-disclaimer">
+        Las ondas binaurales son una herramienta de relajación y no sustituyen el consejo
+        médico. Usa audífonos: sin ellos no se produce el efecto binaural. No las uses mientras
+        conduces o manejas maquinaria.
+      </p>
+    </footer>
+
+  </body>
 </html>

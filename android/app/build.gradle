@@ -22,13 +22,13 @@ def ksKeyPass = ksProps.getProperty('bineural.keyPassword', System.getenv('BINEU
 
 android {
     namespace 'com.vyneural.bineural'
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.vyneural.bineural"
         minSdk 26
-        targetSdk 34
-        versionCode 29
+        targetSdk 36
+        versionCode 30
         versionName "1.6.9"
         // Backend al que el worker de sincronización en segundo plano consulta
         // alarmas y reporta el dispositivo. Se puede sobrescribir en builds de
@@ -81,7 +81,7 @@ dependencies {
     // por el Android Keystore, en vez de SharedPreferences en texto plano.
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     // Google Play Billing (plan Premium, SOLO APK — ver billing/PlayBillingManager.kt).
-    implementation 'com.android.billingclient:billing-ktx:7.1.1'
+    implementation 'com.android.billingclient:billing-ktx:8.0.0'
     // BoM fija versiones compatibles entre sí de todas las libs de Firebase.
     implementation platform('com.google.firebase:firebase-bom:33.5.1')
     implementation 'com.google.firebase:firebase-messaging-ktx'
