@@ -9,6 +9,24 @@
 const $ = (id) => document.getElementById(id);
 
 const MESSAGES = {
+  plan_switched: {
+    emoji: '✅',
+    title: '¡Listo, cambiaste de plan!',
+    text: 'Tu auto-renovación ahora es para el nuevo plan — no hizo falta volver a ingresar la tarjeta. El cobro va a pasar en tu próximo vencimiento, sumando el tiempo que ya tenías.',
+    actions: [{ label: 'Ver mi cuenta', url: '/cuenta' }],
+  },
+  charged: {
+    emoji: '✅',
+    title: '¡Listo, ya sos Premium!',
+    text: 'Guardamos tu tarjeta y cobramos el primer período — tu plan se va a renovar solo de acá en adelante, antes de cada vencimiento. Podés cancelarlo cuando quieras desde tu cuenta.',
+    actions: [{ label: 'Ver mi cuenta', url: '/cuenta' }],
+  },
+  charge_failed: {
+    emoji: '😕',
+    title: 'Guardamos la tarjeta, pero el cobro no pasó',
+    text: 'Transbank rechazó el cobro (fondos, tarjeta no habilitada u otro motivo del banco emisor). Vamos a reintentarlo automáticamente en las próximas horas — si preferís, podés revisar la tarjeta guardada desde tu cuenta.',
+    actions: [{ label: 'Ver mi cuenta', url: '/cuenta' }],
+  },
   approved: {
     emoji: '✅',
     title: '¡Tarjeta inscripta!',

@@ -5,8 +5,9 @@
 // payments.py para el flujo completo del lado del servidor.
 
 import { getAccessToken } from './api/client.js';
-import { listPlans, createPayment, premiumStatus } from './api/billing.js';
+import { listPlans, createPayment, inscribeOneclick, premiumStatus, oneclickStatus } from './api/billing.js';
 import { initStarfield } from './starfield.js';
+import { confirmModal } from './ui/confirm-modal.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -51,17 +52,21 @@ const PLAN_LABELS = {
 // con badge y borde propio) — decisión de producto, no depende del precio.
 const FEATURED_PLAN = 'annual';
 
+// Mensual/Anual se renuevan solos por default desde el primer pago (Oneclick
+// Mall, tarjeta guardada) — ya no es un paso aparte que se activa "después"
+// desde /cuenta. Se cancela cuando quieras, desde ahí mismo, sin perder lo
+// que ya está pagado (ver buyPlan()).
 const REASSURANCE = {
-  monthly: 'Sin compromiso, vence solo (auto-renovación opcional después).',
-  annual: 'Pagás vos cuándo querés — o activás auto-renovación después.',
-  lifetime: 'Un pago. Nunca más renovar.',
+  monthly: 'Se renueva solo cada 30 días — cancelás cuando quieras desde tu cuenta.',
+  annual: 'Se renueva solo cada año — cancelás cuando quieras desde tu cuenta.',
+  lifetime: 'Un pago único. No se renueva porque no vence nunca.',
 };
 
 const PLAN_ORDER = ['monthly', 'annual', 'lifetime'];
 
 // Ítems cortos a propósito (una sola línea) — el resto ya está explicado en
 // el copy del hero de la página.
-const FEATURES = ['Frecuencias personalizadas', 'Alarmas ilimitadas', 'Itinerarios completos'];
+const FEATURES = ['Frecuencias personalizadas', 'Alarmas ilimitadas', 'Itinerarios completos', 'Presets especiales (Schumann, 963 Hz · Divino)'];
 
 // Precio mensual equivalente / ahorro — siempre derivado de los precios
 // reales que devuelve el backend (nunca hardcodeado), para que la promesa de
@@ -136,7 +141,7 @@ function renderActiveBanner(status) {
   banner.classList.add('hidden');
 }
 
-function renderPlans(plans, status) {
+function renderPlans(plans, status, oneclick) {
   const wrap = $('premium-plans');
   if (!wrap) return;
   wrap.innerHTML = '';
@@ -144,17 +149,49 @@ function renderPlans(plans, status) {
   // de nuevo (el backend también lo rechaza — ver POST /payments/create —
   // esto es solo para no ofrecer un botón que sabemos que va a fallar).
   const lifetimeActive = !!(status && status.premium_lifetime);
+  // La tarjeta del plan que YA está auto-renovando queda sin botón
+  // clickeable — nada de volver a llamar inscribeOneclick() para un plan
+  // que no cambió. Antes esto se podía disparar con un click de más (o una
+  // recarga reintentando el POST) y borraba la auto-renovación que ya
+  // funcionaba, dejando una inscripción "pending" huérfana (bug real visto
+  // en vivo: ver también el 409 espejo en payments.py::oneclick_inscribe).
+  const activePlanKey = oneclick && oneclick.active ? oneclick.plan : null;
+  let rendered = 0;
   for (const key of PLAN_ORDER) {
     const plan = plans[key];
     if (!plan) continue;
+    rendered++;
     const info = PLAN_LABELS[key];
     const pitch = pricingPitch(key, plans);
     const featured = key === FEATURED_PLAN;
+    const isActiveAutoRenew = key === activePlanKey;
     const card = document.createElement('div');
     card.className = `page-card premium-plan premium-plan-${key}${featured ? ' premium-plan-featured' : ''}`;
     const priceLine = plan.days
       ? `${clp.format(plan.amount)} <span class="cuenta-meta">/ ${plan.days === 365 ? 'año' : plan.days + ' días'}</span>`
       : `${clp.format(plan.amount)} <span class="cuenta-meta">pago único</span>`;
+    const cardLabel = oneclick && oneclick.card_type && oneclick.card_last_digits
+      ? `${oneclick.card_type} •••• ${oneclick.card_last_digits}`
+      : 'tarjeta guardada';
+    let buttonHTML;
+    if (lifetimeActive) {
+      buttonHTML = `
+        <button type="button" class="cuenta-btn" disabled>Ya la tenés</button>
+        <p class="premium-reassurance">${REASSURANCE[key]}</p>
+      `;
+    } else if (isActiveAutoRenew) {
+      buttonHTML = `
+        <button type="button" class="cuenta-btn" disabled>${ICONS.checkCircle} Auto-renovación activa</button>
+        <p class="premium-reassurance">${cardLabel} — <a href="/cuenta">gestionar o cancelar</a></p>
+      `;
+    } else {
+      buttonHTML = `
+        <button type="button" class="cuenta-btn" data-plan="${key}">
+          ${status && status.is_premium ? 'Renovar' : 'Comprar'}
+        </button>
+        <p class="premium-reassurance">${REASSURANCE[key]}</p>
+      `;
+    }
     card.innerHTML = `
       ${featured ? `<span class="premium-plan-badge">${ICONS.flame} Más elegido</span>` : ''}
       ${key === 'monthly' ? `<span class="premium-ship" aria-hidden="true">${ICONS.rocket}</span>` : ''}
@@ -170,18 +207,20 @@ function renderPlans(plans, status) {
       <ul class="cuenta-list">
         ${FEATURES.map((f) => `<li>✓ ${f}</li>`).join('')}
       </ul>
-      <button type="button" class="cuenta-btn" data-plan="${key}" ${lifetimeActive ? 'disabled' : ''}>
-        ${lifetimeActive ? 'Ya la tenés' : status && status.is_premium ? 'Renovar' : 'Comprar'}
-      </button>
-      <p class="premium-reassurance">${REASSURANCE[key]}</p>
+      ${buttonHTML}
     `;
     wrap.appendChild(card);
   }
-  if (!lifetimeActive) {
-    wrap.querySelectorAll('button[data-plan]').forEach((btn) => {
-      btn.addEventListener('click', () => buyPlan(btn.dataset.plan, btn));
-    });
+  // Defensivo: si el backend alguna vez devuelve un shape que no calza con
+  // ningún key de PLAN_ORDER, la grilla no debe quedar en blanco sin
+  // explicación — mismo mensaje que el catch de loadContent().
+  if (rendered === 0) {
+    wrap.innerHTML = '<p class="cuenta-empty">No pudimos cargar los planes ahora. Reintentá en unos segundos.</p>';
+    return;
   }
+  wrap.querySelectorAll('button[data-plan]').forEach((btn) => {
+    btn.addEventListener('click', () => buyPlan(btn.dataset.plan, btn, activePlanKey));
+  });
 
   // Revelado festivo de los planes — una sola vez por carga, no en cada
   // re-render de renderPlans(). Se salta si el sistema pide reducir
@@ -196,13 +235,29 @@ function renderPlans(plans, status) {
   }
 }
 
-async function buyPlan(plan, btn) {
+async function buyPlan(plan, btn, activePlanKey) {
   // Los planes se ven sin sesión (marketing/SEO), pero comprar sí la
   // requiere: el plan se ata a un usuario. En vez de dejar que el POST al
   // backend falle con 401, abrimos el login acá mismo, antes de tocar la red.
   if (!getAccessToken()) {
     openAuth('login');
     return;
+  }
+  // Ya hay otro plan auto-renovando (ej. Mensual) y se está por pisar con
+  // este (ej. Anual) — a diferencia de re-elegir el MISMO plan (esa tarjeta
+  // ni siquiera tiene botón clickeable, ver renderPlans), esto sí cambia el
+  // plan de verdad, así que se confirma antes de tocar la red (mismo
+  // criterio que cancelOneclick() en /cuenta). Con la tarjeta ya guardada
+  // esto NO vuelve a pedirla — ver inscribeOneclick() más abajo.
+  if (activePlanKey && activePlanKey !== plan && plan !== 'lifetime') {
+    const fromLabel = PLAN_LABELS[activePlanKey]?.title || activePlanKey;
+    const toLabel = PLAN_LABELS[plan]?.title || plan;
+    const ok = await confirmModal({
+      title: 'Cambiar de plan',
+      text: `Esto va a cambiar tu auto-renovación de ${fromLabel} a ${toLabel} — se usa la misma tarjeta guardada, no hace falta ingresarla de nuevo.`,
+      confirmLabel: 'Cambiar plan',
+    });
+    if (!ok) return;
   }
   showError(null);
   // Chispa de confirmación al click — breve y disparada por el propio gesto
@@ -222,13 +277,35 @@ async function buyPlan(plan, btn) {
     btn.textContent = 'Despertando el servidor… puede tardar unos segundos';
   }, WAKEUP_HINT_MS);
   try {
-    const { url, token } = await createPayment(plan);
-    // Transbank exige un POST real del navegador con token_ws — no un
-    // fetch ni un simple location.href (ver docs del flujo Webpay Plus).
-    const form = $('webpay-form');
-    form.action = url;
-    $('webpay-token').value = token;
-    form.submit();
+    // De por vida es pago único (Webpay Plus, nada que auto-renovar).
+    // Mensual/Anual entran directo por Oneclick Mall: la auto-renovación es
+    // el default desde el primer pago, no un paso aparte que se activa
+    // "después" desde /cuenta (ver oneclick_finish, que cobra el primer
+    // período de una si el usuario no tiene Premium vigente todavía).
+    if (plan === 'lifetime') {
+      const { url, token } = await createPayment(plan);
+      // Transbank exige un POST real del navegador con token_ws — no un
+      // fetch ni un simple location.href (ver docs del flujo Webpay Plus).
+      const form = $('webpay-form');
+      form.action = url;
+      $('webpay-token').value = token;
+      form.submit();
+    } else {
+      const result = await inscribeOneclick(plan);
+      if (result.switched) {
+        // Ya había una tarjeta activa — el backend cambió el plan directo,
+        // sin pedir nada nuevo a Transbank (ver payments.py::
+        // oneclick_inscribe). No hay redirect real: se simula el mismo
+        // destino que usa el flujo normal, para reusar una sola pantalla de
+        // resultado en vez de inventar un estado de éxito aparte acá.
+        window.location.href = '/oneclick-retorno?status=plan_switched';
+        return;
+      }
+      const form = $('oneclick-form');
+      form.action = result.url;
+      $('oneclick-token').value = result.token;
+      form.submit();
+    }
   } catch (err) {
     clearTimeout(timer);
     btn.disabled = false;
@@ -242,18 +319,59 @@ async function buyPlan(plan, btn) {
   }
 }
 
+// Devuelve true si vale la pena reintentar (ver loadContentOnBoot): solo
+// para fallas transitorias (red caída / backend dormido, status 0 o 5xx),
+// no para errores reales del servidor. status/oneclick ya tienen su propio
+// .catch(() => null) — solo listPlans() puede tirar acá, y es la única
+// pieza que de verdad bloquea la página (sin precios no hay nada que
+// mostrar; sin status/oneclick igual se puede comprar).
 async function loadContent() {
-  try {
-    const [{ plans }, status] = await Promise.all([listPlans(), premiumStatus().catch(() => null)]);
-    if (status) renderActiveBanner(status);
-    renderPlans(plans, status);
-  } catch (_) {
-    const wrap = $('premium-plans');
-    if (wrap) wrap.innerHTML = '<p class="cuenta-empty">No pudimos cargar los planes ahora. Reintentá en unos segundos.</p>';
+  // status/oneclick son endpoints autenticados — sin token ni siquiera se
+  // piden (null directamente, mismo resultado que su .catch de abajo). Antes
+  // se llamaban siempre, sesión o no: para alguien sin cuenta, el 401
+  // dispara el flujo de refresh de client.js, que al fallar (no hay sesión
+  // que refrescar) despacha 'vyneural:auth' (logout) — y ese evento está
+  // escuchado acá mismo (ver init()) para volver a llamar loadContent(),
+  // que vuelve a pedir status/oneclick sin token, 401 de nuevo, nuevo
+  // despacho... un loop infinito en caliente (bug real visto en vivo: los
+  // planes "aparecían y desaparecían" sin parar para cualquier visitante
+  // sin sesión, la página más importante para conversión).
+  const hasSession = !!getAccessToken();
+  const [plansResult, status, oneclick] = await Promise.all([
+    listPlans()
+      .then((r) => ({ ok: true, plans: r.plans }))
+      .catch((err) => ({ ok: false, err })),
+    hasSession ? premiumStatus().catch(() => null) : Promise.resolve(null),
+    hasSession ? oneclickStatus().catch(() => null) : Promise.resolve(null),
+  ]);
+  if (status) renderActiveBanner(status);
+  if (plansResult.ok) {
+    renderPlans(plansResult.plans, status, oneclick);
+    return false;
+  }
+  const wrap = $('premium-plans');
+  if (wrap) wrap.innerHTML = '<p class="cuenta-empty">No pudimos cargar los planes ahora. Reintentá en unos segundos.</p>';
+  const err = plansResult.err;
+  return !!(err && (err.status === 0 || err.status >= 500));
+}
+
+// Mismo patrón que src/cuenta.js::loadAllOnBoot() (y src/ui/auth.js): un
+// cold start de Render (free tier) puede tardar minutos, no solo los ~20-50s
+// "típicos" — sin reintento automático, la página quedaba con el mensaje de
+// error hasta que el usuario recargara a mano.
+async function loadContentOnBoot() {
+  const RETRY_DELAYS_MS = [
+    3000, 6000, 12000, 20000, // ~41s — cold start "típico"
+    30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, // +270s — cold start largo
+  ]; // ~5m11s de cobertura total
+  for (let attempt = 0; ; attempt++) {
+    const needsRetry = await loadContent();
+    if (!needsRetry || attempt >= RETRY_DELAYS_MS.length) return;
+    await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
   }
 }
 
-function renderGate() {
+function renderGate({ retryOnBoot = false } = {}) {
   // Los planes son la mejor vidriera de Premium: se muestran siempre, con o
   // sin sesión (antes quedaban ocultos detrás de un login-wall, lo que le
   // restaba conversión y SEO a la página que más vende). Lo único que de
@@ -262,11 +380,12 @@ function renderGate() {
   const gate = $('premium-gate');
   const loggedIn = !!getAccessToken();
   if (gate) gate.classList.toggle('hidden', loggedIn);
-  loadContent();
+  if (retryOnBoot) loadContentOnBoot();
+  else loadContent();
 }
 
 function init() {
-  renderGate();
+  renderGate({ retryOnBoot: true });
   const loginBtn = $('premium-login-btn');
   const regBtn = $('premium-register-btn');
   if (loginBtn) loginBtn.addEventListener('click', () => openAuth('login'));

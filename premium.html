@@ -141,9 +141,9 @@
           <div>
             <strong>Pago seguro con Webpay (Transbank):</strong> nunca vemos ni guardamos
             los datos de tu tarjeta — todo el pago ocurre en el sitio de Transbank. El
-            plan mensual y el anual se renuevan a mano por default (pagás de nuevo cuando
-            querés seguir); una vez que sos Premium podés activar la auto-renovación desde
-            tu cuenta si preferís no tener que acordarte. El de por vida no vence.
+            plan mensual y el anual se renuevan solos por default (se guarda tu tarjeta
+            de forma segura en Transbank); podés cancelar la auto-renovación cuando
+            quieras desde tu cuenta sin perder lo que ya pagaste. El de por vida no vence.
           </div>
         </div>
       </div>
@@ -187,9 +187,17 @@
 
     <!-- Form real hacia Transbank — Webpay exige un POST de navegador con
          token_ws, no un fetch/redirect. Se completa y envía por JS
-         (ver src/premium.js::goToWebpay), nunca se muestra. -->
+         (ver src/premium.js::buyPlan), nunca se muestra. Solo para "De por
+         vida" (pago único, sin nada que auto-renovar). -->
     <form id="webpay-form" method="POST" action="" class="hidden">
       <input type="hidden" name="token_ws" id="webpay-token" />
+    </form>
+
+    <!-- Mensual/Anual compran vía Oneclick Mall (ver src/premium.js::buyPlan):
+         la auto-renovación es el default ahora, no un paso aparte después —
+         mismo form que ya usaba /cuenta para activarla (src/cuenta.js). -->
+    <form id="oneclick-form" method="POST" action="" class="hidden">
+      <input type="hidden" name="TBK_TOKEN" id="oneclick-token" />
     </form>
 
     <script type="module" src="/src/site.js"></script>

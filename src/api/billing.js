@@ -31,9 +31,14 @@ export async function paymentHistory() {
 // (De por vida nunca aplica: no vence, no tiene nada que auto-renovar.)
 
 /** Igual patrón que createPayment: { url, token } para un form-POST real
- * hacia Transbank (esta vez a la página de inscripción de tarjeta). */
-export async function inscribeOneclick(plan) {
-  return post('/api/v1/payments/oneclick/inscribe', { plan });
+ * hacia Transbank (esta vez a la página de inscripción de tarjeta) — salvo
+ * que ya haya una tarjeta activa y `forceNewCard` sea false: ahí devuelve
+ * { switched: true } sin url/token (cambió de plan sin pedir nada nuevo,
+ * ver premium.js::buyPlan). `forceNewCard` fuerza pedir una tarjeta nueva
+ * aunque ya haya una activa para el mismo plan (ver cuenta.js →
+ * "Actualizar tarjeta"). */
+export async function inscribeOneclick(plan, forceNewCard = false) {
+  return post('/api/v1/payments/oneclick/inscribe', { plan, force_new_card: forceNewCard });
 }
 
 export async function oneclickStatus() {

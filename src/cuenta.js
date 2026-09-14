@@ -26,6 +26,7 @@ import { getStatus, onStatusChange, STATUS } from './api/status.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
 import { requestPermission } from './notifications.js';
 import { listDevices, forgetDevice, reportDevice } from './api/devices.js';
+import { confirmModal, notifyModal } from './ui/confirm-modal.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -344,6 +345,8 @@ function setPushStatus(label, cls) {
 // roadmap-status con una palabra + una frase honesta debajo. `status` es el
 // resultado de premiumStatus() (null si el pedido falló: sin conexión, no
 // "no sos premium").
+const PLAN_LABELS = { monthly: 'Mensual', annual: 'Anual' };
+
 // Plan vigente (para saber qué auto-renovar) — lo guarda renderPremium() y
 // lo lee wireOneclickButtons() al activar.
 let currentPremiumPlan = null;
@@ -378,9 +381,10 @@ function renderPremium(status, oneclick) {
       month: 'long',
       year: 'numeric',
     });
+    const planLabel = PLAN_LABELS[status.current_plan] || '';
     badge.textContent = 'Activo';
     badge.className = 'roadmap-status rs-live';
-    text.textContent = `Tu plan Premium está activo hasta el ${until}.`;
+    text.textContent = `Tu plan Premium${planLabel ? ` (${planLabel})` : ''} está activo hasta el ${until}.`;
     if (link) link.textContent = 'Renovar';
     renderOneclick(oneclick);
     return;
@@ -403,59 +407,102 @@ function renderPremium(status, oneclick) {
 }
 
 // `oneclick` es el resultado de oneclickStatus() (null si el pedido falló).
+// `state` viene calculado del backend (ver OneclickStatusOut): "none" |
+// "active" | "struggling" (activa pero con cobros fallidos recientes, sigue
+// reintentando) | "gave_up" (se desactivó sola tras agotar los reintentos —
+// antes esto se veía IDÉNTICO a "none", sin ninguna pista de qué pasó).
 function renderOneclick(oneclick) {
   const wrap = $('cuenta-oneclick');
   const text = $('cuenta-oneclick-text');
   const activateBtn = $('cuenta-oneclick-activate');
+  const updateCardBtn = $('cuenta-oneclick-update-card');
   const cancelBtn = $('cuenta-oneclick-cancel');
-  if (!wrap || !text || !activateBtn || !cancelBtn) return;
+  if (!wrap || !text || !activateBtn || !updateCardBtn || !cancelBtn) return;
   wrap.classList.remove('hidden');
-  if (oneclick && oneclick.active) {
-    const card = oneclick.card_type && oneclick.card_last_digits ? `${oneclick.card_type} •••• ${oneclick.card_last_digits}` : 'tarjeta guardada';
+  const card = oneclick && oneclick.card_type && oneclick.card_last_digits ? `${oneclick.card_type} •••• ${oneclick.card_last_digits}` : 'tarjeta guardada';
+  const state = (oneclick && oneclick.state) || 'none';
+
+  if (state === 'struggling') {
+    text.textContent = `Auto-renovación activa (${card}), pero el último cobro falló (ya van ${oneclick.failed_attempts} intentos) — revisá que la tarjeta esté vigente.`;
+    activateBtn.classList.add('hidden');
+    updateCardBtn.classList.remove('hidden');
+    cancelBtn.classList.remove('hidden');
+  } else if (state === 'gave_up') {
+    text.textContent = `No pudimos cobrar tu tarjeta (${card}) después de varios intentos — se desactivó la auto-renovación. Activala de nuevo si querés seguir renovando sola.`;
+    activateBtn.classList.remove('hidden');
+    updateCardBtn.classList.add('hidden');
+    cancelBtn.classList.add('hidden');
+  } else if (state === 'active') {
     text.textContent = `Auto-renovación activa (${card}) — se va a cobrar sola antes de vencer.`;
     activateBtn.classList.add('hidden');
+    updateCardBtn.classList.remove('hidden');
     cancelBtn.classList.remove('hidden');
   } else {
     text.textContent = 'Activá el cobro automático para no tener que acordarte de renovar.';
     activateBtn.classList.remove('hidden');
+    updateCardBtn.classList.add('hidden');
     cancelBtn.classList.add('hidden');
+  }
+}
+
+// Compartido por "Activar cobro automático" y "Actualizar tarjeta" — la
+// única diferencia real es forceNewCard (ver billing.js::inscribeOneclick):
+// sin una tarjeta activa no hace falta forzar nada, con una activa (el caso
+// de "actualizar") sí, para no pisar con el switch-in-place silencioso de
+// premium.js::buyPlan (acá el usuario SÍ quiere que le pidan una tarjeta
+// nueva, no que se reuse la que ya tiene).
+async function startOneclickInscription(btn, forceNewCard) {
+  if (!currentPremiumPlan) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Conectando…';
+  try {
+    const { url, token } = await inscribeOneclick(currentPremiumPlan, forceNewCard);
+    // Transbank exige un POST real del navegador con TBK_TOKEN — mismo
+    // criterio que #webpay-form en premium.js::buyPlan.
+    const form = $('oneclick-form');
+    form.action = url;
+    $('oneclick-token').value = token;
+    form.submit();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = original;
+    await notifyModal({
+      title: 'No se pudo iniciar la inscripción',
+      text: (err && err.detail) || 'reintentá en unos segundos',
+    });
   }
 }
 
 function wireOneclickButtons() {
   const activateBtn = $('cuenta-oneclick-activate');
+  const updateCardBtn = $('cuenta-oneclick-update-card');
   const cancelBtn = $('cuenta-oneclick-cancel');
   if (activateBtn) {
-    activateBtn.addEventListener('click', async () => {
-      if (!currentPremiumPlan) return;
-      activateBtn.disabled = true;
-      const original = activateBtn.textContent;
-      activateBtn.textContent = 'Conectando…';
-      try {
-        const { url, token } = await inscribeOneclick(currentPremiumPlan);
-        // Transbank exige un POST real del navegador con TBK_TOKEN — mismo
-        // criterio que #webpay-form en premium.js::buyPlan.
-        const form = $('oneclick-form');
-        form.action = url;
-        $('oneclick-token').value = token;
-        form.submit();
-      } catch (err) {
-        activateBtn.disabled = false;
-        activateBtn.textContent = original;
-        alert(`No se pudo iniciar la inscripción: ${(err && err.detail) || 'reintentá en unos segundos'}`);
-      }
-    });
+    activateBtn.addEventListener('click', () => startOneclickInscription(activateBtn, false));
+  }
+  if (updateCardBtn) {
+    updateCardBtn.addEventListener('click', () => startOneclickInscription(updateCardBtn, true));
   }
   if (cancelBtn) {
     cancelBtn.addEventListener('click', async () => {
-      if (!confirm('¿Cancelar la auto-renovación? Tu plan sigue activo hasta que venza — solo se corta el próximo cobro automático.')) return;
+      const ok = await confirmModal({
+        title: 'Cancelar auto-renovación',
+        text: 'Tu plan sigue activo hasta que venza — solo se corta el próximo cobro automático.',
+        confirmLabel: 'Cancelar auto-renovación',
+        danger: true,
+      });
+      if (!ok) return;
       cancelBtn.disabled = true;
       try {
         await cancelOneclick();
         await loadAll();
       } catch (err) {
         cancelBtn.disabled = false;
-        alert(`No se pudo cancelar: ${(err && err.detail) || 'reintentá en unos segundos'}`);
+        await notifyModal({
+          title: 'No se pudo cancelar',
+          text: (err && err.detail) || 'reintentá en unos segundos',
+        });
       }
     });
   }
