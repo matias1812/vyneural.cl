@@ -5,9 +5,15 @@
 // payments.py para el flujo completo del lado del servidor.
 
 import { getAccessToken } from './api/client.js';
-import { listPlans, createPayment, inscribeOneclick, premiumStatus, oneclickStatus } from './api/billing.js';
+import { listPlans, createPayment, inscribeOneclick, premiumStatus, oneclickStatus, verifyGooglePlayPurchase } from './api/billing.js';
+import { detectNativeBridge, startPlayPurchase } from './platform/native-bridge.js';
 import { initStarfield } from './starfield.js';
 import { confirmModal } from './ui/confirm-modal.js';
+
+// IDs de producto/suscripción tal como se crean en Play Console — mismo
+// mapeo que el backend (app/billing/plans.py::GOOGLE_PLAY_PRODUCT_IDS),
+// actualizar ahí y acá juntos si cambian.
+const GOOGLE_PLAY_PRODUCT_IDS = { monthly: 'premium_monthly', annual: 'premium_annual', lifetime: 'premium_lifetime' };
 
 const $ = (id) => document.getElementById(id);
 
@@ -277,6 +283,33 @@ async function buyPlan(plan, btn, activePlanKey) {
     btn.textContent = 'Despertando el servidor… puede tardar unos segundos';
   }, WAKEUP_HINT_MS);
   try {
+    // Android: Play exige su propio medio de pago para contenido digital
+    // dentro de la app (Webpay/Oneclick quedan 100% web) — ver
+    // platform/native-bridge.js::startPlayPurchase y billing/google_play.py
+    // del lado backend. Reemplaza TODO el flujo de abajo, nunca lo mezcla.
+    if (detectNativeBridge()?.platform === 'android') {
+      const productId = GOOGLE_PLAY_PRODUCT_IDS[plan];
+      const purchase = await startPlayPurchase(productId, plan !== 'lifetime');
+      if (purchase.cancelled) {
+        // El usuario cerró el flujo de Play sin comprar — no es un error,
+        // simplemente vuelve a como estaba (mismo criterio que cerrar el
+        // formulario de Webpay sin pagar).
+        clearTimeout(timer);
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        return;
+      }
+      if (purchase.error) throw new Error(purchase.error);
+      // El backend es quien de verdad otorga Premium, recién después de
+      // verificar ESE purchaseToken contra Google (nunca se confía en que
+      // Play "dijo que sí" del lado cliente).
+      await verifyGooglePlayPurchase(purchase.purchaseToken, purchase.productId);
+      clearTimeout(timer);
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+      await loadContent(); // refresca el estado (banner de Premium activo) in-place
+      return;
+    }
     // De por vida es pago único (Webpay Plus, nada que auto-renovar).
     // Mensual/Anual entran directo por Oneclick Mall: la auto-renovación es
     // el default desde el primer pago, no un paso aparte que se activa

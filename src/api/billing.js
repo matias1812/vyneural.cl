@@ -1,7 +1,8 @@
 // src/api/billing.js
-// Plan Premium — pagos Webpay Plus (Transbank), SOLO web (Android usa
-// Google Play Billing aparte, no este código). Aditivo: sin backend/sesión
-// simplemente no se puede comprar, el resto de la app sigue igual.
+// Plan Premium — pagos Webpay Plus (Transbank) para la web, y verificación
+// de compras de Google Play para la APK (ver premium.js::buyPlan, que
+// branchea por plataforma). Aditivo: sin backend/sesión simplemente no se
+// puede comprar, el resto de la app sigue igual.
 
 import { get, post, del } from './client.js';
 
@@ -50,4 +51,15 @@ export async function oneclickStatus() {
  * corresponda, solo se corta el PRÓXIMO cobro automático. */
 export async function cancelOneclick() {
   return del('/api/v1/payments/oneclick');
+}
+
+// ── Google Play Billing: compras hechas en la APK ───────────────────────────
+// Contraparte de Webpay/Oneclick de arriba, SOLO APK (Play exige su propio
+// medio de pago para contenido digital dentro de la app). El purchaseToken
+// sale de startPlayPurchase (platform/native-bridge.js) DESPUÉS de una
+// compra real en Play — el backend es quien de verdad la verifica contra
+// Google y recién ahí otorga Premium (ver routers/payments.py::
+// google_play_verify); esto nunca se confía del lado cliente.
+export async function verifyGooglePlayPurchase(purchaseToken, productId) {
+  return post('/api/v1/payments/google-play/verify', { purchase_token: purchaseToken, product_id: productId });
 }
