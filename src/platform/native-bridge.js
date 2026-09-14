@@ -44,6 +44,7 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'OPEN_ALARM_CHANNEL_SETTINGS', // salta directo al canal "Alarmas Vyneural" (Importancia), no a la lista general
   'OPEN_DND_ACCESS_SETTINGS', // permiso de sistema para que las alarmas bypaseen No Molestar (v8)
   'SESSION_END', // M1 — aviso nativo de fin de sesión (la WebView no muestra new Notification())
+  'START_PLAY_PURCHASE', // Google Play Billing — plan Premium, SOLO APK (ver startPlayPurchase abajo)
 ]);
 
 /**
@@ -144,6 +145,84 @@ function readInfo(raw) {
   } catch {
     return null;
   }
+}
+
+// ── Google Play Billing (plan Premium, SOLO APK) ────────────────────────────
+// Mismo patrón que api/client.js::nativeApiFetch para API_REQUEST: ACK
+// inmediato (bridge.postMessage devuelve ACCEPTED con el id ya registrado) y
+// el resultado real llega después por evaluateJavascript, cuando el usuario
+// termina de interactuar con la UI de Play (puede tardar) — nunca se asume
+// el resultado del ACK. Vive acá (no en api/client.js) porque no es tráfico
+// HTTP hacia nuestro backend: PlayBillingManager.kt solo habla con Google.
+const PLAY_PURCHASE_TIMEOUT_MS = 5 * 60 * 1000; // generoso: el usuario interactúa con Play
+let playPurchaseSeq = 0;
+const playPurchasePending = new Map();
+
+if (typeof window !== 'undefined' && !window.__vyneuralPlayPurchaseResponse) {
+  window.__vyneuralPlayPurchaseResponse = (rid, json) => {
+    const entry = playPurchasePending.get(rid);
+    if (!entry) return;
+    playPurchasePending.delete(rid);
+    clearTimeout(entry.timer);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed) {
+      entry.reject(new Error('BRIDGE_ERROR'));
+      return;
+    }
+    // { purchaseToken, orderId, productId } | { cancelled: true } | { error: '...' }
+    entry.resolve(parsed);
+  };
+}
+
+/**
+ * Lanza una compra real de Google Play para `productId` (ver
+ * billing/plans.py::GOOGLE_PLAY_PRODUCT_IDS del backend, mismos IDs).
+ * `isSubscription` = true para mensual/anual, false para "de por vida"
+ * (producto administrado, no suscripción).
+ * @returns {Promise<{purchaseToken:string,orderId:string,productId:string} | {cancelled:true} | {error:string}>}
+ */
+export function startPlayPurchase(productId, isSubscription = true) {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('NOT_SUPPORTED'));
+      return;
+    }
+    const bridge = window.AndroidBridgeNative;
+    if (!bridge || typeof bridge.postMessage !== 'function') {
+      reject(new Error('NOT_SUPPORTED'));
+      return;
+    }
+    const id = ++playPurchaseSeq;
+    const timer = setTimeout(() => {
+      playPurchasePending.delete(id);
+      reject(new Error('TIMEOUT'));
+    }, PLAY_PURCHASE_TIMEOUT_MS);
+    playPurchasePending.set(id, { resolve, reject, timer });
+    let ack = null;
+    try {
+      ack = bridge.postMessage(
+        JSON.stringify({ command: 'START_PLAY_PURCHASE', payload: { id, productId, isSubscription } }),
+      );
+    } catch {
+      ack = null;
+    }
+    let ackObj = null;
+    try {
+      ackObj = typeof ack === 'string' ? JSON.parse(ack) : ack;
+    } catch {
+      ackObj = null;
+    }
+    if (!ackObj || ackObj.status !== 'ACCEPTED') {
+      clearTimeout(timer);
+      playPurchasePending.delete(id);
+      reject(new Error('BRIDGE_ERROR'));
+    }
+  });
 }
 
 export function createNativeBridgeAdapter(env = {}) {

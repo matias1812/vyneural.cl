@@ -18,6 +18,7 @@ import android.webkit.JavascriptInterface
 import com.vyneural.bineural.BuildConfig
 import com.vyneural.bineural.MainActivity
 import com.vyneural.bineural.audio.AudioForegroundService
+import com.vyneural.bineural.billing.PlayBillingManager
 import com.vyneural.bineural.diag.Diagnostics
 import com.vyneural.bineural.notifications.AlarmScheduler
 import com.vyneural.bineural.notifications.NotificationHelper
@@ -47,6 +48,7 @@ class AndroidBridge(
     private val permissions: PermissionManager,
 ) {
     private val context: Context = activity
+    private val playBilling by lazy { PlayBillingManager(activity) }
     @JavascriptInterface
     fun getVersion(): String = "1.0.0"
 
@@ -453,6 +455,25 @@ class AndroidBridge(
                             .getOrElse { JSONObject().put("error", it.message ?: "request failed") }
                         activity.pushToWeb("window.__vyneuralApiResponse($id, ${JSONObject.quote(result.toString())})")
                     }.start()
+                    respond("ACCEPTED", command, JSONObject().put("id", id))
+                }
+                "START_PLAY_PURCHASE" -> {
+                    // Google Play Billing (plan Premium, SOLO APK). Mismo shape
+                    // async que API_REQUEST: ACK inmediato con el id que la web
+                    // ya registró, y el resultado real vuelve por
+                    // evaluateJavascript cuando Play termina el flujo de compra
+                    // (que puede tardar — el usuario interactúa con la UI de
+                    // Play). playBilling nunca llama al backend: solo entrega
+                    // {purchaseToken, orderId, productId} | {cancelled} | {error}
+                    // — otorgar Premium es 100% del backend (google_play_verify),
+                    // después de verificar ESE token contra Google.
+                    val id = payload?.optLong("id", -1L) ?: -1L
+                    val productId = payload?.optString("productId", "") ?: ""
+                    if (id < 0 || productId.isEmpty()) return respond("INVALID", command, null)
+                    val isSubscription = payload?.optBoolean("isSubscription", true) ?: true
+                    playBilling.startPurchase(productId, isSubscription) { result ->
+                        activity.pushToWeb("window.__vyneuralPlayPurchaseResponse($id, ${JSONObject.quote(result.toString())})")
+                    }
                     respond("ACCEPTED", command, JSONObject().put("id", id))
                 }
                 "SAVE_ICS" -> {
