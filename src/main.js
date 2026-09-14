@@ -3926,20 +3926,35 @@ function refreshAlarmHonestNote() {
     'configurado: activalas desde tu cuenta.';
 }
 
-// ── Gating por sesión: campana + notificaciones ────────────────────────────
+// ── Gating por sesión y Premium: campana + notificaciones ──────────────────
 // Sin sesión no hay backend al que sincronizar el recordatorio (y el Web Push
-// con la app cerrada requiere sesión): la campana queda bloqueada y las
-// notificaciones no se activan hasta iniciar sesión. Igual en web y APK (el
-// bundle es el mismo). Se re-evalúa al iniciar/cerrar sesión y antes de abrir.
+// con la app cerrada requiere sesión). Además, crear un recordatorio nuevo es
+// Premium — mismo criterio que guardNewReminder en /rutina (ver
+// src/ui/premium-gate.js): la campana queda bloqueada en ambos casos. Los
+// recordatorios YA creados siguen viéndose y pudiéndose borrar igual
+// (grandfathering, ver renderAlarms) — esto solo bloquea abrir el modal para
+// agregar uno nuevo. Igual en web y APK (el bundle es el mismo). Se
+// re-evalúa al iniciar/cerrar sesión y antes de abrir.
 function updateAlarmGating() {
   const logged = !!getAccessToken();
-  alarmBtn.classList.toggle('locked', !logged);
-  alarmBtn.setAttribute('aria-disabled', String(!logged));
-  alarmBtn.setAttribute('title', logged ? 'Recordatorio de sesión' : 'Iniciá sesión para programar recordatorios y notificaciones');
-  alarmBtn.setAttribute('aria-label', logged ? 'Recordatorio de sesión' : 'Iniciá sesión para programar recordatorios');
-  // La vista en la página y el badge solo tienen sentido con sesión.
-  if (alarmView) alarmView.classList.toggle('hidden', !logged || getAlarms().length === 0);
-  if (alarmBadge) alarmBadge.classList.toggle('hidden', !logged || getAlarms().length === 0);
+  if (!logged) {
+    alarmBtn.classList.add('locked');
+    alarmBtn.setAttribute('aria-disabled', 'true');
+    alarmBtn.setAttribute('title', 'Iniciá sesión para programar recordatorios y notificaciones');
+    alarmBtn.setAttribute('aria-label', 'Iniciá sesión para programar recordatorios');
+    if (alarmView) alarmView.classList.add('hidden');
+    if (alarmBadge) alarmBadge.classList.add('hidden');
+    return;
+  }
+  // La vista/badge de recordatorios YA creados no dependen de Premium.
+  if (alarmView) alarmView.classList.toggle('hidden', getAlarms().length === 0);
+  if (alarmBadge) alarmBadge.classList.toggle('hidden', getAlarms().length === 0);
+  isPremiumUser().then((premium) => {
+    alarmBtn.classList.toggle('locked', !premium);
+    alarmBtn.setAttribute('aria-disabled', String(!premium));
+    alarmBtn.setAttribute('title', premium ? 'Recordatorio de sesión' : 'Crear un recordatorio es parte de Vyneural Premium');
+    alarmBtn.setAttribute('aria-label', premium ? 'Recordatorio de sesión' : 'Crear un recordatorio es parte de Vyneural Premium');
+  });
 }
 
 function openAlarmModal() {
@@ -3947,15 +3962,21 @@ function openAlarmModal() {
     showToast('🔒 Iniciá sesión para activar notificaciones y recordatorios');
     return;
   }
-  updateAlarmGating();
-  if (!alarmTime.value) {
-    alarmTime.value = defaultAlarmTime();
-    resyncApkTimePicker('alarm-time');
-  }
-  refreshAlarmPerm();
-  refreshAlarmHonestNote();
-  renderAlarms();
-  alarmModal.classList.remove('hidden');
+  isPremiumUser().then((premium) => {
+    if (!premium) {
+      openPremiumRequired('Crear un recordatorio es parte de Vyneural Premium.');
+      return;
+    }
+    updateAlarmGating();
+    if (!alarmTime.value) {
+      alarmTime.value = defaultAlarmTime();
+      resyncApkTimePicker('alarm-time');
+    }
+    refreshAlarmPerm();
+    refreshAlarmHonestNote();
+    renderAlarms();
+    alarmModal.classList.remove('hidden');
+  });
 }
 
 function closeAlarmModal() {
