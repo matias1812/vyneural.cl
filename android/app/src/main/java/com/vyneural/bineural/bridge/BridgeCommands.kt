@@ -40,6 +40,8 @@ object BridgeCommands {
         "SYNC_ALARMS", // recordatorio/itinerario creado o editado → resincronizar YA (no esperar el ciclo de ~5 min)
         "API_REQUEST", // HTTP nativo (sin CORS): el WebView de la APK (file://) no puede
         //               hacer fetch al backend porque su origen es opaco (null).
+        "START_PLAY_PURCHASE", // Google Play Billing — plan Premium, SOLO APK
+        //               (ver billing/PlayBillingManager.kt).
     )
 
     fun isAllowed(command: String): Boolean = command in ALL

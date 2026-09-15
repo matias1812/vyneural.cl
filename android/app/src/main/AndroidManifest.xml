@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Google Play Billing (plan Premium, SOLO APK — ver billing/PlayBillingManager.kt).
+         Requerido por Play Console para poder crear productos/suscripciones. -->
+    <uses-permission android:name="com.android.vending.BILLING" />
     <!-- Bug real reportado en vivo: la vibración de las alarmas nunca sonó,
          en NINGÚN test (botón de prueba, alarma nativa, FCM), sin importar
          cuántas veces se recreara el canal de notificaciones (v4/v5/v6) —

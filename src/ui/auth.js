@@ -154,6 +154,24 @@ function renderNav() {
   });
   menu.appendChild(cuenta);
 
+  // "Tu rutina" vivía duplicada en el header (y footer) de cada página HTML
+  // estática — con ~20 páginas copiando esa lista a mano, quedaba
+  // desincronizada entre sí (algunas con otro orden, otras sin el link) y
+  // se veía como que el link "desaparecía" al navegar. Sacada de ahí, vive
+  // acá una sola vez, junto con Mi cuenta.
+  const rutina = document.createElement('button');
+  rutina.type = 'button';
+  rutina.className = 'auth-menu-item';
+  rutina.setAttribute('role', 'menuitem');
+  rutina.innerHTML = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg><span>Tu rutina</span>`;
+  rutina.addEventListener('click', () => {
+    closeMenu();
+    const here = window.location.pathname.replace(/\/+$/, '');
+    if (here.endsWith('/rutina')) return;
+    window.location.href = '/rutina';
+  });
+  menu.appendChild(rutina);
+
   const permisos = document.createElement('button');
   permisos.type = 'button';
   permisos.className = 'auth-menu-item';
