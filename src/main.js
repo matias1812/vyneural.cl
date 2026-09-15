@@ -2272,7 +2272,18 @@ function updateUrl() {
   // estado — y al recargar, el parser de slug pisaría ese state=bar con el
   // preset original de la URL. shareLink() (unas líneas más abajo) ya
   // construye su URL igual, contra '/' a secas; esto solo alinea ambas.
-  history.replaceState(null, '', `/?${currentUrlParams()}`);
+  // La APK carga desde file:///android_asset/... — ahí replaceState con una
+  // ruta absoluta ("/?...") tira DOMException (Chromium no deja construir
+  // esa URL contra un origen file://), y como esto se llama también durante
+  // el arranque (restaurar el último estado guardado), un throw acá cortaba
+  // TODA la ejecución del resto del script — la app quedaba clavada en el
+  // loader inicial sin llegar nunca a mostrar contenido. Sin efecto visible
+  // de todos modos en la APK (no hay barra de direcciones que actualizar).
+  try {
+    history.replaceState(null, '', `/?${currentUrlParams()}`);
+  } catch {
+    /* no-op: ver comentario arriba */
+  }
 }
 
 carrierOptions.addEventListener('click', (e) => {
@@ -4854,7 +4865,13 @@ if (!isFinite(deepFreq) && !deepSeq) {
 // src/ui/auth.js) — llega acá con #permisos y se abre el mismo modal que el
 // menú ⋯ del reproductor, en vez de un destino separado.
 if (location.hash === '#permisos') {
-  history.replaceState(null, '', location.pathname + location.search);
+  // Ver comentario en updateUrl(): bajo file:// (APK) esto puede tirar
+  // DOMException — nunca debe cortar la apertura del modal de Permisos.
+  try {
+    history.replaceState(null, '', location.pathname + location.search);
+  } catch {
+    /* no-op */
+  }
   openPermissions();
 }
 
