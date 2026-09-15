@@ -4,6 +4,7 @@
 // (el plan se ata a un usuario). Ver backvyneural/backend/app/routers/
 // payments.py para el flujo completo del lado del servidor.
 
+import './style.css';
 import { getAccessToken } from './api/client.js';
 import { listPlans, createPayment, inscribeOneclick, premiumStatus, oneclickStatus, verifyGooglePlayPurchase } from './api/billing.js';
 import { detectNativeBridge, startPlayPurchase } from './platform/native-bridge.js';
