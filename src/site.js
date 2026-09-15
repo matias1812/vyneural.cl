@@ -143,7 +143,13 @@ document.querySelectorAll('.site-links a').forEach((a) => {
 if (here !== '/') {
   initPermissionsModal();
   if (location.hash === '#permisos') {
-    history.replaceState(null, '', location.pathname + location.search);
+    // Ver src/main.js::updateUrl(): bajo file:// (APK) replaceState puede
+    // tirar DOMException — nunca debe cortar la apertura del modal.
+    try {
+      history.replaceState(null, '', location.pathname + location.search);
+    } catch {
+      /* no-op */
+    }
     openPermissions();
   }
 }
