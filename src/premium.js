@@ -69,7 +69,14 @@ const REASSURANCE = {
   lifetime: 'Un pago único. No se renueva porque no vence nunca.',
 };
 
-const PLAN_ORDER = ['monthly', 'annual', 'lifetime'];
+// TEMPORAL: Mensual/Anual (Oneclick Mall) ocultos hasta que Transbank asigne
+// el código de comercio productivo de Oneclick — hoy solo Webpay Plus (de por
+// vida) lo tiene, y TRANSBANK_ENVIRONMENT es un solo interruptor global para
+// ambos productos (ver payments.py::_oneclick_inscription), así que activar
+// producción para Webpay Plus sin esto rompería estos dos botones con un 500.
+// Volver a ['monthly', 'annual', 'lifetime'] apenas llegue ese código — ver
+// backvyneural/docs/SESION_2026-09-13_PREMIUM_TRANSBANK.md.
+const PLAN_ORDER = ['lifetime'];
 
 // Ítems cortos a propósito (una sola línea) — el resto ya está explicado en
 // el copy del hero de la página.
