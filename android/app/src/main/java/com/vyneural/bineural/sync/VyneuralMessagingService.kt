@@ -45,8 +45,16 @@ class VyneuralMessagingService : FirebaseMessagingService() {
         val freq = data["freq"]?.toDoubleOrNull()
         val beat = data["beat"]?.toDoubleOrNull()
         val wave = data["wave"]
+        val soundUri = data["soundUri"]?.takeIf { it.isNotBlank() }
+        val vibrationId = data["vibrationId"] ?: "default"
+        val snoozeEnabled = data["snoozeEnabled"] == "true"
+        val snoozeMinutes = data["snoozeMinutes"]?.toIntOrNull() ?: 5
 
-        NotificationHelper.showAlarm(applicationContext, title, body, freq, beat, wave, alarmId = id)
+        NotificationHelper.showAlarm(
+            applicationContext, title, body, freq, beat, wave, alarmId = id,
+            soundUri = soundUri, vibrationId = vibrationId,
+            snoozeEnabled = snoozeEnabled, snoozeMinutes = snoozeMinutes,
+        )
         // Mismo límite de sonido/vibración sin respuesta que una alarma
         // local (AlarmReceiver): se auto-silencia si nadie la toca.
         AlarmScheduler(applicationContext).scheduleSilence(id)

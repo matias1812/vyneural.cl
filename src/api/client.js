@@ -107,6 +107,29 @@ export function clearSession() {
   bridgeNotify('CLEAR_AUTH', null);
 }
 
+// APK — AlarmSync.kt corre en 2do plano SIEMPRE (esté la Activity pausada o
+// no) y puede refrescar el token nativo (AuthStore) mientras esta WebView
+// está backgroundeada (p. ej. con el diálogo de compra de Play abierto
+// encima). Bug real visto en vivo: la WebView volvía a foreground con el
+// refresh token VIEJO todavía acá en localStorage, ya rotado del lado
+// nativo — al usarlo, el backend detecta reuso de un token ya rotado y
+// revoca TODAS las sesiones del usuario. MainActivity.onResume() llama a
+// esto con lo que AuthStore tenga guardado, así localStorage nunca queda
+// atrás. A propósito NO llama a storeSession()/bridgeNotify('STORE_AUTH'):
+// el valor YA vino de ahí — reenviarlo de vuelta sería un loop nativo↔JS.
+if (typeof window !== 'undefined' && !window.__vyneuralSyncAuthFromNative) {
+  window.__vyneuralSyncAuthFromNative = (access, refresh) => {
+    if (access) setAccessToken(access);
+    if (refresh) {
+      try {
+        localStorage.setItem('vyneural_refresh_token', refresh);
+      } catch (_) {
+        /* sin storage */
+      }
+    }
+  };
+}
+
 // ── HTTP nativo en la APK (sin CORS) ───────────────────────────────────────
 // El WebView de la APK carga desde file:// (origen opaco → Origin: null) y no
 // puede depender de que el backend liste "null" en CORS. Cuando el bridge

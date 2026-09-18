@@ -42,6 +42,7 @@ object BridgeCommands {
         //               hacer fetch al backend porque su origen es opaco (null).
         "START_PLAY_PURCHASE", // Google Play Billing — plan Premium, SOLO APK
         //               (ver billing/PlayBillingManager.kt).
+        "PICK_ALARM_SOUND", // P7 — picker de tonos del sistema para personalizar la alarma.
     )
 
     fun isAllowed(command: String): Boolean = command in ALL

@@ -20,7 +20,7 @@ import { createAlarm } from './api/alarms.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
 import { AlarmManager, createDurableStore } from './core/alarm-manager.js';
 import { getAlarms, saveAlarms, fireAlarm, rruleFor, nextAlarmAt, requestPermission } from './notifications.js';
-import { createNativeBridgeAdapter } from './platform/native-bridge.js';
+import { createNativeBridgeAdapter, pickAlarmSound } from './platform/native-bridge.js';
 import { PROFILES } from './models/profiles.js';
 import { carrierBaseFor } from './core/carrier.js';
 import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js';
@@ -1186,15 +1186,30 @@ function scheduleNativeReminder(alarm) {
     freq: alarm.freq,
     beat: alarm.beat,
     wave: alarm.wave || 'sine',
+    // P7 — personalización de alarma (sonido/vibración/posponer).
+    soundUri: alarm.soundUri || undefined,
+    vibrationId: alarm.vibrationId || 'default',
+    snoozeEnabled: !!alarm.snoozeEnabled,
+    snoozeMinutes: alarm.snoozeMinutes || 5,
   });
   return !!(r && r.ok);
 }
+
+// P7 — personalización de alarma: sonido elegido con el picker del sistema
+// (solo APK). Vive fuera de wireReminderForm() porque el nombre mostrado se
+// resetea con form.reset() pero la URI elegida no debe perderse hasta la
+// próxima elección explícita — mismo criterio que cualquier "valor pendiente"
+// de este archivo (ver pendingStepEdit).
+let pendingReminderSoundUri = null;
 
 function wireReminderForm() {
   const form = document.getElementById('reminder-form');
   const stateSel = document.getElementById('reminder-state');
   const customRow = document.getElementById('reminder-custom-row');
   const daysWrap = document.getElementById('reminder-days-wrap');
+  const customAlarmWrap = document.getElementById('reminder-custom-alarm-wrap');
+  const soundPickBtn = document.getElementById('reminder-sound-pick');
+  const soundNameEl = document.getElementById('reminder-sound-name');
   const timeEl = document.getElementById('reminder-time');
   if (!form || !stateSel) return;
 
@@ -1210,9 +1225,26 @@ function wireReminderForm() {
   // (ver ui/apk-time-picker.js). Web/desktop sigue con el input nativo.
   if (nativeBridge.present) mountApkTimePicker('reminder-time');
   populateReminderPresets();
-  // Los días de repetición son exclusivos de la APK (ver nota de la página):
-  // en web/PWA el selector ni se muestra, para no prometer algo que no cumple.
+  // Los días de repetición y la personalización de alarma (sonido/vibración/
+  // posponer) son exclusivos de la APK: en web/PWA no hay AlarmManager nativo
+  // ni canal de notificación que las respete, así que ni se muestran, para
+  // no prometer algo que no cumple.
   if (daysWrap) daysWrap.classList.toggle('hidden', !IN_APK);
+  if (customAlarmWrap) customAlarmWrap.classList.toggle('hidden', !IN_APK);
+  if (soundPickBtn) {
+    soundPickBtn.addEventListener('click', async () => {
+      soundPickBtn.disabled = true;
+      try {
+        const result = await pickAlarmSound();
+        if (result && result.uri) {
+          pendingReminderSoundUri = result.uri;
+          if (soundNameEl) soundNameEl.textContent = result.name || 'Tono elegido';
+        }
+      } finally {
+        soundPickBtn.disabled = false;
+      }
+    });
+  }
 
   stateSel.addEventListener('change', () => {
     const p = reminderPreset();
@@ -1243,6 +1275,10 @@ function wireReminderForm() {
       const days = IN_APK ? reminderDaysSelected() : [];
       const [hh, mm] = time.split(':').map(Number);
       const nextAt = days.length ? nextOccurrenceAt(hh, mm, days) || nextAlarmAt(time).getTime() : nextAlarmAt(time).getTime();
+      // P7 — personalización de alarma (solo APK, ver customAlarmWrap arriba).
+      const vibrationEl = document.getElementById('reminder-vibration');
+      const snoozeEnabledEl = document.getElementById('reminder-snooze-enabled');
+      const snoozeMinutesEl = document.getElementById('reminder-snooze-minutes');
       const alarm = {
         id: `al-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
         time,
@@ -1253,6 +1289,10 @@ function wireReminderForm() {
         minutes: parseInt(minutesEl.value, 10) || 0,
         days,
         nextAt,
+        soundUri: IN_APK ? pendingReminderSoundUri || undefined : undefined,
+        vibrationId: IN_APK && vibrationEl ? vibrationEl.value : 'default',
+        snoozeEnabled: IN_APK && snoozeEnabledEl ? snoozeEnabledEl.checked : false,
+        snoozeMinutes: IN_APK && snoozeMinutesEl ? parseInt(snoozeMinutesEl.value, 10) || 5 : 5,
       };
       const nativeOwned = scheduleNativeReminder(alarm);
       if (nativeOwned) alarm.external = true;
@@ -1269,7 +1309,22 @@ function wireReminderForm() {
           enabled: true,
           scheduled_at: new Date(alarm.nextAt).toISOString(),
           timezone,
-          config: { freq: alarm.freq, beat: alarm.beat, wave: alarm.wave, minutes: alarm.minutes, localId: alarm.id },
+          config: {
+            freq: alarm.freq,
+            beat: alarm.beat,
+            wave: alarm.wave,
+            minutes: alarm.minutes,
+            localId: alarm.id,
+            // P7 — mismo config JSONB de siempre, sin campos nuevos en el
+            // backend: viaja de vuelta en GET /alarms para que AlarmSync.kt
+            // reprograme con esta config si la alarma se sincroniza a otro
+            // dispositivo, y en el push de FCM (reminders.py) si la app
+            // estuvo cerrada.
+            soundUri: alarm.soundUri,
+            vibrationId: alarm.vibrationId,
+            snoozeEnabled: alarm.snoozeEnabled,
+            snoozeMinutes: alarm.snoozeMinutes,
+          },
           repeat_rule: days.length ? rruleFor(days) : null,
           notification_enabled: true,
         })
@@ -1301,6 +1356,9 @@ function wireReminderForm() {
         b.setAttribute('aria-pressed', 'false');
         b.classList.remove('active');
       });
+      // form.reset() no toca esto: no es un <input> real, es un botón + texto.
+      pendingReminderSoundUri = null;
+      if (soundNameEl) soundNameEl.textContent = 'Predeterminado';
       const details = form.closest('details');
       if (details) details.open = false;
       render();

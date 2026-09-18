@@ -11,7 +11,10 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.media.RingtoneManager
 import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -23,6 +26,7 @@ import com.vyneural.bineural.lifecycle.LifecycleManager
 import com.vyneural.bineural.notifications.AlarmScheduler
 import com.vyneural.bineural.notifications.NotificationHelper
 import com.vyneural.bineural.permissions.PermissionManager
+import com.vyneural.bineural.util.AuthStore
 import com.vyneural.bineural.util.BineuralLog
 
 /**
@@ -55,6 +59,42 @@ class MainActivity : ComponentActivity() {
     // solo cuando cambian los insets (ver injectSafeAreaCss()).
     private var safeAreaTopPx = 0
     private var safeAreaBottomPx = 0
+
+    // P7 — personalización de alarma: picker de tonos del sistema. Debe
+    // registrarse ANTES de que la Activity llegue a STARTED — como
+    // inicializador de propiedad (se evalúa en la construcción) cumple eso
+    // siempre, a diferencia de registrarlo dentro de onCreate().
+    private var pendingSoundPickCallback: ((org.json.JSONObject) -> Unit)? = null
+    private val soundPickerLauncher: ActivityResultLauncher<Intent> = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val cb = pendingSoundPickCallback
+        pendingSoundPickCallback = null
+        if (cb == null) return@registerForActivityResult
+        val uri = result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+        if (uri == null) {
+            cb(org.json.JSONObject().put("cancelled", true))
+            return@registerForActivityResult
+        }
+        val name = runCatching { RingtoneManager.getRingtone(this, uri)?.getTitle(this) }.getOrNull() ?: "Tono elegido"
+        cb(org.json.JSONObject().put("uri", uri.toString()).put("name", name))
+    }
+
+    /** Lanza el picker de tonos de ALARMA del sistema — ver PICK_ALARM_SOUND
+     *  en AndroidBridge.kt / pickAlarmSound() en native-bridge.js. */
+    fun pickAlarmSound(callback: (org.json.JSONObject) -> Unit) {
+        pendingSoundPickCallback = callback
+        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+            putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            putExtra(
+                RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+            )
+        }
+        soundPickerLauncher.launch(intent)
+    }
 
     companion object {
         // Extras del Intent que abre MainActivity al tocar la notificación de
@@ -96,12 +136,17 @@ class MainActivity : ComponentActivity() {
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             // getInsets() devuelve píxeles FÍSICOS — el CSS "px" que entiende
             // Chromium es en cambio un px "CSS" (ya escalado por la densidad
-            // de pantalla). Sin dividir por density(), en un teléfono de
-            // densidad 3x el padding queda 3 veces más grande de lo real
-            // (bug real visto en vivo: "el navbar quedó demasiado abajo").
-            val density = resources.displayMetrics.density
-            safeAreaTopPx = (bars.top / density).toInt()
-            safeAreaBottomPx = (bars.bottom / density).toInt()
+            // de pantalla). Se guardan crudos acá (sin dividir por
+            // resources.displayMetrics.density): esa densidad es la que
+            // reporta Android a nivel de sistema, y en fabricantes con su
+            // propio ajuste de "tamaño de pantalla" (confirmado en vivo en un
+            // Honor/MagicOS) puede no coincidir exactamente con la densidad
+            // que Chromium usa de verdad para sus propios píxeles CSS —
+            // dejaba un gap residual. injectSafeAreaCss() convierte del lado
+            // JS con window.devicePixelRatio, la fuente autoritativa para
+            // ESTE WebView específico, sin intermediarios.
+            safeAreaTopPx = bars.top
+            safeAreaBottomPx = bars.bottom
             injectSafeAreaCss()
             insets
         }
@@ -209,8 +254,9 @@ class MainActivity : ComponentActivity() {
      *  de cuando cambian los insets (rotación, teclado, immersive mode). */
     private fun injectSafeAreaCss() {
         webView.evaluateJavascript(
-            "document.documentElement.style.setProperty('--safe-top','${safeAreaTopPx}px');" +
-                "document.documentElement.style.setProperty('--safe-bottom','${safeAreaBottomPx}px');",
+            "(function(){var r=window.devicePixelRatio||1;" +
+                "document.documentElement.style.setProperty('--safe-top',(${safeAreaTopPx}/r)+'px');" +
+                "document.documentElement.style.setProperty('--safe-bottom',(${safeAreaBottomPx}/r)+'px');})();",
             null,
         )
     }
@@ -338,10 +384,35 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         webView.onResume()
         LifecycleManager.onResume()
+        syncAuthFromNativeStore()
         // Sincronización al volver a primer plano: si hay sesión, las alarmas
         // creadas en la web mientras la app estuvo cerrada llegan al instante
         // (no hay que esperar el ciclo periódico). No-op si no hay token.
         AlarmSync.run(this)
+    }
+
+    // AlarmSync corre en 2do plano SIEMPRE (esté la Activity pausada o no) y
+    // puede refrescar el access+refresh token nativo (AuthStore) mientras la
+    // WebView está backgroundeada (p. ej. con el diálogo de compra de Play
+    // abierto encima) — bug real visto en vivo: la WebView volvía a foreground
+    // con el refresh token VIEJO todavía en localStorage, ya rotado/revocado
+    // del lado nativo; al intentar usarlo, el backend detecta reuso de un
+    // token ya rotado y revoca TODAS las sesiones del usuario (defensa
+    // antirrobo legítima, pero dispara en falso acá). AuthStore siempre tiene
+    // la copia más nueva (STORE_AUTH ya sincroniza JS→nativo en cada
+    // storeSession(), incluida cada refresh exitosa de la WebView) — pisar
+    // localStorage con lo que haya en AuthStore en cada resume es siempre
+    // seguro: si el último refresco fue de la WebView, es el mismo valor
+    // (no-op); si fue nativo, corrige la divergencia ANTES de que la WebView
+    // llegue a usar el token viejo.
+    private fun syncAuthFromNativeStore() {
+        val access = AuthStore.token(this) ?: return
+        val refresh = AuthStore.refreshToken(this) ?: return
+        webView.evaluateJavascript(
+            "window.__vyneuralSyncAuthFromNative && window.__vyneuralSyncAuthFromNative(" +
+                "${org.json.JSONObject.quote(access)}, ${org.json.JSONObject.quote(refresh)});",
+            null,
+        )
     }
 
     override fun onPause() {

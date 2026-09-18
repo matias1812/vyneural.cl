@@ -28,6 +28,10 @@ class AlarmReceiver : BroadcastReceiver() {
             if (record.has("beat")) record.optDouble("beat") else null,
             if (record.has("wave")) record.optString("wave") else null,
             alarmId = id,
+            soundUri = record.optString("soundUri").takeIf { it.isNotBlank() },
+            vibrationId = record.optString("vibrationId", "default"),
+            snoozeEnabled = record.optBoolean("snoozeEnabled", false),
+            snoozeMinutes = record.optInt("snoozeMinutes", 5),
         )
         // Límite de sonido sin respuesta: si nadie toca/descarta la alarma, se
         // silencia sola a los AlarmScheduler.ALARM_RING_LIMIT_MS (AlarmSilenceReceiver).

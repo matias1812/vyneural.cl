@@ -141,7 +141,16 @@ object AlarmSync {
             val freq = config?.let { if (it.has("freq")) it.optDouble("freq") else null }
             val beat = config?.let { if (it.has("beat")) it.optDouble("beat") else null }
             val wave = config?.let { if (it.has("wave")) it.optString("wave") else null }
-            scheduler.schedule(id, title, buildBody(config, title), atMs, days, freq, beat, wave)
+            // P7 — personalización de alarma: mismo config JSONB que ya trae
+            // freq/beat/wave (sin migración nueva del lado backend).
+            val soundUri = config?.optString("soundUri")?.takeIf { it.isNotBlank() }
+            val vibrationId = config?.optString("vibrationId", "default") ?: "default"
+            val snoozeEnabled = config?.optBoolean("snoozeEnabled", false) ?: false
+            val snoozeMinutes = config?.optInt("snoozeMinutes", 5) ?: 5
+            scheduler.schedule(
+                id, title, buildBody(config, title), atMs, days, freq, beat, wave,
+                soundUri, vibrationId, snoozeEnabled, snoozeMinutes,
+            )
         }
 
         // Las sincronizadas que ya no están en el servidor fueron borradas en

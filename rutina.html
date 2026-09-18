@@ -173,6 +173,38 @@
               <p class="cuenta-empty" id="reminder-hint">
                 Sin días marcados, el recordatorio es de una sola vez.
               </p>
+              <div class="it-step-days-wrap" id="reminder-custom-alarm-wrap">
+                <span class="it-step-days-label">Alarma (solo APK)</span>
+                <div class="cuenta-form-row">
+                  <label>Vibración
+                    <select id="reminder-vibration">
+                      <option value="default">Predeterminada</option>
+                      <option value="short">Corta</option>
+                      <option value="long">Larga</option>
+                      <option value="pulse">Pulsos</option>
+                    </select>
+                  </label>
+                  <label>Sonido
+                    <button type="button" class="cuenta-btn" id="reminder-sound-pick">
+                      <span id="reminder-sound-name">Predeterminado</span>
+                    </button>
+                  </label>
+                </div>
+                <div class="cuenta-form-row">
+                  <label class="it-step-notify-wrap">
+                    <input type="checkbox" id="reminder-snooze-enabled" />
+                    Permitir posponer
+                  </label>
+                  <label>Minutos al posponer
+                    <select id="reminder-snooze-minutes">
+                      <option value="5">5</option>
+                      <option value="10">10</option>
+                      <option value="15">15</option>
+                      <option value="20">20</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
               <button type="submit" class="cuenta-btn">Guardar recordatorio</button>
             </form>
           </details>

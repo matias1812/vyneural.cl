@@ -45,6 +45,7 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'OPEN_DND_ACCESS_SETTINGS', // permiso de sistema para que las alarmas bypaseen No Molestar (v8)
   'SESSION_END', // M1 — aviso nativo de fin de sesión (la WebView no muestra new Notification())
   'START_PLAY_PURCHASE', // Google Play Billing — plan Premium, SOLO APK (ver startPlayPurchase abajo)
+  'PICK_ALARM_SOUND', // P7 — picker de tonos del sistema para personalizar la alarma (ver pickAlarmSound abajo)
 ]);
 
 /**
@@ -221,6 +222,67 @@ export function startPlayPurchase(productId, isSubscription = true) {
       clearTimeout(timer);
       playPurchasePending.delete(id);
       reject(new Error('BRIDGE_ERROR'));
+    }
+  });
+}
+
+// P7 — personalización de alarma: elegir sonido con el picker de tonos del
+// PROPIO sistema (ACTION_RINGTONE_PICKER, TYPE_ALARM) en vez de un catálogo
+// fijo nuestro — el usuario elige entre lo que YA tiene en su teléfono, sin
+// necesitar archivos de audio propios empaquetados. Mismo patrón async que
+// startPlayPurchase: ACK inmediato, resultado real por evaluateJavascript
+// cuando el usuario cierra el picker del sistema (puede tardar).
+const SOUND_PICK_TIMEOUT_MS = 2 * 60 * 1000;
+let soundPickSeq = 0;
+const soundPickPending = new Map();
+
+if (typeof window !== 'undefined' && !window.__vyneuralSoundPickResponse) {
+  window.__vyneuralSoundPickResponse = (rid, json) => {
+    const entry = soundPickPending.get(rid);
+    if (!entry) return;
+    soundPickPending.delete(rid);
+    clearTimeout(entry.timer);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      parsed = null;
+    }
+    // { uri, name } | { cancelled: true } | { error: '...' }
+    entry.resolve(parsed || { error: 'BRIDGE_ERROR' });
+  };
+}
+
+/** @returns {Promise<{uri:string,name:string} | {cancelled:true} | {error:string}>} */
+export function pickAlarmSound() {
+  return new Promise((resolve) => {
+    const bridge = typeof window !== 'undefined' ? window.AndroidBridgeNative : null;
+    if (!bridge || typeof bridge.postMessage !== 'function') {
+      resolve({ error: 'NOT_SUPPORTED' });
+      return;
+    }
+    const id = ++soundPickSeq;
+    const timer = setTimeout(() => {
+      soundPickPending.delete(id);
+      resolve({ error: 'TIMEOUT' });
+    }, SOUND_PICK_TIMEOUT_MS);
+    soundPickPending.set(id, { resolve, timer });
+    let ack = null;
+    try {
+      ack = bridge.postMessage(JSON.stringify({ command: 'PICK_ALARM_SOUND', payload: { id } }));
+    } catch {
+      ack = null;
+    }
+    let ackObj = null;
+    try {
+      ackObj = typeof ack === 'string' ? JSON.parse(ack) : ack;
+    } catch {
+      ackObj = null;
+    }
+    if (!ackObj || ackObj.status !== 'ACCEPTED') {
+      clearTimeout(timer);
+      soundPickPending.delete(id);
+      resolve({ error: 'BRIDGE_ERROR' });
     }
   });
 }

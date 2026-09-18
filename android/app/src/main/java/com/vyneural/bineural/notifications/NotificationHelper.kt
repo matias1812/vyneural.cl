@@ -173,6 +173,56 @@ object NotificationHelper {
 
     private val VIBRATION_ALARM = longArrayOf(0, 500, 300, 500, 300, 700)
 
+    // Personalización de alarma (P7): patrones de vibración a elegir por
+    // alarma — "default" es VIBRATION_ALARM de siempre (compatibilidad con
+    // canal/config existente), el resto son variantes nuevas.
+    val VIBRATIONS: Map<String, LongArray> = mapOf(
+        "default" to VIBRATION_ALARM,
+        "short" to longArrayOf(0, 300),
+        "long" to longArrayOf(0, 800, 400, 800, 400, 800),
+        "pulse" to longArrayOf(0, 200, 200, 200, 200, 200, 200, 200),
+    )
+
+    /** Canal por combinación (sonido elegido, patrón de vibración): los
+     *  canales son inmutables por ID una vez creados (ver historial v2→v9
+     *  arriba) — la única forma de tener sonido/vibración DISTINTOS por
+     *  alarma es un canal propio por combinación, creado la primera vez que
+     *  se usa. La combinación por defecto (sin sonido custom, vibración
+     *  "default") sigue siendo CHANNEL_ALARMS de siempre — nada cambia para
+     *  una alarma sin personalizar. `soundUri`: URI elegida con el picker de
+     *  tonos del sistema (ACTION_RINGTONE_PICKER, TYPE_ALARM) — no un
+     *  catálogo fijo nuestro, así el usuario elige entre lo que YA tiene en
+     *  su teléfono, sin depender de archivos de audio propios. */
+    fun channelFor(context: Context, soundUri: String?, vibrationId: String): String {
+        val vibKey = if (VIBRATIONS.containsKey(vibrationId)) vibrationId else "default"
+        if (soundUri.isNullOrBlank() && vibKey == "default") return CHANNEL_ALARMS
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CHANNEL_ALARMS
+        val id = "bineural_alarms_v9_" + kotlin.math.abs((soundUri.orEmpty() + "|" + vibKey).hashCode())
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(id) == null) {
+            val alarmSound = soundUri?.let { android.net.Uri.parse(it) }
+                ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+                ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
+                ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+            nm.createNotificationChannel(
+                NotificationChannel(id, "Alarmas Vyneural (personalizada)", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Alarma con sonido/vibración elegidos por el usuario"
+                    enableVibration(true)
+                    setVibrationPattern(VIBRATIONS[vibKey])
+                    setBypassDnd(true)
+                    setSound(
+                        alarmSound,
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build(),
+                    )
+                },
+            )
+        }
+        return id
+    }
+
     /** Notificación del reproductor (Foreground Service): el SO la muestra en
      *  lock screen y centro de control mientras el servicio corre. Con la
      *  MediaSession adjunta (P1.5) el sombreado de notificaciones y la
@@ -261,8 +311,14 @@ object NotificationHelper {
         freq: Double? = null,
         beat: Double? = null,
         wave: String? = null,
+        alarmId: String? = null,
+        soundUri: String? = null,
+        vibrationId: String = "default",
+        snoozeEnabled: Boolean = false,
+        snoozeMinutes: Int = 5,
     ): Notification {
         ensureChannels(context)
+        val channelId = channelFor(context, soundUri, vibrationId)
         val openIntent = Intent(context, MainActivity::class.java)
         // Deep link (paridad con el Web Push, ver reminders.py:_deep_link): al
         // tocar la notificación, MainActivity abre la web en esta frecuencia
@@ -278,7 +334,7 @@ object NotificationHelper {
             context, 0, openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        return NotificationCompat.Builder(context, CHANNEL_ALARMS)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_stat_bineural)
             .setContentTitle(title)
             .setContentText(body)
@@ -287,12 +343,35 @@ object NotificationHelper {
             // CATEGORY_ALARM (no REMINDER): el sistema la trata como alarma real
             // (prioridad en No molestar según la política del usuario).
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            // El SONIDO de alarma (ringtone TYPE_ALARM con USAGE_ALARM) lo lleva
-            // el canal v3 (inmutable, se configura al crearse): la notificación
-            // no necesita repetirlo. Vibración con patrón de recordatorio.
-            .setVibrate(VIBRATION_ALARM)
+            // El sonido/vibración los lleva el canal (channelFor arriba,
+            // inmutable al crearse): la notificación no necesita repetirlos.
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .build()
+        // Posponer: self-contained en el propio PendingIntent (título/body/
+        // freq/beat/wave/sonido/vibración/alarmId) — NO depende de que el
+        // record en SharedPreferences siga existiendo (una alarma de una
+        // sola vez ya se borró de ahí en AlarmReceiver antes de que el
+        // usuario llegue a tocar el botón).
+        if (snoozeEnabled && alarmId != null) {
+            val snoozeIntent = Intent(context, AlarmSnoozeReceiver::class.java).apply {
+                putExtra("alarmId", alarmId)
+                putExtra("title", title)
+                putExtra("body", body)
+                putExtra("snoozeMinutes", snoozeMinutes)
+                if (freq != null) putExtra("freq", freq)
+                if (beat != null) putExtra("beat", beat)
+                if (wave != null) putExtra("wave", wave)
+                if (soundUri != null) putExtra("soundUri", soundUri)
+                putExtra("vibrationId", vibrationId)
+            }
+            val snoozePi = PendingIntent.getBroadcast(
+                context,
+                alarmId.hashCode(),
+                snoozeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(0, "Posponer $snoozeMinutes min", snoozePi)
+        }
+        return builder.build()
     }
 
     // P6 — una misma alarma puede llegar a mostrarse por DOS caminos
@@ -338,6 +417,10 @@ object NotificationHelper {
         beat: Double? = null,
         wave: String? = null,
         alarmId: String? = null,
+        soundUri: String? = null,
+        vibrationId: String = "default",
+        snoozeEnabled: Boolean = false,
+        snoozeMinutes: Int = 5,
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -352,7 +435,10 @@ object NotificationHelper {
         if (alarmId != null) markShown(context, alarmId)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         logChannelState(nm)
-        nm.notify(NOTIF_ALARM, alarmNotification(context, title, body, freq, beat, wave))
+        nm.notify(
+            NOTIF_ALARM,
+            alarmNotification(context, title, body, freq, beat, wave, alarmId, soundUri, vibrationId, snoozeEnabled, snoozeMinutes),
+        )
     }
 
     /**

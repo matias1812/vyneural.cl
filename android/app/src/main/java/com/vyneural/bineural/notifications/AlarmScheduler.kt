@@ -52,11 +52,21 @@ class AlarmScheduler(private val context: Context) {
         freq: Double? = null,
         beat: Double? = null,
         wave: String? = null,
+        soundUri: String? = null,
+        vibrationId: String = "default",
+        snoozeEnabled: Boolean = false,
+        snoozeMinutes: Int = 5,
     ) {
         val record = JSONObject()
             .put("title", title)
             .put("body", body)
             .put("at", atMs)
+            // P7 — personalización de alarma: sonido/vibración/posponer, ver
+            // NotificationHelper.kt::channelFor()/alarmNotification().
+            .put("vibrationId", vibrationId)
+            .put("snoozeEnabled", snoozeEnabled)
+            .put("snoozeMinutes", snoozeMinutes)
+        if (soundUri != null) record.put("soundUri", soundUri)
         // Deep link: al tocar la notificación, MainActivity abre la web en esta
         // frecuencia exacta en vez de la pantalla por defecto (ver AlarmReceiver
         // + NotificationHelper). Opcional: alarmas sin config (legado) siguen
@@ -154,6 +164,10 @@ class AlarmScheduler(private val context: Context) {
                     if (j.has("freq")) j.optDouble("freq") else null,
                     if (j.has("beat")) j.optDouble("beat") else null,
                     if (j.has("wave")) j.optString("wave") else null,
+                    j.optString("soundUri").takeIf { it.isNotBlank() },
+                    j.optString("vibrationId", "default"),
+                    j.optBoolean("snoozeEnabled", false),
+                    j.optInt("snoozeMinutes", 5),
                 )
             } else {
                 prefs.edit().remove(alarmId).apply()
@@ -196,13 +210,23 @@ class AlarmScheduler(private val context: Context) {
                 val freq = if (j.has("freq")) j.optDouble("freq") else null
                 val beat = if (j.has("beat")) j.optDouble("beat") else null
                 val wave = if (j.has("wave")) j.optString("wave") else null
+                val soundUri = j.optString("soundUri").takeIf { it.isNotBlank() }
+                val vibrationId = j.optString("vibrationId", "default")
+                val snoozeEnabled = j.optBoolean("snoozeEnabled", false)
+                val snoozeMinutes = j.optInt("snoozeMinutes", 5)
                 if (days.isNotEmpty() && hh >= 0 && mm >= 0) {
                     val next = nextOccurrence(hh, mm, days, System.currentTimeMillis() + 60_000)
                     if (next != null) {
-                        schedule(id, j.optString("title", "Vyneural"), j.optString("body", ""), next, days, freq, beat, wave)
+                        schedule(
+                            id, j.optString("title", "Vyneural"), j.optString("body", ""), next, days,
+                            freq, beat, wave, soundUri, vibrationId, snoozeEnabled, snoozeMinutes,
+                        )
                     }
                 } else {
-                    schedule(id, j.optString("title", "Vyneural"), j.optString("body", ""), j.optLong("at"), null, freq, beat, wave)
+                    schedule(
+                        id, j.optString("title", "Vyneural"), j.optString("body", ""), j.optLong("at"), null,
+                        freq, beat, wave, soundUri, vibrationId, snoozeEnabled, snoozeMinutes,
+                    )
                 }
             }
         }

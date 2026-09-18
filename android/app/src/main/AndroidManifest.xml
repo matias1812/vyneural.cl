@@ -68,6 +68,11 @@
             android:name=".notifications.AlarmSilenceReceiver"
             android:exported="false" />
 
+        <!-- Botón "Posponer" de la notificación de alarma (P7). -->
+        <receiver
+            android:name=".notifications.AlarmSnoozeReceiver"
+            android:exported="false" />
+
         <receiver
             android:name=".notifications.BootReceiver"
             android:exported="true">

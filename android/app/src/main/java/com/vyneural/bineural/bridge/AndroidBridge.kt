@@ -210,7 +210,13 @@ class AndroidBridge(
                     val freq = if (payload.has("freq")) payload.optDouble("freq") else null
                     val beat = if (payload.has("beat")) payload.optDouble("beat") else null
                     val wave = if (payload.has("wave")) payload.optString("wave") else null
-                    scheduler.schedule(id, title, body, at, days, freq, beat, wave)
+                    // P7 — personalización de alarma (ver NotificationHelper.kt::
+                    // channelFor()/pickAlarmSound en native-bridge.js).
+                    val soundUri = payload.optString("soundUri").takeIf { it.isNotBlank() }
+                    val vibrationId = payload.optString("vibrationId", "default")
+                    val snoozeEnabled = payload.optBoolean("snoozeEnabled", false)
+                    val snoozeMinutes = payload.optInt("snoozeMinutes", 5)
+                    scheduler.schedule(id, title, body, at, days, freq, beat, wave, soundUri, vibrationId, snoozeEnabled, snoozeMinutes)
                     respond("OK", command, null)
                 }
                 "CANCEL_ALARM" -> {
@@ -473,6 +479,19 @@ class AndroidBridge(
                     val isSubscription = payload?.optBoolean("isSubscription", true) ?: true
                     playBilling.startPurchase(productId, isSubscription) { result ->
                         activity.pushToWeb("window.__vyneuralPlayPurchaseResponse($id, ${JSONObject.quote(result.toString())})")
+                    }
+                    respond("ACCEPTED", command, JSONObject().put("id", id))
+                }
+                "PICK_ALARM_SOUND" -> {
+                    // P7 — personalización de alarma: picker de tonos del PROPIO
+                    // sistema (ACTION_RINGTONE_PICKER, TYPE_ALARM), no un catálogo
+                    // fijo nuestro. Mismo shape async que START_PLAY_PURCHASE: ACK
+                    // inmediato, resultado real por evaluateJavascript cuando el
+                    // usuario cierra el picker (puede tardar).
+                    val id = payload?.optLong("id", -1L) ?: -1L
+                    if (id < 0) return respond("INVALID", command, null)
+                    activity.pickAlarmSound { result ->
+                        activity.pushToWeb("window.__vyneuralSoundPickResponse($id, ${JSONObject.quote(result.toString())})")
                     }
                     respond("ACCEPTED", command, JSONObject().put("id", id))
                 }
