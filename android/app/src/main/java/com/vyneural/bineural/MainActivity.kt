@@ -94,8 +94,14 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         ViewCompat.setOnApplyWindowInsetsListener(webView) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            safeAreaTopPx = bars.top
-            safeAreaBottomPx = bars.bottom
+            // getInsets() devuelve píxeles FÍSICOS — el CSS "px" que entiende
+            // Chromium es en cambio un px "CSS" (ya escalado por la densidad
+            // de pantalla). Sin dividir por density(), en un teléfono de
+            // densidad 3x el padding queda 3 veces más grande de lo real
+            // (bug real visto en vivo: "el navbar quedó demasiado abajo").
+            val density = resources.displayMetrics.density
+            safeAreaTopPx = (bars.top / density).toInt()
+            safeAreaBottomPx = (bars.bottom / density).toInt()
             injectSafeAreaCss()
             insets
         }
