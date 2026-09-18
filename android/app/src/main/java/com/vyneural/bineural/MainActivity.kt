@@ -48,6 +48,13 @@ class MainActivity : ComponentActivity() {
     // que el diagnóstico lo lea sin tocar el WebView desde otro hilo.
     @Volatile
     private var currentPage = "index"
+    // Últimos insets de barras del sistema conocidos (px) — cada navegación
+    // carga un documento HTML nuevo (loadLocalPage, no es una SPA), así que
+    // las variables CSS inyectadas en el documento anterior se pierden; se
+    // reinyectan también en onPageFinished con estos valores cacheados, no
+    // solo cuando cambian los insets (ver injectSafeAreaCss()).
+    private var safeAreaTopPx = 0
+    private var safeAreaBottomPx = 0
 
     companion object {
         // Extras del Intent que abre MainActivity al tocar la notificación de
@@ -73,15 +80,23 @@ class MainActivity : ComponentActivity() {
         // legacy solo existía para targetSdk 35) — sin esto, el WebView
         // dibuja contenido debajo de la barra de estado/navegación en vez de
         // respetarla (bug real visto en vivo: "la app se ve más larga, la
-        // barra de notificaciones queda atrás"). Se le da el padding
-        // correcto directo del lado nativo — no depende de que la web
-        // coopere con env(safe-area-inset-*) (que hoy no existe en el CSS).
-        // setImmersiveMode() sigue funcionando igual: cuando oculta las
-        // barras los insets bajan a 0 y este padding se reduce solo.
+        // barra de notificaciones queda atrás").
+        //
+        // Se probó primero con view.setPadding(...) directo sobre el WebView
+        // — confirmado en vivo (celular real, versión ya actualizada) que
+        // NO alcanza: WebView.setPadding() no redimensiona de forma
+        // confiable el viewport interno de Chromium en todos los
+        // fabricantes/versiones, a diferencia de un ViewGroup normal. En vez
+        // de depender de eso, los insets se pasan a la propia página como
+        // variables CSS (--safe-top/--safe-bottom, ver style.css::.site-nav)
+        // — 100% dentro del motor de layout de la página, sin la
+        // incertidumbre del padding nativo del WebView.
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(webView) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            safeAreaTopPx = bars.top
+            safeAreaBottomPx = bars.bottom
+            injectSafeAreaCss()
             insets
         }
         // P4-B — BACK (tecla y gesto Android 13+) usa el historial manual de
@@ -151,6 +166,7 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
+                injectSafeAreaCss()
                 injectBridge()
                 Diagnostics.bridgeStatus = if (view.url?.startsWith("file://") == true) "CONNECTED" else "ERROR"
             }
@@ -180,6 +196,17 @@ class MainActivity : ComponentActivity() {
     /** Envía JavaScript al WebView (eventos nativos → JS). */
     fun pushToWeb(js: String) {
         webView.post { webView.evaluateJavascript(js, null) }
+    }
+
+    /** Ver comentario en onCreate: variables CSS para los insets de barras del
+     *  sistema, reinyectadas en cada documento nuevo (onPageFinished) además
+     *  de cuando cambian los insets (rotación, teclado, immersive mode). */
+    private fun injectSafeAreaCss() {
+        webView.evaluateJavascript(
+            "document.documentElement.style.setProperty('--safe-top','${safeAreaTopPx}px');" +
+                "document.documentElement.style.setProperty('--safe-bottom','${safeAreaBottomPx}px');",
+            null,
+        )
     }
 
     /** Pantalla completa (immersive): oculta/muestra las barras del sistema. */

@@ -67,7 +67,15 @@ object NotificationHelper {
     // solo aplica al CREARSE por primera vez — createNotificationChannel()
     // sobre un canal existente no lo cambia, así que necesita ID nuevo para
     // que los teléfonos que ya tenían v7 lo reciban.
-    const val CHANNEL_ALARMS = "bineural_alarms_v8"
+    // v9: mismo síntoma reportado otra vez en vivo (llega pero no despliega
+    // heads-up, sin sonido ni vibración) DESPUÉS de v8 — consistente con que
+    // Android bajó la importancia sola (ver comentario v7): esta sesión
+    // disparó/descartó muchas notificaciones de prueba en el canal v8. Bump
+    // para que nazca de cero en IMPORTANCE_HIGH otra vez. Como esto puede
+    // volver a pasar con el uso normal (no es exclusivo de testing), ver
+    // permissions-modal.js/main.js: ahora la UI detecta importancia degradada
+    // y lo señala de forma prominente en vez de depender de otro bump manual.
+    const val CHANNEL_ALARMS = "bineural_alarms_v9"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.

@@ -15,6 +15,13 @@
   /* Selects, dropdowns nativos, scrollbars y date pickers en oscuro (sin
      destellos blancos del sistema). */
   color-scheme: dark;
+  /* Insets de barras del sistema en la APK (MainActivity.kt::injectSafeAreaCss
+     los pisa con el valor real en cada carga de página) — 0 por defecto en
+     web/PWA, donde nunca se sobreescriben. targetSdk 36 fuerza edge-to-edge
+     sin opt-out; el WebView dibuja debajo de la barra de estado si nada
+     compensa el espacio (bug real: .site-nav quedaba tapado). */
+  --safe-top: 0px;
+  --safe-bottom: 0px;
 }
 
 * {
@@ -83,7 +90,10 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 24px;
+  /* padding-top suma el inset real de la barra de estado en la APK (0 en
+     web/PWA) — sticky con top:0 se pega al borde real del viewport, así que
+     sin esto quedaba literalmente debajo de la barra de estado del sistema. */
+  padding: calc(14px + var(--safe-top)) 24px 14px;
   background: rgba(11, 13, 26, 0.75);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -2790,6 +2800,21 @@ html:not(.in-app) .in-app-only {
 
 .perm-test:hover {
   background: rgba(167, 139, 250, 0.2);
+}
+
+/* Canal de alarma con importancia degradada (Android puede bajarla solo si
+   se descartan varias notificaciones sin abrirlas) — mismo rojo que
+   .cuenta-btn-danger, para que se distinga de la sugerencia de rutina y no
+   pase desapercibido (bug real: notificación llega sin heads-up/sonido/
+   vibración y nada avisaba que este botón era justo lo que había que tocar). */
+.perm-test-urgent {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #f87171;
+}
+
+.perm-test-urgent:hover {
+  background: rgba(248, 113, 113, 0.2);
 }
 
 .perm-note {

@@ -3494,12 +3494,26 @@ function renderPermissionState() {
   if (btnNotifSettings) {
     btnNotifSettings.classList.toggle('hidden', !isNative);
     const dndNeedsSetup = !!(caps.alarmChannel && caps.alarmChannel.supported && !caps.alarmChannel.dndBypassGranted);
+    // Ver mismo bloque en ui/permissions-modal.js — duplicado porque esta
+    // fila también vive en el panel del generador, no solo en el modal.
+    const importanceDegraded = !!(
+      caps.alarmChannel &&
+      caps.alarmChannel.supported &&
+      typeof caps.alarmChannel.importance === 'number' &&
+      caps.alarmChannel.importance < 4
+    );
     btnNotifSettings.textContent =
       notifPerm !== 'granted'
         ? 'Abrir ajustes de notificación'
         : dndNeedsSetup
           ? 'Permitir alarma en No Molestar'
-          : 'Revisar sonido/vibración de alarma';
+          : importanceDegraded
+            ? '⚠️ Las alarmas están silenciadas — tocá para arreglarlo'
+            : 'Revisar sonido/vibración de alarma';
+    btnNotifSettings.classList.toggle(
+      'perm-test-urgent',
+      notifPerm === 'granted' && !dndNeedsSetup && importanceDegraded,
+    );
     btnNotifSettings.dataset.notifGranted = notifPerm === 'granted' ? '1' : '0';
     btnNotifSettings.dataset.dndNeedsSetup = notifPerm === 'granted' && dndNeedsSetup ? '1' : '0';
   }

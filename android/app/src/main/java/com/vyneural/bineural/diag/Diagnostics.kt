@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import com.vyneural.bineural.audio.AudioForegroundService
 import com.vyneural.bineural.notifications.AlarmScheduler
+import com.vyneural.bineural.notifications.NotificationHelper
 
 /**
  * Estado global para la pantalla de diagnóstico y la sonda del bridge.
@@ -99,7 +100,11 @@ object Diagnostics {
         }
         b.appendLine("  POST_NOTIFICATIONS: ${if (perm == PackageManager.PERMISSION_GRANTED) "GRANTED" else "NOT GRANTED"}")
         b.appendLine("  Channel player: ${if (channelExists(context, "bineural_player")) "YES" else "NO"}")
-        b.appendLine("  Channel alarms: ${if (channelExists(context, "bineural_alarms")) "YES" else "NO"}")
+        // Antes comparaba contra el string legado "bineural_alarms" (previo al
+        // versionado v2+) — siempre reportaba NO sin importar el estado real
+        // del canal vigente. Usa la constante actual, la misma que crea
+        // ensureChannels() y consulta alarmChannelDiagnostics().
+        b.appendLine("  Channel alarms: ${if (channelExists(context, NotificationHelper.CHANNEL_ALARMS)) "YES" else "NO"}")
         b.appendLine()
         b.appendLine("ALARMS:")
         val s = AlarmScheduler(context)

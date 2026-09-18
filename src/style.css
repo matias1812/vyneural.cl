@@ -3867,6 +3867,18 @@ body.immersive .controls {
   background: rgba(167, 139, 250, 0.2);
 }
 
+/* Canal de alarma con importancia degradada — ver src/site.css para el
+   contexto completo (misma regla, duplicada porque main.js usa este CSS). */
+.perm-test-urgent {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #f87171;
+}
+
+.perm-test-urgent:hover {
+  background: rgba(248, 113, 113, 0.2);
+}
+
 .perm-off:hover {
   color: var(--text);
   border-color: rgba(255, 255, 255, 0.3);
