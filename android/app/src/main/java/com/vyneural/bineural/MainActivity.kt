@@ -12,6 +12,9 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import com.vyneural.bineural.audio.AudioForegroundService
 import com.vyneural.bineural.bridge.AndroidBridge
 import com.vyneural.bineural.sync.AlarmSync
@@ -66,6 +69,21 @@ class MainActivity : ComponentActivity() {
 
         webView = WebView(this)
         setContentView(webView)
+        // targetSdk 36 fuerza edge-to-edge sin ningún opt-out (el atributo
+        // legacy solo existía para targetSdk 35) — sin esto, el WebView
+        // dibuja contenido debajo de la barra de estado/navegación en vez de
+        // respetarla (bug real visto en vivo: "la app se ve más larga, la
+        // barra de notificaciones queda atrás"). Se le da el padding
+        // correcto directo del lado nativo — no depende de que la web
+        // coopere con env(safe-area-inset-*) (que hoy no existe en el CSS).
+        // setImmersiveMode() sigue funcionando igual: cuando oculta las
+        // barras los insets bajan a 0 y este padding se reduce solo.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
         // P4-B — BACK (tecla y gesto Android 13+) usa el historial manual de
         // páginas; cuando se agota, el callback se deshabilita y el sistema
         // cierra la Activity como siempre.

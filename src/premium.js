@@ -17,7 +17,7 @@ import {
 } from './api/billing.js';
 import { detectNativeBridge, startPlayPurchase } from './platform/native-bridge.js';
 import { initStarfield } from './starfield.js';
-import { confirmModal } from './ui/confirm-modal.js';
+import { confirmModal, notifyModal } from './ui/confirm-modal.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -123,6 +123,114 @@ const clp = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP',
 // Espera >4s sin respuesta = probable cold start del backend (Render free) —
 // mismo criterio y mismo umbral que src/ui/auth.js.
 const WAKEUP_HINT_MS = 4000;
+
+// Un cold start de Render (free tier) puede tardar minutos, no solo los
+// ~20-50s "típicos" — se reusa para cualquier llamada que no pueda darse el
+// lujo de fallar al primer intento: cargar la página (loadContentOnBoot) y,
+// más crítico todavía, confirmar una compra de Google Play que YA se hizo
+// del lado de Google (ver buyPlan → verifyGooglePlayPurchase) — si esa
+// verificación se rinde después de un solo intento, la compra queda
+// "comprada pero nunca confirmada" hasta que Google la revierte sola por
+// falta de acknowledge (bug real visto en vivo probando la APK).
+const RETRY_DELAYS_MS = [
+  3000, 6000, 12000, 20000, // ~41s — cold start "típico"
+  30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, // +270s — cold start largo
+]; // ~5m11s de cobertura total
+
+// Compra de Google Play completada pero todavía no confirmada con nuestro
+// backend — sobrevive un reload/relogin de la página (sessionStorage, no
+// memoria) para que resumePendingGooglePlayPurchase() la retome sola en vez
+// de perderla si el usuario cierra el modal de error o recarga. Es el camino
+// rápido/interactivo; la reconciliación server-side por RTDN (ver
+// routers/payments.py::google_play_rtdn) es la red de seguridad de fondo si
+// ni esto alcanza (app cerrada del todo, sessionStorage perdido, etc.).
+const PENDING_GP_PURCHASE_KEY = 'vyneural_pending_google_play_purchase';
+
+function savePendingGooglePlayPurchase(purchaseToken, productId) {
+  try {
+    sessionStorage.setItem(PENDING_GP_PURCHASE_KEY, JSON.stringify({ purchaseToken, productId }));
+  } catch (_) {
+    /* sin sessionStorage: no hay dónde guardar el pendiente, se pierde el camino rápido (queda RTDN) */
+  }
+}
+
+function loadPendingGooglePlayPurchase() {
+  try {
+    const raw = sessionStorage.getItem(PENDING_GP_PURCHASE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearPendingGooglePlayPurchase() {
+  try {
+    sessionStorage.removeItem(PENDING_GP_PURCHASE_KEY);
+  } catch (_) {
+    /* sin sessionStorage */
+  }
+}
+
+// Reintenta verifyGooglePlayPurchase con el mismo backoff que loadContentOnBoot
+// (RETRY_DELAYS_MS) — PERO a diferencia de un cold start (transitorio, vale
+// la pena esperar), un 401 que sobrevive el refresh automático de client.js
+// significa sesión REALMENTE muerta: reintentar el mismo request no cambia
+// nada, solo quema los ~5 minutos de presupuesto mostrando "confirmando…"
+// mientras la ventana real que tiene Google antes de auto-cancelar la compra
+// por falta de acknowledge (confirmado en vivo: minutos, no los 3 días
+// documentados) se cierra sola. Por eso corta apenas detecta UNAUTHORIZED en
+// vez de agotar el loop — y guarda el pendiente para reintentar apenas haya
+// sesión de nuevo (ver resumePendingGooglePlayPurchase).
+async function verifyGooglePlayPurchaseWithRetry(purchaseToken, productId, onAttempt) {
+  for (let attempt = 0; ; attempt++) {
+    if (onAttempt) onAttempt(attempt);
+    try {
+      await verifyGooglePlayPurchase(purchaseToken, productId);
+      clearPendingGooglePlayPurchase();
+      return { ok: true };
+    } catch (err) {
+      if (err && err.code === 'UNAUTHORIZED') {
+        savePendingGooglePlayPurchase(purchaseToken, productId);
+        return { ok: false, sessionExpired: true };
+      }
+      if (attempt < RETRY_DELAYS_MS.length) {
+        savePendingGooglePlayPurchase(purchaseToken, productId);
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+        continue;
+      }
+      return { ok: false, sessionExpired: false };
+    }
+  }
+}
+
+// Se llama al cargar /premium con sesión, y de nuevo apenas se loguea (ver
+// init()) — retoma sola una compra que quedó pendiente sin que el usuario
+// tenga que volver a tocar "Comprar" (que además, sin recuperación de compra
+// huérfana del lado Kotlin en este build, podría ni abrir el diálogo de Play
+// de nuevo). Silenciosa mientras reintenta (no hay botón que actualizar acá);
+// solo se anuncia el resultado final.
+let resumingPendingPurchase = false;
+async function resumePendingGooglePlayPurchase() {
+  if (resumingPendingPurchase || !getAccessToken()) return;
+  const pending = loadPendingGooglePlayPurchase();
+  if (!pending) return;
+  resumingPendingPurchase = true;
+  try {
+    const result = await verifyGooglePlayPurchaseWithRetry(pending.purchaseToken, pending.productId);
+    if (result.ok) {
+      await loadContent();
+      await notifyModal({ title: '¡Listo!', text: 'Tu compra se confirmó — ya tenés Premium.' });
+    } else if (!result.sessionExpired) {
+      showError('Tu compra en Google Play se realizó pero no pudimos confirmarla todavía — volvé a intentarlo en un rato, se recupera sola.');
+    }
+    // sessionExpired de nuevo: ya se guardó el pendiente otra vez, se
+    // reintenta en el próximo login — no hace falta abrir el modal de auth
+    // acá (este código corre justo DESPUÉS de un login, sería confuso pedir
+    // loguearse de nuevo en el instante siguiente).
+  } finally {
+    resumingPendingPurchase = false;
+  }
+}
 
 function openAuth(mode) {
   const auth = window.__vyneuralAuth;
@@ -313,12 +421,53 @@ async function buyPlan(plan, btn, activePlanKey) {
       if (purchase.error) throw new Error(purchase.error);
       // El backend es quien de verdad otorga Premium, recién después de
       // verificar ESE purchaseToken contra Google (nunca se confía en que
-      // Play "dijo que sí" del lado cliente).
-      await verifyGooglePlayPurchase(purchase.purchaseToken, purchase.productId);
+      // Play "dijo que sí" del lado cliente). A esta altura la compra YA
+      // pasó en Google (hay purchaseToken real) — si esta llamada falla al
+      // primer intento (típicamente un cold start de Render) NO hay que
+      // rendirse: la compra queda "hecha pero no confirmada" hasta que
+      // Google la revierte sola por falta de acknowledge (bug real visto en
+      // vivo probando la APK — dos compras de prueba canceladas así).
       clearTimeout(timer);
+      const verifyResult = await verifyGooglePlayPurchaseWithRetry(
+        purchase.purchaseToken,
+        purchase.productId,
+        (attempt) => {
+          btn.textContent =
+            attempt === 0
+              ? 'Confirmando tu compra…'
+              : 'Confirmando tu compra con Google… puede tardar unos minutos';
+        },
+      );
       btn.disabled = false;
       btn.textContent = originalLabel;
+      if (verifyResult.sessionExpired) {
+        // La compra en Google Play YA se hizo — lo que murió es la sesión.
+        // Reintentar el mismo request no lo arregla (client.js ya intentó
+        // refrescar el token solo y no pudo) — hay que loguearse de nuevo
+        // YA: Google puede auto-cancelar la compra en unos minutos si no la
+        // confirmamos (confirmado en vivo, no son los 3 días documentados).
+        // El purchaseToken ya quedó guardado (verifyGooglePlayPurchaseWithRetry)
+        // — al loguear de nuevo, resumePendingGooglePlayPurchase() la retoma
+        // sola, sin que haga falta tocar "Comprar" otra vez.
+        showError('Tu compra en Google Play se realizó pero tu sesión expiró. Iniciá sesión de nuevo AHORA — Google puede cancelar la compra en unos minutos si no la confirmamos.');
+        openAuth('login');
+        return;
+      }
+      if (!verifyResult.ok) {
+        // Se agotaron los reintentos (~5 minutos) — a esta altura NO hay que
+        // mostrar el error genérico de "no pudimos iniciar el pago": sería
+        // mentira, la compra en Google Play ya se hizo de verdad. El
+        // purchaseToken quedó guardado — el próximo load de /premium
+        // (resumePendingGooglePlayPurchase) o un nuevo Comprar() (recupera
+        // la huérfana, ver PlayBillingManager.kt) la retoman solos.
+        showError('Tu compra en Google Play se realizó pero no pudimos confirmarla todavía — volvé a intentarlo en un rato, se recupera sola.');
+        return;
+      }
       await loadContent(); // refresca el estado (banner de Premium activo) in-place
+      await notifyModal({
+        title: '¡Listo!',
+        text: 'Tu compra se confirmó — ya tenés Premium.',
+      });
       return;
     }
     // De por vida es pago único (Webpay Plus, nada que auto-renovar).
@@ -399,15 +548,10 @@ async function loadContent() {
   return !!(err && (err.status === 0 || err.status >= 500));
 }
 
-// Mismo patrón que src/cuenta.js::loadAllOnBoot() (y src/ui/auth.js): un
-// cold start de Render (free tier) puede tardar minutos, no solo los ~20-50s
-// "típicos" — sin reintento automático, la página quedaba con el mensaje de
-// error hasta que el usuario recargara a mano.
+// Mismo patrón que src/cuenta.js::loadAllOnBoot() (y src/ui/auth.js): sin
+// reintento automático, la página quedaba con el mensaje de error hasta que
+// el usuario recargara a mano.
 async function loadContentOnBoot() {
-  const RETRY_DELAYS_MS = [
-    3000, 6000, 12000, 20000, // ~41s — cold start "típico"
-    30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, // +270s — cold start largo
-  ]; // ~5m11s de cobertura total
   for (let attempt = 0; ; attempt++) {
     const needsRetry = await loadContent();
     if (!needsRetry || attempt >= RETRY_DELAYS_MS.length) return;
@@ -430,11 +574,15 @@ function renderGate({ retryOnBoot = false } = {}) {
 
 function init() {
   renderGate({ retryOnBoot: true });
+  resumePendingGooglePlayPurchase();
   const loginBtn = $('premium-login-btn');
   const regBtn = $('premium-register-btn');
   if (loginBtn) loginBtn.addEventListener('click', () => openAuth('login'));
   if (regBtn) regBtn.addEventListener('click', () => openAuth('register'));
-  document.addEventListener('vyneural:auth', renderGate);
+  document.addEventListener('vyneural:auth', (e) => {
+    renderGate();
+    if (e.detail && e.detail.type === 'login') resumePendingGooglePlayPurchase();
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init, { once: true });

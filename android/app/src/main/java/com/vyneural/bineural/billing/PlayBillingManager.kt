@@ -1,6 +1,8 @@
 package com.vyneural.bineural.billing
 
 import android.app.Activity
+import android.os.Handler
+import android.os.Looper
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
 import com.android.billingclient.api.BillingFlowParams
@@ -9,8 +11,11 @@ import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
+import com.android.billingclient.api.QueryPurchasesParams
+import com.vyneural.bineural.util.AuthStore
 import com.vyneural.bineural.util.BineuralLog
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Wrapper fino sobre BillingClient — SOLO habla con Google Play. Nunca llama
@@ -54,8 +59,15 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
 
             override fun onBillingServiceDisconnected() {
                 // Best-effort: el próximo startPurchase() reconecta solo
-                // (ensureClient reconstruye si !isReady).
+                // (ensureClient reconstruye si !isReady). Si había una compra
+                // en curso, no dejarla colgada en silencio hasta que el
+                // timeout de 5 min del lado JS expire sin explicación — se
+                // resuelve acá mismo con un error claro y accionable.
                 BineuralLog.d("play-billing", "servicio de facturación desconectado")
+                pendingCallback?.let { cb ->
+                    pendingCallback = null
+                    cb(JSONObject().put("error", "servicio de facturación desconectado, reintentá"))
+                }
             }
         })
     }
@@ -77,7 +89,67 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
         )
     }
 
+    // Antes de abrir el diálogo de Play, se chequea si el producto YA está
+    // comprado (compra "huérfana": Google la procesó pero nuestro backend
+    // nunca llegó a verificarla — típicamente porque la sesión murió a mitad
+    // del flujo, ver premium.js). Si existe, se devuelve directo sin abrir
+    // el diálogo — el reintento de verifyGooglePlayPurchase en premium.js la
+    // recupera solo. Un intento anterior de esto dejaba el botón colgado
+    // para siempre si queryPurchasesAsync nunca llamaba a su callback (causa
+    // exacta no confirmada — posible gotcha de threading de BillingClient);
+    // por eso ahora esto tiene un timeout manual acotado (QUERY_TIMEOUT_MS):
+    // si no contesta a tiempo, se seguí igual al flujo normal en vez de
+    // bloquear el botón indefinidamente otra vez.
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private companion object {
+        const val QUERY_TIMEOUT_MS = 3000L
+    }
+
     private fun queryAndLaunch(
+        billingClient: BillingClient,
+        productId: String,
+        isSubscription: Boolean,
+        onResult: (JSONObject) -> Unit,
+    ) {
+        val productType = if (isSubscription) BillingClient.ProductType.SUBS else BillingClient.ProductType.INAPP
+        val resolved = AtomicBoolean(false)
+        val timeoutRunnable = Runnable {
+            if (resolved.compareAndSet(false, true)) {
+                BineuralLog.d("play-billing", "queryPurchasesAsync no contestó a tiempo — sigo directo al flujo normal")
+                launchNewPurchase(billingClient, productId, isSubscription, onResult)
+            }
+        }
+        mainHandler.postDelayed(timeoutRunnable, QUERY_TIMEOUT_MS)
+
+        val queryParams = QueryPurchasesParams.newBuilder().setProductType(productType).build()
+        billingClient.queryPurchasesAsync(queryParams) { _, purchases ->
+            if (!resolved.compareAndSet(false, true)) return@queryPurchasesAsync
+            mainHandler.removeCallbacks(timeoutRunnable)
+            val orphan = purchases.firstOrNull { p ->
+                p.purchaseState == Purchase.PurchaseState.PURCHASED && p.products.contains(productId)
+            }
+            if (orphan != null) {
+                BineuralLog.d("play-billing", "compra huérfana recuperada sin abrir Play: $productId")
+                // Resuelve acá directo (nunca pasa por onPurchasesUpdated, que
+                // es lo único que normalmente limpia pendingCallback) — hay
+                // que limpiarlo a mano, si no un onPurchasesUpdated posterior
+                // (de otra compra, o un evento tardío de Play) llamaría este
+                // mismo callback ya usado una segunda vez.
+                if (pendingCallback === onResult) pendingCallback = null
+                onResult(
+                    JSONObject()
+                        .put("purchaseToken", orphan.purchaseToken)
+                        .put("orderId", orphan.orderId ?: "")
+                        .put("productId", orphan.products.firstOrNull() ?: productId)
+                )
+            } else {
+                launchNewPurchase(billingClient, productId, isSubscription, onResult)
+            }
+        }
+    }
+
+    private fun launchNewPurchase(
         billingClient: BillingClient,
         productId: String,
         isSubscription: Boolean,
@@ -101,11 +173,17 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
                 val offerToken = details.subscriptionOfferDetails?.firstOrNull()?.offerToken
                 if (offerToken != null) productDetailsParams.setOfferToken(offerToken)
             }
-            val flowParams = BillingFlowParams.newBuilder()
+            val flowParamsBuilder = BillingFlowParams.newBuilder()
                 .setProductDetailsParamsList(listOf(productDetailsParams.build()))
-                .build()
+            // Correlaciona la compra con nuestro usuario del lado de Google —
+            // sin esto, RTDN (routers/payments.py::google_play_rtdn) no tiene
+            // forma de saber a quién otorgarle Premium si el cliente nunca
+            // vuelve a avisar (sesión muerta, app matada a mitad de compra).
+            AuthStore.userId(activity)?.takeIf { it.isNotBlank() }?.let { userId ->
+                flowParamsBuilder.setObfuscatedAccountId(userId)
+            }
             activity.runOnUiThread {
-                billingClient.launchBillingFlow(activity, flowParams)
+                billingClient.launchBillingFlow(activity, flowParamsBuilder.build())
             }
         }
     }
