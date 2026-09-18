@@ -295,7 +295,41 @@ object NotificationHelper {
             .build()
     }
 
-    /** Publica la alarma. Respeta el permiso POST_NOTIFICATIONS (Android 13+). */
+    // P6 — una misma alarma puede llegar a mostrarse por DOS caminos
+    // independientes: AlarmReceiver (AlarmManager local, programado de
+    // antemano) y VyneuralMessagingService (push FCM, que Play Services
+    // puede entregar tarde — típicamente recién cuando el teléfono recupera
+    // conexión/se reabre la app). Reportado en vivo: sonó bien estando la
+    // app cerrada y volvió a sonar al reabrirla — el FCM llegó tarde y
+    // ninguno de los dos caminos sabía que el otro ya la había mostrado.
+    // Este dedup por alarmId es el único punto en común entre ambos.
+    private const val DEDUP_PREFS = "bineural_alarm_dedup"
+    private const val DEDUP_WINDOW_MS = 5 * 60 * 1000L // > ALARM_RING_LIMIT_MS de sobra
+
+    private fun alreadyShownRecently(context: Context, alarmId: String): Boolean {
+        val prefs = context.getSharedPreferences(DEDUP_PREFS, Context.MODE_PRIVATE)
+        val last = prefs.getLong(alarmId, 0L)
+        return last != 0L && System.currentTimeMillis() - last < DEDUP_WINDOW_MS
+    }
+
+    private fun markShown(context: Context, alarmId: String) {
+        val prefs = context.getSharedPreferences(DEDUP_PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val editor = prefs.edit().putLong(alarmId, now)
+        // Limpieza oportunista: sin esto, cada alarma que alguna vez sonó
+        // queda para siempre en este SharedPreferences (nunca crece mucho,
+        // pero no hay razón para no barrerlo cuando ya pasó de sobra la
+        // ventana de dedup).
+        for ((key, value) in prefs.all) {
+            if (value is Long && now - value >= DEDUP_WINDOW_MS) editor.remove(key)
+        }
+        editor.apply()
+    }
+
+    /** Publica la alarma. Respeta el permiso POST_NOTIFICATIONS (Android 13+).
+     *  `alarmId`: si se pasa (AlarmReceiver / VyneuralMessagingService, NO el
+     *  botón de diagnóstico "Probar notificación"), deduplica contra el otro
+     *  camino de entrega — ver comentario arriba. */
     fun showAlarm(
         context: Context,
         title: String,
@@ -303,6 +337,7 @@ object NotificationHelper {
         freq: Double? = null,
         beat: Double? = null,
         wave: String? = null,
+        alarmId: String? = null,
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -310,6 +345,11 @@ object NotificationHelper {
             com.vyneural.bineural.util.BineuralLog.e("notif-channel", "showAlarm: POST_NOTIFICATIONS no concedido, notificación DESCARTADA")
             return
         }
+        if (alarmId != null && alreadyShownRecently(context, alarmId)) {
+            com.vyneural.bineural.util.BineuralLog.d("notif-channel", "showAlarm: alarmId=$alarmId ya mostrada por el otro camino, se omite el duplicado")
+            return
+        }
+        if (alarmId != null) markShown(context, alarmId)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         logChannelState(nm)
         nm.notify(NOTIF_ALARM, alarmNotification(context, title, body, freq, beat, wave))
