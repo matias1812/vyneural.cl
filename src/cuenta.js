@@ -21,7 +21,7 @@ import {
 import { listAlarms, deleteAlarm } from './api/alarms.js';
 import { listItineraries } from './api/itineraries.js';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
-import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick } from './api/billing.js';
+import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
 import { getStatus, onStatusChange, STATUS } from './api/status.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
 import { requestPermission } from './notifications.js';
@@ -356,6 +356,7 @@ function renderPremium(status, oneclick) {
   const text = $('cuenta-premium-text');
   const link = $('cuenta-premium-link');
   const ocWrap = $('cuenta-oneclick');
+  const gpWrap = $('cuenta-google-play');
   if (!badge || !text) return;
   currentPremiumPlan = status ? status.current_plan : null;
 
@@ -364,6 +365,7 @@ function renderPremium(status, oneclick) {
     badge.className = 'roadmap-status rs-bad';
     text.textContent = 'No se pudo consultar tu plan ahora — reintentá más tarde.';
     if (ocWrap) ocWrap.classList.add('hidden');
+    if (gpWrap) gpWrap.classList.add('hidden');
     return;
   }
   if (status.premium_lifetime) {
@@ -373,6 +375,7 @@ function renderPremium(status, oneclick) {
     if (link) link.textContent = 'Ver planes';
     // No vence — no hay nada que auto-renovar.
     if (ocWrap) ocWrap.classList.add('hidden');
+    if (gpWrap) gpWrap.classList.add('hidden');
     return;
   }
   if (status.is_premium && status.premium_until) {
@@ -386,10 +389,23 @@ function renderPremium(status, oneclick) {
     badge.className = 'roadmap-status rs-live';
     text.textContent = `Tu plan Premium${planLabel ? ` (${planLabel})` : ''} está activo hasta el ${until}.`;
     if (link) link.textContent = 'Renovar';
-    renderOneclick(oneclick);
+    // La auto-renovación vigente viene de UN SOLO canal a la vez (ver
+    // active_channel en payments.py::premium_status) — /cuenta muestra la
+    // gestión de ESE canal nada más, sin importar si se está viendo desde
+    // el sitio web o desde la WebView de la APK: ambos pegan al mismo
+    // backend y comparten la misma cuenta, así que alguien que contrató en
+    // un lado y entra por el otro ve exactamente lo mismo acá.
+    if (status.active_channel === 'google_play') {
+      if (ocWrap) ocWrap.classList.add('hidden');
+      renderGooglePlay(status);
+    } else {
+      if (gpWrap) gpWrap.classList.add('hidden');
+      renderOneclick(oneclick, until);
+    }
     return;
   }
   if (ocWrap) ocWrap.classList.add('hidden');
+  if (gpWrap) gpWrap.classList.add('hidden');
   if (status.had_premium_before) {
     // Venció, distinto de "nunca compró" — mismo current_plan de arriba
     // sirve para el link "Renovar" ir directo al plan correcto en /premium
@@ -406,12 +422,37 @@ function renderPremium(status, oneclick) {
   if (link) link.textContent = 'Ver planes';
 }
 
+// Google Play solo permite cancelar desde SU propia UI (la Billing Library
+// no deja que una app cancele en nombre del usuario) — esto es un link a
+// Play Store, no un endpoint nuestro. `?package=` deep-linkea directo a la
+// suscripción del usuario en Play; funciona igual en un navegador de
+// escritorio/móvil común y dentro de la WebView de la APK
+// (MainActivity.kt::shouldOverrideUrlLoading ya intercepta cualquier
+// https:// tocado adentro y lo abre en el navegador externo del sistema —
+// no hace falta ningún cambio nativo para esto).
+function renderGooglePlay(status) {
+  const wrap = $('cuenta-google-play');
+  const text = $('cuenta-google-play-text');
+  const link = $('cuenta-google-play-link');
+  if (!wrap || !text || !link) return;
+  wrap.classList.remove('hidden');
+  text.textContent = 'Te suscribiste desde la app de Android — la auto-renovación se cancela directamente en Google Play, no acá.';
+  const params = new URLSearchParams({ package: ANDROID_PACKAGE_ID });
+  const sku = GOOGLE_PLAY_PRODUCT_IDS[status.current_plan];
+  if (sku) params.set('sku', sku);
+  link.href = `https://play.google.com/store/account/subscriptions?${params.toString()}`;
+}
+
 // `oneclick` es el resultado de oneclickStatus() (null si el pedido falló).
 // `state` viene calculado del backend (ver OneclickStatusOut): "none" |
-// "active" | "struggling" (activa pero con cobros fallidos recientes, sigue
-// reintentando) | "gave_up" (se desactivó sola tras agotar los reintentos —
-// antes esto se veía IDÉNTICO a "none", sin ninguna pista de qué pasó).
-function renderOneclick(oneclick) {
+// "cancelled" (canceló a mano, o se desactivó la cuenta — hubo
+// auto-renovación real y se apagó) | "active" | "struggling" (activa pero
+// con cobros fallidos recientes, sigue reintentando) | "gave_up" (se
+// desactivó sola tras agotar los reintentos — antes "cancelled" y "gave_up"
+// se veían IDÉNTICOS a "none", sin ninguna pista de qué había pasado).
+// `premiumUntilText` es la fecha ya formateada que arma renderPremium() —
+// se reusa acá para el mensaje de "cancelaste, seguís activo hasta el...".
+function renderOneclick(oneclick, premiumUntilText) {
   const wrap = $('cuenta-oneclick');
   const text = $('cuenta-oneclick-text');
   const activateBtn = $('cuenta-oneclick-activate');
@@ -422,7 +463,12 @@ function renderOneclick(oneclick) {
   const card = oneclick && oneclick.card_type && oneclick.card_last_digits ? `${oneclick.card_type} •••• ${oneclick.card_last_digits}` : 'tarjeta guardada';
   const state = (oneclick && oneclick.state) || 'none';
 
-  if (state === 'struggling') {
+  if (state === 'cancelled') {
+    text.textContent = `Cancelaste la auto-renovación — tu Premium sigue activo hasta el ${premiumUntilText || '—'}. Podés reactivarla cuando quieras.`;
+    activateBtn.classList.remove('hidden');
+    updateCardBtn.classList.add('hidden');
+    cancelBtn.classList.add('hidden');
+  } else if (state === 'struggling') {
     text.textContent = `Auto-renovación activa (${card}), pero el último cobro falló (ya van ${oneclick.failed_attempts} intentos) — revisá que la tarjeta esté vigente.`;
     activateBtn.classList.add('hidden');
     updateCardBtn.classList.remove('hidden');

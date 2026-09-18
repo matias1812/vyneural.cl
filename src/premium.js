@@ -6,15 +6,18 @@
 
 import './style.css';
 import { getAccessToken } from './api/client.js';
-import { listPlans, createPayment, inscribeOneclick, premiumStatus, oneclickStatus, verifyGooglePlayPurchase } from './api/billing.js';
+import {
+  listPlans,
+  createPayment,
+  inscribeOneclick,
+  premiumStatus,
+  oneclickStatus,
+  verifyGooglePlayPurchase,
+  GOOGLE_PLAY_PRODUCT_IDS,
+} from './api/billing.js';
 import { detectNativeBridge, startPlayPurchase } from './platform/native-bridge.js';
 import { initStarfield } from './starfield.js';
 import { confirmModal } from './ui/confirm-modal.js';
-
-// IDs de producto/suscripción tal como se crean en Play Console — mismo
-// mapeo que el backend (app/billing/plans.py::GOOGLE_PLAY_PRODUCT_IDS),
-// actualizar ahí y acá juntos si cambian.
-const GOOGLE_PLAY_PRODUCT_IDS = { monthly: 'premium_monthly', annual: 'premium_annual', lifetime: 'premium_lifetime' };
 
 const $ = (id) => document.getElementById(id);
 

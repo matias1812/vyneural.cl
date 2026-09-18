@@ -63,3 +63,11 @@ export async function cancelOneclick() {
 export async function verifyGooglePlayPurchase(purchaseToken, productId) {
   return post('/api/v1/payments/google-play/verify', { purchase_token: purchaseToken, product_id: productId });
 }
+
+// IDs de producto/suscripción tal como se crean en Play Console — mismo
+// mapeo que el backend (app/billing/plans.py::GOOGLE_PLAY_PRODUCT_IDS) y
+// que android/app/build.gradle::applicationId. Actualizar los tres juntos
+// si cambian. Compartido entre premium.js (comprar) y cuenta.js (armar el
+// link de "cancelar en Google Play").
+export const GOOGLE_PLAY_PRODUCT_IDS = { monthly: 'premium_monthly', annual: 'premium_annual', lifetime: 'premium_lifetime' };
+export const ANDROID_PACKAGE_ID = 'com.vyneural.bineural';
