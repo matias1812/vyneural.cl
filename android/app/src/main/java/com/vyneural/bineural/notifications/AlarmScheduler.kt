@@ -56,6 +56,7 @@ class AlarmScheduler(private val context: Context) {
         vibrationId: String = "default",
         snoozeEnabled: Boolean = false,
         snoozeMinutes: Int = 5,
+        localId: String? = null,
     ) {
         val record = JSONObject()
             .put("title", title)
@@ -67,6 +68,15 @@ class AlarmScheduler(private val context: Context) {
             .put("snoozeEnabled", snoozeEnabled)
             .put("snoozeMinutes", snoozeMinutes)
         if (soundUri != null) record.put("soundUri", soundUri)
+        // localId (config.localId del backend) es el id que usa el dedup de
+        // NotificationHelper.showAlarm — DISTINTO de `alarmId` (la clave de
+        // este SharedPreferences/PendingIntent, que tiene que seguir siendo
+        // el id del servidor para que sync/cancelación funcionen). Sin esto,
+        // AlarmReceiver mostraba la alarma con el id crudo del servidor
+        // mientras VyneuralMessagingService (FCM) la mostraba con localId —
+        // dos claves distintas para la MISMA alarma, dedup roto, el
+        // duplicado original podía reaparecer.
+        if (localId != null) record.put("localId", localId)
         // Deep link: al tocar la notificación, MainActivity abre la web en esta
         // frecuencia exacta en vez de la pantalla por defecto (ver AlarmReceiver
         // + NotificationHelper). Opcional: alarmas sin config (legado) siguen
@@ -168,6 +178,7 @@ class AlarmScheduler(private val context: Context) {
                     j.optString("vibrationId", "default"),
                     j.optBoolean("snoozeEnabled", false),
                     j.optInt("snoozeMinutes", 5),
+                    j.optString("localId").takeIf { it.isNotBlank() },
                 )
             } else {
                 prefs.edit().remove(alarmId).apply()
@@ -214,18 +225,19 @@ class AlarmScheduler(private val context: Context) {
                 val vibrationId = j.optString("vibrationId", "default")
                 val snoozeEnabled = j.optBoolean("snoozeEnabled", false)
                 val snoozeMinutes = j.optInt("snoozeMinutes", 5)
+                val localId = j.optString("localId").takeIf { it.isNotBlank() }
                 if (days.isNotEmpty() && hh >= 0 && mm >= 0) {
                     val next = nextOccurrence(hh, mm, days, System.currentTimeMillis() + 60_000)
                     if (next != null) {
                         schedule(
                             id, j.optString("title", "Vyneural"), j.optString("body", ""), next, days,
-                            freq, beat, wave, soundUri, vibrationId, snoozeEnabled, snoozeMinutes,
+                            freq, beat, wave, soundUri, vibrationId, snoozeEnabled, snoozeMinutes, localId,
                         )
                     }
                 } else {
                     schedule(
                         id, j.optString("title", "Vyneural"), j.optString("body", ""), j.optLong("at"), null,
-                        freq, beat, wave, soundUri, vibrationId, snoozeEnabled, snoozeMinutes,
+                        freq, beat, wave, soundUri, vibrationId, snoozeEnabled, snoozeMinutes, localId,
                     )
                 }
             }

@@ -27,7 +27,14 @@ class AlarmReceiver : BroadcastReceiver() {
             if (record.has("freq")) record.optDouble("freq") else null,
             if (record.has("beat")) record.optDouble("beat") else null,
             if (record.has("wave")) record.optString("wave") else null,
-            alarmId = id,
+            // El dedup de showAlarm() compara este alarmId contra el que
+            // manda VyneuralMessagingService (FCM) para la MISMA alarma —
+            // que es localId, no el id crudo del servidor (ver AlarmSync.kt
+            // y reminders.py: local_id = cfg.get("localId") or str(alarm.id)).
+            // Mismo fallback que el backend: si no hay localId guardado
+            // (alarma vieja, o creada sin pasar por la web), usar el id del
+            // servidor como antes.
+            alarmId = record.optString("localId").takeIf { it.isNotBlank() } ?: id,
             soundUri = record.optString("soundUri").takeIf { it.isNotBlank() },
             vibrationId = record.optString("vibrationId", "default"),
             snoozeEnabled = record.optBoolean("snoozeEnabled", false),

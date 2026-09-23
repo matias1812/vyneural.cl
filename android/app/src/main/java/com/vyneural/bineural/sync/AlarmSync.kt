@@ -147,9 +147,17 @@ object AlarmSync {
             val vibrationId = config?.optString("vibrationId", "default") ?: "default"
             val snoozeEnabled = config?.optBoolean("snoozeEnabled", false) ?: false
             val snoozeMinutes = config?.optInt("snoozeMinutes", 5) ?: 5
+            // localId (id LOCAL generado por el cliente web, distinto del id
+            // del servidor) es lo que usa el dedup de NotificationHelper —
+            // mismo campo que ya manda el backend en el payload de FCM (ver
+            // reminders.py: local_id = cfg.get("localId") or str(alarm.id)).
+            // Sin pasarlo acá, este camino (AlarmManager nativo) deduplicaba
+            // con el id crudo del servidor mientras FCM deduplicaba con
+            // localId — dos claves distintas para la misma alarma.
+            val localId = config?.optString("localId")?.takeIf { it.isNotBlank() }
             scheduler.schedule(
                 id, title, buildBody(config, title), atMs, days, freq, beat, wave,
-                soundUri, vibrationId, snoozeEnabled, snoozeMinutes,
+                soundUri, vibrationId, snoozeEnabled, snoozeMinutes, localId,
             )
         }
 
