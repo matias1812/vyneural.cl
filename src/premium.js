@@ -14,6 +14,7 @@ import {
   oneclickStatus,
   verifyGooglePlayPurchase,
   GOOGLE_PLAY_PRODUCT_IDS,
+  ANDROID_PACKAGE_ID,
 } from './api/billing.js';
 import { detectNativeBridge, startPlayPurchase } from './platform/native-bridge.js';
 import { initStarfield } from './starfield.js';
@@ -274,6 +275,13 @@ function renderPlans(plans, status, oneclick) {
   // funcionaba, dejando una inscripción "pending" huérfana (bug real visto
   // en vivo: ver también el 409 espejo en payments.py::oneclick_inscribe).
   const activePlanKey = oneclick && oneclick.active ? oneclick.plan : null;
+  // Bug real: si el Premium vigente ya lo sostiene Google Play (comprado
+  // desde la app Android), activar Oneclick acá abriría un SEGUNDO canal de
+  // auto-renovación en paralelo — doble cobro en el próximo ciclo. El
+  // backend ya lo bloquea con un 409 (ver payments.py::oneclick_inscribe),
+  // esto solo evita ofrecer el botón que sabemos que va a fallar. Lifetime
+  // no se ve afectado: es pago único, no auto-renueva.
+  const googlePlayActive = !!(status && status.active_channel === 'google_play');
   let rendered = 0;
   for (const key of PLAN_ORDER) {
     const plan = plans[key];
@@ -283,6 +291,7 @@ function renderPlans(plans, status, oneclick) {
     const pitch = pricingPitch(key, plans);
     const featured = key === FEATURED_PLAN;
     const isActiveAutoRenew = key === activePlanKey;
+    const disableForGooglePlay = googlePlayActive && key !== 'lifetime';
     const card = document.createElement('div');
     card.className = `page-card premium-plan premium-plan-${key}${featured ? ' premium-plan-featured' : ''}`;
     const priceLine = plan.days
@@ -296,6 +305,16 @@ function renderPlans(plans, status, oneclick) {
       buttonHTML = `
         <button type="button" class="cuenta-btn" disabled>Ya la tenés</button>
         <p class="premium-reassurance">${REASSURANCE[key]}</p>
+      `;
+    } else if (disableForGooglePlay) {
+      const gpParams = new URLSearchParams({ package: ANDROID_PACKAGE_ID });
+      const gpSku = GOOGLE_PLAY_PRODUCT_IDS[status.current_plan];
+      if (gpSku) gpParams.set('sku', gpSku);
+      buttonHTML = `
+        <button type="button" class="cuenta-btn" disabled>Ya sos Premium</button>
+        <p class="premium-reassurance">Ya sos Premium vía Google Play — gestioná o cancelá tu suscripción desde
+          <a href="https://play.google.com/store/account/subscriptions?${gpParams.toString()}" target="_blank" rel="noopener">Google Play</a>,
+          no hace falta (ni conviene) activar acá una auto-renovación con tarjeta.</p>
       `;
     } else if (isActiveAutoRenew) {
       buttonHTML = `
