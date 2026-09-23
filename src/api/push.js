@@ -5,6 +5,7 @@
 // muestra la notificación; el usuario decide con un gesto.
 
 import { cachedGet, post, del } from './client.js';
+import { detectNativeBridge } from '../platform/native-bridge.js';
 
 // ── Estado real del backend de push (compartido) ───────────────────────────
 // La UI del generador, /diagnostico y el manager de notificaciones necesitan
@@ -32,6 +33,21 @@ export async function pushStatus() {
 // configurado. Devuelve { configured, subscribed } — nunca lanza si falta
 // HTTPS, permisos o SW (la PWA sigue funcionando igual).
 export async function subscribeToPush() {
+  // Dentro de la APK, FCM ya cubre este dispositivo (push nativo, ver
+  // backend/app/push/fcm.py::send_to_user / VyneuralMessagingService.kt) —
+  // la WebView de Chromium SÍ soporta PushManager, así que sin este guard un
+  // usuario APK terminaba con una PushSubscription (Web Push) VIVA además de
+  // su Device.fcm_token, pudiendo disparar una notificación duplicada si el
+  // fallback de Web Push en reminders.py::_send_one_reminder se activaba con
+  // esa suscripción vieja todavía activa. Mismo helper de detección que ya
+  // usa premium.js — no se inventa un tercer método.
+  if (detectNativeBridge()?.platform === 'android') {
+    // Limpieza de instalaciones previas a este fix: si ya había una
+    // PushSubscription viva de antes, se da de baja acá para no dejar dos
+    // canales activos en paralelo en el próximo tick.
+    await unsubscribeFromPush().catch(() => {});
+    return { configured: false, subscribed: false, reason: 'native-push-covers-apk' };
+  }
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     return { configured: false, subscribed: false, reason: 'unsupported' };
   }
