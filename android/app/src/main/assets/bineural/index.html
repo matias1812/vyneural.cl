@@ -68,15 +68,15 @@
         "publisher": { "@type": "Organization", "name": "Vyneural" }
       }
     </script>
-    <script type="module" src="./assets/main-BRxP4VIV.js"></script>
+    <script type="module" src="./assets/main-DD0khCC1.js"></script>
     <link rel="modulepreload" href="./assets/site-Dhkz-rXc.js">
-    <link rel="modulepreload" href="./assets/starfield-BGutfZVU.js">
+    <link rel="modulepreload" href="./assets/starfield--l13yVb0.js">
     <link rel="modulepreload" href="./assets/billing-RyYNvCTy.js">
     <link rel="modulepreload" href="./assets/premium-gate-BfC1FLxG.js">
     <link rel="modulepreload" href="./assets/preload-helper-Dp1pzeXC.js">
     <link rel="modulepreload" href="./assets/alarms-Bt4763WQ.js">
     <link rel="stylesheet" href="./assets/site-U2crUEgv.css">
-    <link rel="stylesheet" href="./assets/starfield-L0Pfp0-x.css">
+    <link rel="stylesheet" href="./assets/starfield-CbDeC9J_.css">
   </head>
   <body>
     <div id="loader" class="loader">
@@ -638,38 +638,44 @@
              en vez de las clases prestadas de /cuenta) para que no se vea
              "pegado" al resto. Exclusivo de la APK: no hay canal de
              notificación real que los respete en web/PWA. -->
-        <details id="alarm-settings" class="alarm-troubleshoot in-app-only">
+        <details id="alarm-settings" class="alarm-troubleshoot alarm-settings-card in-app-only">
           <summary>⚙️ Ajustes de sonido y vibración</summary>
-          <label class="alarm-field">
-            <span class="alarm-label">📳 Vibración</span>
-            <select id="alarm-vibration" class="alarm-input">
-              <option value="default">Predeterminada</option>
-              <option value="short">Corta</option>
-              <option value="long">Larga</option>
-              <option value="pulse">Pulsos</option>
-            </select>
-          </label>
-          <label class="alarm-field">
-            <span class="alarm-label">🔊 Sonido</span>
-            <button type="button" class="alarm-input alarm-sound-btn" id="alarm-sound-pick">
-              <span id="alarm-sound-name">Predeterminado</span>
-            </button>
-          </label>
-          <label class="alarm-field">
-            <span class="alarm-label it-step-notify-wrap">
-              <input type="checkbox" id="alarm-snooze-enabled" />
-              ⏰ Permitir posponer
-            </span>
-          </label>
-          <label class="alarm-field">
-            <span class="alarm-label">Minutos al posponer</span>
-            <select id="alarm-snooze-minutes" class="alarm-input">
-              <option value="5">5</option>
-              <option value="10">10</option>
-              <option value="15">15</option>
-              <option value="20">20</option>
-            </select>
-          </label>
+          <div class="alarm-settings-grid">
+            <label class="alarm-field">
+              <span class="alarm-label">📳 Vibración</span>
+              <select id="alarm-vibration" class="alarm-input">
+                <option value="default">Predeterminada</option>
+                <option value="short">Corta</option>
+                <option value="long">Larga</option>
+                <option value="pulse">Pulsos</option>
+              </select>
+            </label>
+            <label class="alarm-field">
+              <span class="alarm-label">🔊 Sonido</span>
+              <button type="button" class="alarm-input alarm-sound-btn" id="alarm-sound-pick">
+                <span id="alarm-sound-name">Predeterminado</span>
+                <span class="alarm-sound-btn-chevron" aria-hidden="true">✎</span>
+              </button>
+            </label>
+          </div>
+          <div class="alarm-settings-grid">
+            <label class="alarm-field alarm-snooze-toggle">
+              <span class="alarm-label">⏰ Posponer</span>
+              <span class="alarm-checkbox-row">
+                <input type="checkbox" id="alarm-snooze-enabled" />
+                Permitir posponer
+              </span>
+            </label>
+            <label class="alarm-field">
+              <span class="alarm-label">Minutos al posponer</span>
+              <select id="alarm-snooze-minutes" class="alarm-input">
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="20">20</option>
+              </select>
+            </label>
+          </div>
         </details>
 
         <!-- Recorte de texto: los bloques de estado/permisos/troubleshooting
