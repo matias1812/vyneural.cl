@@ -629,38 +629,44 @@
              en vez de las clases prestadas de /cuenta) para que no se vea
              "pegado" al resto. Exclusivo de la APK: no hay canal de
              notificación real que los respete en web/PWA. -->
-        <details id="alarm-settings" class="alarm-troubleshoot in-app-only">
+        <details id="alarm-settings" class="alarm-troubleshoot alarm-settings-card in-app-only">
           <summary>⚙️ Ajustes de sonido y vibración</summary>
-          <label class="alarm-field">
-            <span class="alarm-label">📳 Vibración</span>
-            <select id="alarm-vibration" class="alarm-input">
-              <option value="default">Predeterminada</option>
-              <option value="short">Corta</option>
-              <option value="long">Larga</option>
-              <option value="pulse">Pulsos</option>
-            </select>
-          </label>
-          <label class="alarm-field">
-            <span class="alarm-label">🔊 Sonido</span>
-            <button type="button" class="alarm-input alarm-sound-btn" id="alarm-sound-pick">
-              <span id="alarm-sound-name">Predeterminado</span>
-            </button>
-          </label>
-          <label class="alarm-field">
-            <span class="alarm-label it-step-notify-wrap">
-              <input type="checkbox" id="alarm-snooze-enabled" />
-              ⏰ Permitir posponer
-            </span>
-          </label>
-          <label class="alarm-field">
-            <span class="alarm-label">Minutos al posponer</span>
-            <select id="alarm-snooze-minutes" class="alarm-input">
-              <option value="5">5</option>
-              <option value="10">10</option>
-              <option value="15">15</option>
-              <option value="20">20</option>
-            </select>
-          </label>
+          <div class="alarm-settings-grid">
+            <label class="alarm-field">
+              <span class="alarm-label">📳 Vibración</span>
+              <select id="alarm-vibration" class="alarm-input">
+                <option value="default">Predeterminada</option>
+                <option value="short">Corta</option>
+                <option value="long">Larga</option>
+                <option value="pulse">Pulsos</option>
+              </select>
+            </label>
+            <label class="alarm-field">
+              <span class="alarm-label">🔊 Sonido</span>
+              <button type="button" class="alarm-input alarm-sound-btn" id="alarm-sound-pick">
+                <span id="alarm-sound-name">Predeterminado</span>
+                <span class="alarm-sound-btn-chevron" aria-hidden="true">✎</span>
+              </button>
+            </label>
+          </div>
+          <div class="alarm-settings-grid">
+            <label class="alarm-field alarm-snooze-toggle">
+              <span class="alarm-label">⏰ Posponer</span>
+              <span class="alarm-checkbox-row">
+                <input type="checkbox" id="alarm-snooze-enabled" />
+                Permitir posponer
+              </span>
+            </label>
+            <label class="alarm-field">
+              <span class="alarm-label">Minutos al posponer</span>
+              <select id="alarm-snooze-minutes" class="alarm-input">
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="20">20</option>
+              </select>
+            </label>
+          </div>
         </details>
 
         <!-- Recorte de texto: los bloques de estado/permisos/troubleshooting

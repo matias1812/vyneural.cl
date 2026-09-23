@@ -1251,6 +1251,26 @@ function stop(withSummary) {
   if (summary) showSessionSummary(summary);
 }
 
+// El gating de Premium (custom/premiumOnly, ver el click de la tarjeta más
+// arriba) solo se chequeaba al SELECCIONAR el estado — si el Premium vencía
+// a mitad de una sesión ya iniciada, esta seguía sonando indefinidamente en
+// un estado que ya no debería estar disponible. Reconsulta periódica
+// (mismo orden que el TTL de 30s de isPremiumUser, ver premium-gate.js) que
+// solo actúa cuando de verdad hace falta: sesión reproduciendo Y en un
+// estado gateado. isPremiumUser() ya devuelve `true` ante un error de red
+// (nunca castiga a quien ya pagó por una caída pasajera) — acá solo se
+// corta si el backend confirma explícitamente que ya no es premium.
+setInterval(async () => {
+  if (!playing) return;
+  if (!(selected.custom || selected.premiumOnly)) return;
+  const premium = await isPremiumUser();
+  if (premium) return;
+  showToast('⚠️ Tu Premium terminó: la sesión se detuvo.');
+  stop(false);
+  const fallback = STATES.find((s) => !s.custom && !s.premiumOnly) || STATES[0];
+  selectState(fallback);
+}, 60000);
+
 // Pausa real (lock screen / notificación / botón de la app): congela el motor
 // y el temporizador (remanente guardado en pausedRemainingMs) SIN terminar la
 // sesión — no se registra historial ni se resetea el reloj. En la APK el
@@ -3878,6 +3898,18 @@ const alarmHistoryWrap = document.getElementById('alarm-history-wrap');
 const alarmHistoryList = document.getElementById('alarm-history-list');
 const alarmTestNotification = document.getElementById('alarm-test-notification');
 
+// Minutos al posponer solo importa si "Permitir posponer" está activado —
+// atenuarlo/deshabilitarlo cuando no aplica es más claro que dejarlo
+// habilitado sin efecto.
+function syncSnoozeMinutesEnabled() {
+  if (!alarmSnoozeMinutes || !alarmSnoozeEnabled) return;
+  alarmSnoozeMinutes.disabled = !alarmSnoozeEnabled.checked;
+}
+if (alarmSnoozeEnabled) {
+  alarmSnoozeEnabled.addEventListener('change', syncSnoozeMinutesEnabled);
+  syncSnoozeMinutesEnabled();
+}
+
 // P7 — sonido elegido con el picker del sistema: vive fuera del form porque
 // no hay que perderlo al re-renderizar (mismo criterio que
 // rutina.js::pendingReminderSoundUri).
@@ -4322,6 +4354,7 @@ function beginEditAlarm(alarm) {
   if (alarmSoundName) alarmSoundName.textContent = alarm.soundUri ? 'Tono personalizado' : 'Predeterminado';
   if (alarmSnoozeEnabled) alarmSnoozeEnabled.checked = !!alarm.snoozeEnabled;
   if (alarmSnoozeMinutes) alarmSnoozeMinutes.value = String(alarm.snoozeMinutes || 5);
+  syncSnoozeMinutesEnabled();
   if (alarmEditCancel) alarmEditCancel.classList.remove('hidden');
   alarmSave.textContent = 'Guardar cambios';
   refreshAlarmPerm();
@@ -4336,6 +4369,7 @@ if (alarmEditCancel) {
     if (alarmSoundName) alarmSoundName.textContent = 'Predeterminado';
     if (alarmSnoozeEnabled) alarmSnoozeEnabled.checked = false;
     if (alarmSnoozeMinutes) alarmSnoozeMinutes.value = '5';
+    syncSnoozeMinutesEnabled();
   });
 }
 
