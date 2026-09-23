@@ -83,7 +83,13 @@ object NotificationHelper {
     // NotificationHelper. El bump igual se hace por las dudas (varias sesiones
     // de prueba dispararon/descartaron notificaciones en v9, mismo patrón que
     // v7/v9), pero NO reemplaza confirmar si FCM está configurado en producción.
-    const val CHANNEL_ALARMS = "bineural_alarms_v10"
+    // v11 (2026-09-23) — confirmado en vivo por logcat (logChannelState):
+    // v10 ya estaba en importance=2 (LOW) en el dispositivo de prueba,
+    // degradado por Android durante las mismas rondas de testing de esta
+    // sesión (crear/descartar notificaciones de prueba repetidamente). Mismo
+    // patrón que v6/v7/v8/v9 — un canal ya creado en el dispositivo no se
+    // puede "reparar" con código, solo un ID nuevo empieza limpio.
+    const val CHANNEL_ALARMS = "bineural_alarms_v11"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.

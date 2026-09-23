@@ -26,20 +26,44 @@ object AuthStore {
     private fun prefs(context: Context): SharedPreferences? {
         cached?.let { return it }
         return synchronized(this) {
-            cached ?: runCatching {
-                val masterKey = MasterKey.Builder(context.applicationContext)
-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                    .build()
-                EncryptedSharedPreferences.create(
-                    context.applicationContext,
-                    PREFS,
-                    masterKey,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-                )
-            }.onFailure {
-                BineuralLog.e("auth-store", "no se pudo inicializar el storage cifrado", it)
-            }.getOrNull()?.also { cached = it }
+            cached ?: createEncryptedPrefs(context, allowReset = true)?.also { cached = it }
+        }
+    }
+
+    private fun createEncryptedPrefs(context: Context, allowReset: Boolean): SharedPreferences? {
+        return runCatching {
+            val masterKey = MasterKey.Builder(context.applicationContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                context.applicationContext,
+                PREFS,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }.getOrElse { e ->
+            BineuralLog.e("auth-store", "no se pudo inicializar el storage cifrado", e)
+            // Bug real visto en vivo: AEADBadTagException/KeyStoreException
+            // "Signature/MAC verification failed" — la clave del Keystore ya
+            // no puede desencriptar el archivo guardado (el sistema la
+            // invalidó/rotó por su cuenta en algún momento — pasa, poco
+            // frecuente pero documentado en Jetpack Security). Sin este
+          // reset, este storage queda roto PARA SIEMPRE en cada arranque:
+            // AuthStore.save()/token() nunca vuelven a funcionar, la sesión
+            // nativa nunca se guarda, y AlarmSync.run() corta apenas arranca
+            // (siempre ve "sin sesión") — el dispositivo NUNCA llega a
+            // reportar su token FCM. Girar la llave es imposible (la vieja
+            // ciphertext quedó huérfana de una clave que ya no existe); lo
+            // único que se puede hacer es borrar el archivo y empezar de
+            // cero (pierde la sesión guardada UNA vez — el próximo login la
+            // vuelve a guardar con una clave sana).
+            if (allowReset) {
+                context.applicationContext.deleteSharedPreferences(PREFS)
+                createEncryptedPrefs(context, allowReset = false)
+            } else {
+                null
+            }
         }
     }
 
