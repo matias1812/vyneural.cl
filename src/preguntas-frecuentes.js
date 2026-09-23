@@ -83,10 +83,6 @@ const FAQ = {
       q: 'Mi teléfono (Xiaomi, Huawei, Samsung) no me avisa. ¿Qué hago?',
       a: 'Si cerrás la app con “Eliminar” desde recientes o la forzás a detener, Android congela sus alarmas. Es una limitación de los fabricantes, no de la app: no fuerces el cierre y desactivá la optimización agresiva de batería para Vyneural si la ofrece tu teléfono.',
     },
-    {
-      q: '¿Cómo descargo la APK?',
-      a: 'Desde la página <a href="/descargar">Descargar APK</a> de esta web. Permití la instalación desde fuentes desconocidas cuando Android lo pida (es la app de Vyneural, firmada por nosotros).',
-    },
   ],
 };
 

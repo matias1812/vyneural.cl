@@ -565,8 +565,23 @@ function renderGate({ retryOnBoot = false } = {}) {
   else loadContent();
 }
 
+// Mismo patrón que src/cuenta.js::renderPremium (ocWrap/gpWrap): el texto
+// legal/de pago tiene que coincidir con el medio de pago REAL usado en este
+// entorno, nunca uno genérico — antes esta nota siempre mostraba el copy de
+// Transbank/Webpay aunque la compra en Android pase 100% por Google Play
+// (bug real: descripción incorrecta del procesador de pago para compras
+// Android — riesgo de política de Play y de exactitud SERNAC).
+function renderPaymentNote() {
+  const isAndroid = detectNativeBridge()?.platform === 'android';
+  const webNote = $('premium-note-web');
+  const androidNote = $('premium-note-android');
+  if (webNote) webNote.classList.toggle('hidden', isAndroid);
+  if (androidNote) androidNote.classList.toggle('hidden', !isAndroid);
+}
+
 function init() {
   renderGate({ retryOnBoot: true });
+  renderPaymentNote();
   resumePendingGooglePlayPurchase();
   const loginBtn = $('premium-login-btn');
   const regBtn = $('premium-register-btn');
