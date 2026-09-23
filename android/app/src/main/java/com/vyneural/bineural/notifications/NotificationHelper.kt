@@ -75,7 +75,15 @@ object NotificationHelper {
     // volver a pasar con el uso normal (no es exclusivo de testing), ver
     // permissions-modal.js/main.js: ahora la UI detecta importancia degradada
     // y lo señala de forma prominente en vez de depender de otro bump manual.
-    const val CHANNEL_ALARMS = "bineural_alarms_v9"
+    // v10: primera prueba real post-Play (v1.7.8, instalado desde la consola,
+    // no por adb) reportó el mismo síntoma otra vez — pero la sospecha
+    // principal esta vez es que el push nunca llegó por FCM en absoluto
+    // (posible FIREBASE_CREDENTIALS_JSON sin configurar en Render) y cayó al
+    // fallback de Web Push, que nunca pasa por este canal ni por
+    // NotificationHelper. El bump igual se hace por las dudas (varias sesiones
+    // de prueba dispararon/descartaron notificaciones en v9, mismo patrón que
+    // v7/v9), pero NO reemplaza confirmar si FCM está configurado en producción.
+    const val CHANNEL_ALARMS = "bineural_alarms_v10"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.
@@ -184,7 +192,7 @@ object NotificationHelper {
     )
 
     /** Canal por combinación (sonido elegido, patrón de vibración): los
-     *  canales son inmutables por ID una vez creados (ver historial v2→v9
+     *  canales son inmutables por ID una vez creados (ver historial v2→v10
      *  arriba) — la única forma de tener sonido/vibración DISTINTOS por
      *  alarma es un canal propio por combinación, creado la primera vez que
      *  se usa. La combinación por defecto (sin sonido custom, vibración
@@ -197,7 +205,11 @@ object NotificationHelper {
         val vibKey = if (VIBRATIONS.containsKey(vibrationId)) vibrationId else "default"
         if (soundUri.isNullOrBlank() && vibKey == "default") return CHANNEL_ALARMS
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CHANNEL_ALARMS
-        val id = "bineural_alarms_v9_" + kotlin.math.abs((soundUri.orEmpty() + "|" + vibKey).hashCode())
+        // Deriva del mismo CHANNEL_ALARMS de arriba (no un literal aparte) —
+        // antes este prefijo estaba hardcodeado como "bineural_alarms_v9_",
+        // desincronizado del bump de la constante de arriba, así que un
+        // futuro v11/v12 solo tocaría uno de los dos lugares por accidente.
+        val id = "${CHANNEL_ALARMS}_" + kotlin.math.abs((soundUri.orEmpty() + "|" + vibKey).hashCode())
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(id) == null) {
             val alarmSound = soundUri?.let { android.net.Uri.parse(it) }
