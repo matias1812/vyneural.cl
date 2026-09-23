@@ -154,6 +154,10 @@ self.addEventListener('push', (e) => {
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     renotify: true,
+    // Sin esto, un Web Push (fallback cuando FCM no entrega, ver
+    // reminders.py::_send_one_reminder) llegaba sin vibración — a diferencia
+    // del camino nativo (NotificationHelper.kt), que sí la aplica siempre.
+    vibrate: data.kind === 'alarm' ? [300, 200, 300, 200, 300] : [200],
     data: {
       url: data.url || '/',
       kind: data.kind || 'generic', // frequency | itinerary | alarm | generic
