@@ -146,21 +146,7 @@ const MODAL_HTML = `
       Vyneural usa estos permisos para seguir sonando limpio fuera de la app
       (pantalla bloqueada o en segundo plano) y para avisarte de los recordatorios.
     </p>
-    <div class="perm-diff-box" id="perm-diff-box">
-      <div class="pdb-title">Diferencias de plataforma</div>
-      <div class="pdb-grid">
-        <div class="pdb-item"><b>Audio Background</b><span id="pdb-audio">Web: Limitado<br>APK: Foreground Service</span></div>
-        <div class="pdb-item"><b>Alarmas</b><span id="pdb-alarms">Web: Solo app abierta<br>APK: Scheduler del SO</span></div>
-        <div class="pdb-item"><b>Notificaciones</b><span id="pdb-notif">Web: Push (con back)<br>APK: Locales (sin back)</span></div>
-      </div>
-    </div>
-    <div class="perm-row" id="perm-platform-row" style="display:none"><span>Plataforma</span><b id="perm-platform" class="perm-state">—</b></div>
     <div class="perm-row"><span>Notificaciones</span><b id="perm-notif" class="perm-state">—</b></div>
-    <div class="perm-row"><span>Control del reproductor (Media Session)</span><b id="perm-mediasession" class="perm-state">—</b></div>
-    <div class="perm-row"><span>Pantalla activa (Wake Lock)</span><b id="perm-wakelock" class="perm-state">—</b></div>
-    <div class="perm-row"><span>Notificaciones push (servidor)</span><b id="perm-push" class="perm-state">—</b></div>
-    <div class="perm-row" id="perm-battery-row" style="display:none"><span>Optimización de batería</span><b id="perm-battery" class="perm-state">—</b></div>
-    <div class="perm-row" id="perm-autostart-row" style="display:none"><span>Inicio automático (fabricante)</span><b id="perm-autostart" class="perm-state">—</b></div>
     <div class="perm-row"><span>Permisos habilitados en Vyneural</span><b id="perm-enabled" class="perm-state">—</b></div>
     <div class="perm-actions">
       <button id="perm-on" class="auth-submit">Activar permisos</button>
@@ -170,6 +156,29 @@ const MODAL_HTML = `
       <button id="perm-battery-settings" class="perm-test hidden">Quitar restricción de batería</button>
       <button id="perm-autostart-settings" class="perm-test hidden">Revisar inicio automático</button>
     </div>
+    <!-- Recorte de texto ("agota la vista" en mobile, reportado en vivo):
+         el detalle de plataforma/estado puro va colapsado acá — mismo patrón
+         que #alarm-troubleshoot en index.html. renderPermissionState() lo
+         auto-abre solo si hay algo realmente accionable ahí adentro
+         (batería/autostart/alarmas exactas pendientes), reutilizando las
+         mismas condiciones que ya muestran esos botones. -->
+    <details id="perm-details" class="alarm-troubleshoot">
+      <summary>Ver más detalles</summary>
+      <div class="perm-diff-box" id="perm-diff-box">
+        <div class="pdb-title">Diferencias de plataforma</div>
+        <div class="pdb-grid">
+          <div class="pdb-item"><b>Audio Background</b><span id="pdb-audio">Web: Limitado<br>APK: Foreground Service</span></div>
+          <div class="pdb-item"><b>Alarmas</b><span id="pdb-alarms">Web: Solo app abierta<br>APK: Scheduler del SO</span></div>
+          <div class="pdb-item"><b>Notificaciones</b><span id="pdb-notif">Web: Push (con back)<br>APK: Locales (sin back)</span></div>
+        </div>
+      </div>
+      <div class="perm-row" id="perm-platform-row" style="display:none"><span>Plataforma</span><b id="perm-platform" class="perm-state">—</b></div>
+      <div class="perm-row"><span>Control del reproductor (Media Session)</span><b id="perm-mediasession" class="perm-state">—</b></div>
+      <div class="perm-row"><span>Pantalla activa (Wake Lock)</span><b id="perm-wakelock" class="perm-state">—</b></div>
+      <div class="perm-row"><span>Notificaciones push (servidor)</span><b id="perm-push" class="perm-state">—</b></div>
+      <div class="perm-row" id="perm-battery-row" style="display:none"><span>Optimización de batería</span><b id="perm-battery" class="perm-state">—</b></div>
+      <div class="perm-row" id="perm-autostart-row" style="display:none"><span>Inicio automático (fabricante)</span><b id="perm-autostart" class="perm-state">—</b></div>
+    </details>
     <p id="perm-note" class="perm-note"></p>
   </div>
 </div>`;
@@ -299,6 +308,18 @@ function renderPermissionState() {
   const btnAutostartSettings = document.getElementById('perm-autostart-settings');
   if (btnAutostartSettings) {
     btnAutostartSettings.classList.toggle('hidden', !(isNative && caps.autostartGuidance.supported));
+  }
+  // Auto-abrir el detalle colapsado solo si hay algo ahí adentro que de
+  // verdad requiera acción — mismas condiciones que ya deciden mostrar los
+  // botones de batería/autostart/alarmas exactas, no una señal nueva.
+  const permDetails = document.getElementById('perm-details');
+  if (permDetails) {
+    const needsAttention =
+      isNative &&
+      ((caps.exactAlarms.supported && !caps.exactAlarms.granted) ||
+        !caps.batteryUnrestricted.granted ||
+        caps.autostartGuidance.supported);
+    permDetails.open = needsAttention;
   }
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);

@@ -1,1 +1,0 @@
-import{G as t,d as l,p as r,a1 as e}from"./site-BmgUSY4m.js";const p=()=>t("/api/v1/alarms"),c=a=>e("/api/v1/alarms",a),o=(a,s)=>r(`/api/v1/alarms/${a}`,s),d=a=>l(`/api/v1/alarms/${a}`);export{c,d,p as l,o as u};

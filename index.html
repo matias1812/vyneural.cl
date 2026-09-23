@@ -623,43 +623,45 @@
         </label>
 
         <!-- P7 — personalización de alarma (sonido/vibración/posponer): mismo
-             patrón e IDs (prefijo alarm- en vez de reminder-) que
-             #reminder-custom-alarm-wrap en rutina.html, wireado igual contra
-             el bridge nativo (scheduleAlarm ya acepta estos campos). Exclusivo
-             de la APK: no hay canal de notificación real que los respete en
-             web/PWA. -->
-        <div class="alarm-field in-app-only">
-          <span class="alarm-label">Sonido y vibración</span>
-          <div class="cuenta-form-row">
-            <label>Vibración
-              <select id="alarm-vibration">
-                <option value="default">Predeterminada</option>
-                <option value="short">Corta</option>
-                <option value="long">Larga</option>
-                <option value="pulse">Pulsos</option>
-              </select>
-            </label>
-            <label>Sonido
-              <button type="button" class="cuenta-btn" id="alarm-sound-pick">
-                <span id="alarm-sound-name">Predeterminado</span>
-              </button>
-            </label>
-          </div>
-          <div class="cuenta-form-row">
-            <label class="it-step-notify-wrap">
+             wireado de siempre (soundUri/vibrationId/snoozeEnabled/snoozeMinutes,
+             el bridge nativo ya los acepta), ahora agrupado en una sección
+             plegable con el estilo propio del modal (.alarm-field/.alarm-input,
+             en vez de las clases prestadas de /cuenta) para que no se vea
+             "pegado" al resto. Exclusivo de la APK: no hay canal de
+             notificación real que los respete en web/PWA. -->
+        <details id="alarm-settings" class="alarm-troubleshoot in-app-only">
+          <summary>⚙️ Ajustes de sonido y vibración</summary>
+          <label class="alarm-field">
+            <span class="alarm-label">📳 Vibración</span>
+            <select id="alarm-vibration" class="alarm-input">
+              <option value="default">Predeterminada</option>
+              <option value="short">Corta</option>
+              <option value="long">Larga</option>
+              <option value="pulse">Pulsos</option>
+            </select>
+          </label>
+          <label class="alarm-field">
+            <span class="alarm-label">🔊 Sonido</span>
+            <button type="button" class="alarm-input alarm-sound-btn" id="alarm-sound-pick">
+              <span id="alarm-sound-name">Predeterminado</span>
+            </button>
+          </label>
+          <label class="alarm-field">
+            <span class="alarm-label it-step-notify-wrap">
               <input type="checkbox" id="alarm-snooze-enabled" />
-              Permitir posponer
-            </label>
-            <label>Minutos al posponer
-              <select id="alarm-snooze-minutes">
-                <option value="5">5</option>
-                <option value="10">10</option>
-                <option value="15">15</option>
-                <option value="20">20</option>
-              </select>
-            </label>
-          </div>
-        </div>
+              ⏰ Permitir posponer
+            </span>
+          </label>
+          <label class="alarm-field">
+            <span class="alarm-label">Minutos al posponer</span>
+            <select id="alarm-snooze-minutes" class="alarm-input">
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="20">20</option>
+            </select>
+          </label>
+        </details>
 
         <!-- Recorte de texto: los bloques de estado/permisos/troubleshooting
              (antes todos visibles a la vez) van colapsados acá. refreshAlarmPerm()
@@ -709,9 +711,15 @@
         </div>
 
         <!-- Historial de notificaciones ENVIADAS por el backend (FCM/Web Push) —
-             no es confirmación de entrega, ver GET /api/v1/alarms/notifications. -->
-        <div id="alarm-history-wrap" class="alarm-list-wrap hidden">
+             no es confirmación de entrega, ver GET /api/v1/alarms/notifications.
+             El botón de prueba dispara un push AHORA (POST /alarms/test-notification),
+             sin esperar una alarma vencida: sirve para aislar en un toque si el
+             envío funciona o no, en vez de tener que agendar y esperar. -->
+        <div class="alarm-history-head">
           <h4 class="alarm-list-title">Notificaciones enviadas</h4>
+          <button id="alarm-test-notification" type="button" class="alarm-settings-btn">🔔 Enviar notificación de prueba</button>
+        </div>
+        <div id="alarm-history-wrap" class="hidden">
           <ul id="alarm-history-list" class="alarm-list"></ul>
         </div>
       </div>
@@ -813,31 +821,7 @@
           Vyneural usa estos permisos para seguir sonando limpio fuera de la app
           (pantalla bloqueada o en segundo plano) y para avisarte de los recordatorios.
         </p>
-
-        <div class="perm-diff-box" id="perm-diff-box">
-          <div class="pdb-title">Diferencias de plataforma</div>
-          <div class="pdb-grid">
-            <div class="pdb-item">
-              <b>Audio Background</b>
-              <span id="pdb-audio">Web: Limitado<br>APK: Foreground Service</span>
-            </div>
-            <div class="pdb-item">
-              <b>Alarmas</b>
-              <span id="pdb-alarms">Web: Solo app abierta<br>APK: Scheduler del SO</span>
-            </div>
-            <div class="pdb-item">
-              <b>Notificaciones</b>
-              <span id="pdb-notif">Web: Push (con back)<br>APK: Locales (sin back)</span>
-            </div>
-          </div>
-        </div>
-        <div class="perm-row" id="perm-platform-row" style="display:none"><span>Plataforma</span><b id="perm-platform" class="perm-state">—</b></div>
         <div class="perm-row"><span>Notificaciones</span><b id="perm-notif" class="perm-state">—</b></div>
-        <div class="perm-row"><span>Control del reproductor (Media Session)</span><b id="perm-mediasession" class="perm-state">—</b></div>
-        <div class="perm-row"><span>Pantalla activa (Wake Lock)</span><b id="perm-wakelock" class="perm-state">—</b></div>
-        <div class="perm-row"><span>Notificaciones push (servidor)</span><b id="perm-push" class="perm-state">—</b></div>
-        <div class="perm-row" id="perm-battery-row" style="display:none"><span>Optimización de batería</span><b id="perm-battery" class="perm-state">—</b></div>
-        <div class="perm-row" id="perm-autostart-row" style="display:none"><span>Inicio automático (fabricante)</span><b id="perm-autostart" class="perm-state">—</b></div>
         <div class="perm-row"><span>Permisos habilitados en Vyneural</span><b id="perm-enabled" class="perm-state">—</b></div>
         <div class="perm-actions">
           <button id="perm-on" class="quick-start">Activar permisos</button>
@@ -847,6 +831,35 @@
           <button id="perm-battery-settings" class="perm-test hidden">Quitar restricción de batería</button>
           <button id="perm-autostart-settings" class="perm-test hidden">Revisar inicio automático</button>
         </div>
+        <!-- Recorte de texto: el detalle de plataforma/estado puro va
+             colapsado — mismo patrón que #alarm-troubleshoot. Auto-abierto
+             por main.js solo si hay algo accionable ahí adentro. -->
+        <details id="perm-details" class="alarm-troubleshoot">
+          <summary>Ver más detalles</summary>
+          <div class="perm-diff-box" id="perm-diff-box">
+            <div class="pdb-title">Diferencias de plataforma</div>
+            <div class="pdb-grid">
+              <div class="pdb-item">
+                <b>Audio Background</b>
+                <span id="pdb-audio">Web: Limitado<br>APK: Foreground Service</span>
+              </div>
+              <div class="pdb-item">
+                <b>Alarmas</b>
+                <span id="pdb-alarms">Web: Solo app abierta<br>APK: Scheduler del SO</span>
+              </div>
+              <div class="pdb-item">
+                <b>Notificaciones</b>
+                <span id="pdb-notif">Web: Push (con back)<br>APK: Locales (sin back)</span>
+              </div>
+            </div>
+          </div>
+          <div class="perm-row" id="perm-platform-row" style="display:none"><span>Plataforma</span><b id="perm-platform" class="perm-state">—</b></div>
+          <div class="perm-row"><span>Control del reproductor (Media Session)</span><b id="perm-mediasession" class="perm-state">—</b></div>
+          <div class="perm-row"><span>Pantalla activa (Wake Lock)</span><b id="perm-wakelock" class="perm-state">—</b></div>
+          <div class="perm-row"><span>Notificaciones push (servidor)</span><b id="perm-push" class="perm-state">—</b></div>
+          <div class="perm-row" id="perm-battery-row" style="display:none"><span>Optimización de batería</span><b id="perm-battery" class="perm-state">—</b></div>
+          <div class="perm-row" id="perm-autostart-row" style="display:none"><span>Inicio automático (fabricante)</span><b id="perm-autostart" class="perm-state">—</b></div>
+        </details>
         <p id="perm-note" class="perm-note"></p>
       </div>
     </div>

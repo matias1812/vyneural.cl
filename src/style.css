@@ -2807,6 +2807,20 @@ body.immersive .controls {
   color: var(--text);
 }
 
+.alarm-sound-btn {
+  text-align: left;
+  cursor: pointer;
+}
+
+.alarm-sound-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.alarm-sound-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .alarm-custom {
   padding: 12px 14px;
   margin-bottom: 14px;
@@ -2960,6 +2974,30 @@ body.immersive .controls {
   margin: 0 0 10px;
   font-size: 13px;
   color: var(--text);
+}
+
+.alarm-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.alarm-history-head .alarm-list-title {
+  margin: 0;
+}
+
+.alarm-history-head .alarm-settings-btn {
+  width: auto;
+  margin: 0;
+  white-space: nowrap;
+}
+
+#alarm-history-wrap .alarm-list {
+  margin-top: 10px;
 }
 
 .alarm-list {

@@ -90,7 +90,7 @@ import { isPremiumUser, openPremiumRequired } from './ui/premium-gate.js';
 // el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
 // rompe la alarma local.
 import { createAlarm, updateAlarm, deleteAlarm, listAlarms as listServerAlarms } from './api/alarms.js';
-import { listAlarmNotifications } from './api/alarm-notifications.js';
+import { listAlarmNotifications, testAlarmNotification } from './api/alarm-notifications.js';
 // P1.5 Fase 5 — proveedor ÚNICO de audio (WEB | NATIVE | NONE). Nunca dos motores.
 import { assertSingleAudioProvider, providerLabel } from './core/audio-provider.js';
 
@@ -3548,6 +3548,20 @@ function renderPermissionState() {
     btnAutostartSettings.classList.toggle('hidden', !(isNative && caps.autostartGuidance.supported));
   }
 
+  // Auto-abrir el detalle colapsado solo si hay algo ahí adentro que de
+  // verdad requiera acción — mismas condiciones que ya deciden mostrar los
+  // botones de batería/autostart/alarmas exactas (ver mismo bloque en
+  // ui/permissions-modal.js), no una señal nueva.
+  const permDetails = document.getElementById('perm-details');
+  if (permDetails) {
+    const needsAttention =
+      isNative &&
+      ((caps.exactAlarms.supported && !caps.exactAlarms.granted) ||
+        !caps.batteryUnrestricted.granted ||
+        caps.autostartGuidance.supported);
+    permDetails.open = needsAttention;
+  }
+
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);
   permEnabled.className = 'perm-state' + (disabled ? ' bad' : ' ok');
@@ -3862,6 +3876,7 @@ const alarmSnoozeMinutes = document.getElementById('alarm-snooze-minutes');
 const alarmTroubleshoot = document.getElementById('alarm-troubleshoot');
 const alarmHistoryWrap = document.getElementById('alarm-history-wrap');
 const alarmHistoryList = document.getElementById('alarm-history-list');
+const alarmTestNotification = document.getElementById('alarm-test-notification');
 
 // P7 — sonido elegido con el picker del sistema: vive fuera del form porque
 // no hay que perderlo al re-renderizar (mismo criterio que
@@ -4093,6 +4108,29 @@ async function renderAlarmHistory() {
     info.append(b, small);
     li.append(info);
     alarmHistoryList.appendChild(li);
+  });
+}
+
+if (alarmTestNotification) {
+  alarmTestNotification.addEventListener('click', async () => {
+    if (!getAccessToken()) {
+      showToast('🔒 Iniciá sesión para enviar una notificación de prueba');
+      return;
+    }
+    alarmTestNotification.disabled = true;
+    try {
+      const res = await testAlarmNotification();
+      if (res && res.delivered) {
+        showToast(`✅ Enviada por ${ALARM_CHANNEL_LABEL[res.channel] || res.channel}`);
+      } else {
+        showToast('⚠️ No se pudo enviar — revisá la configuración de push (FCM/Web Push)');
+      }
+    } catch (_) {
+      showToast('⚠️ No se pudo enviar — revisá tu conexión');
+    } finally {
+      alarmTestNotification.disabled = false;
+      renderAlarmHistory();
+    }
   });
 }
 
