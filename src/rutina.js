@@ -1742,7 +1742,7 @@ function refreshState() {
   if (note) {
     note.textContent = IN_APK
       ? 'En la APK estas alarmas las programa el reloj del sistema de Android: siguen sonando con la app cerrada y con pantalla bloqueada (con vibración).'
-      : 'En la web/PWA estos recordatorios suenan mientras la pestaña está abierta. Para repetición semanal con alarma real y vibración, instalá la APK.';
+      : 'En la web/PWA estos recordatorios suenan mientras la pestaña está abierta.';
     note.classList.remove('hidden');
   }
 }
