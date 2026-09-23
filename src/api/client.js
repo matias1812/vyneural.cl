@@ -240,7 +240,13 @@ function tryRefresh() {
     refreshPromise = performFetch('/api/v1/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      // performFetch() ya serializa `body` (línea ~219) — serializarlo acá
+      // ANTES lo mandaba doble ('"{\"refresh_token\":...}"', un string JSON
+      // dentro de otro), y el backend lo rechazaba con 422 ("Input should be
+      // a valid dictionary or object"). Bug real, confirmado en logs de
+      // producción: esto explica los 422 intermitentes de /auth/refresh que
+      // se venían atribuyendo a "body truncado por red móvil".
+      body: { refresh_token: refreshToken },
     })
       .then((res) => {
         if (res.status < 200 || res.status >= 300) return { ok: false, network: false };
