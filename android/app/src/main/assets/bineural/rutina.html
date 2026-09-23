@@ -49,12 +49,12 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/rutina-DpmUP71o.js"></script>
-    <link rel="modulepreload" href="./assets/site-DdHMpg3V.js">
-    <link rel="modulepreload" href="./assets/freq-cover-BWFuhwFC.js">
-    <link rel="modulepreload" href="./assets/alarms-CHgO6_b5.js">
-    <link rel="modulepreload" href="./assets/billing-9McIk7nl.js">
-    <link rel="modulepreload" href="./assets/premium-gate-BQ6cdxV4.js">
+    <script type="module" src="./assets/rutina-CfapU-f-.js"></script>
+    <link rel="modulepreload" href="./assets/site-D1ZvPlwf.js">
+    <link rel="modulepreload" href="./assets/freq-cover-Cozezz7l.js">
+    <link rel="modulepreload" href="./assets/alarms-CUe670rh.js">
+    <link rel="modulepreload" href="./assets/billing-CnfKvOZM.js">
+    <link rel="modulepreload" href="./assets/premium-gate-JK85Xa4D.js">
     <link rel="stylesheet" href="./assets/site-U2crUEgv.css">
   </head>
   <body>
@@ -84,8 +84,9 @@
         <h1>Tus rituales, en un solo lugar.</h1>
         <p class="page-lead">
           Cada recordatorio que guardás en el generador aparece acá: a qué hora, en qué días se
-          repite, con qué frecuencia y cuándo es la próxima sesión. En la APK estas alarmas las
-          programa el reloj del sistema, con vibración y con la app cerrada.
+          repite, con qué frecuencia y cuándo es la próxima sesión. En la futura app de Android
+          estas alarmas las va a programar el reloj del sistema, con vibración y con la app
+          cerrada.
         </p>
         <a class="hero-cta" href="#rutina-reminder-form">＋ Agregar recordatorio</a>
       </header>
@@ -98,8 +99,8 @@
           <p class="rm-emoji" aria-hidden="true">🔒</p>
           <h3>Iniciá sesión para ver tu rutina</h3>
           <p>
-            Tus recordatorios e itinerarios viven en tu cuenta, así los ves igual en la web y en
-            la APK. Crear una cuenta es gratis y toma un minuto.
+            Tus recordatorios e itinerarios viven en tu cuenta, así los ves igual en la web y,
+            más adelante, en la app de Android. Crear una cuenta es gratis y toma un minuto.
           </p>
           <button type="button" class="hero-cta" id="rutina-auth-gate-login">Iniciar sesión / Crear cuenta</button>
         </div>
@@ -120,11 +121,11 @@
           </div>
           <p class="rutina-hint">Tu horario completo: recordatorios de este dispositivo y las próximas sesiones de tus itinerarios, en orden.</p>
 
-          <!-- Web/PWA: la repetición semanal con alarma real (AlarmManager) es
-               exclusiva de la APK; los itinerarios sí funcionan acá vía push. -->
+          <!-- Web/PWA: la repetición semanal con alarma real (AlarmManager) llega
+               con la futura app de Android; los itinerarios sí funcionan acá vía push. -->
           <div class="page-card hidden" id="rutina-apk-gate">
             <p class="rm-emoji" aria-hidden="true">📲</p>
-            <h3>Repetición con alarma real: exclusiva de la APK</h3>
+            <h3>Repetición con alarma real: llega con la futura app de Android</h3>
             <p>
               Un recordatorio de este dispositivo que se repita ciertos días con alarma real y
               vibración necesita el reloj del sistema de Android. Tus
@@ -166,7 +167,7 @@
                 </label>
               </div>
               <div class="it-step-days-wrap" id="reminder-days-wrap">
-                <span class="it-step-days-label">Repetir (solo APK)</span>
+                <span class="it-step-days-label">Repetir (próximamente en Android)</span>
                 <div class="it-step-days" id="reminder-days" role="group" aria-label="Días de repetición">
                   <button type="button" class="day-chip" data-day="1" aria-pressed="false">L</button>
                   <button type="button" class="day-chip" data-day="2" aria-pressed="false">M</button>
@@ -181,7 +182,7 @@
                 Sin días marcados, el recordatorio es de una sola vez.
               </p>
               <div class="it-step-days-wrap" id="reminder-custom-alarm-wrap">
-                <span class="it-step-days-label">Alarma (solo APK)</span>
+                <span class="it-step-days-label">Alarma (próximamente en Android)</span>
                 <div class="cuenta-form-row">
                   <label>Vibración
                     <select id="reminder-vibration">
@@ -224,9 +225,9 @@
           </div>
           <p class="rutina-hint">
             Un itinerario es tu rutina de pasos: una secuencia de frecuencias con su duración y,
-            si querés, un horario propio. Con cuenta, se sincronizan y se ven igual en la web y en
-            la APK; con horario configurado te llega un recordatorio por notificación push a este
-            dispositivo (en la APK, además, con la alarma del sistema).
+            si querés, un horario propio. Con cuenta, se sincronizan entre tus dispositivos; con
+            horario configurado te llega un recordatorio por notificación push a este dispositivo
+            (en la futura app de Android, además, con la alarma del sistema).
           </p>
           <p class="rutina-hint" id="rutina-it-sync" hidden></p>
 
@@ -244,18 +245,18 @@
         <div class="page-card">
           <h3>¿Cómo funcionan las alarmas?</h3>
           <ul>
-            <li><strong>En la APK:</strong> la alarma la programa el reloj del sistema de Android (AlarmManager). Suena con la app cerrada, con la pantalla bloqueada y tras un reinicio, con vibración. Necesita el permiso de notificaciones y, para disparar a la hora justa, el de alarmas exactas.</li>
+            <li><strong>En la futura app de Android:</strong> la alarma va a programarla el reloj del sistema de Android (AlarmManager). Va a sonar con la app cerrada, con la pantalla bloqueada y tras un reinicio, con vibración. Necesita el permiso de notificaciones y, para disparar a la hora justa, el de alarmas exactas.</li>
             <li><strong>En la web/PWA:</strong> el recordatorio de dispositivo suena mientras la página está abierta; para avisos con la pestaña cerrada, usá el respaldo de calendario (Google Calendar o .ics) desde el modal de recordatorios. El horario de un <strong>itinerario</strong> es distinto: lo manda el servidor como notificación push a la hora justa, con o sin la pestaña abierta (necesita permiso de notificaciones activado).</li>
-            <li><strong>Repetición semanal:</strong> en los recordatorios de dispositivo es exclusiva de la APK (reloj del sistema); en los itinerarios funciona en cualquier plataforma con cuenta.</li>
+            <li><strong>Repetición semanal:</strong> en los recordatorios de dispositivo llega con la futura app de Android (reloj del sistema); en los itinerarios funciona en cualquier plataforma con cuenta.</li>
           </ul>
           <p><a class="hero-cta" href="/hoja-de-ruta#alarmas">Ver el estado honesto de las alarmas</a></p>
         </div>
 
         <div class="page-note">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-          Tus recordatorios e itinerarios viven en tu cuenta y se sincronizan entre la web y la
-          APK. Las ondas binaurales son una herramienta de relajación y no sustituyen el consejo
-          médico.
+          Tus recordatorios e itinerarios viven en tu cuenta y se sincronizan entre tus
+          dispositivos. Las ondas binaurales son una herramienta de relajación y no sustituyen el
+          consejo médico.
         </div>
         </div>
       </div>
@@ -374,7 +375,6 @@
           <a href="/que-son-las-ondas-binaurales">Qué son las ondas binaurales</a>
           <a href="/beneficios">Beneficios</a>
           <a href="/como-usar">Cómo usar</a>
-          <a href="/descargar">Descargar APK (Android)</a>
           <a href="/hoja-de-ruta">Hoja de ruta</a>
           <a href="/codigo-abierto">Código abierto</a>
         </div>
@@ -403,6 +403,6 @@
         médico. Usa audífonos: sin ellos no se produce el efecto binaural. No las uses mientras
         conduces o manejas maquinaria.
       </p>
-    </footer>
+    </footer>
   </body>
 </html>

@@ -49,10 +49,10 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <!-- Precios placeholder (ver backvyneural/backend/app/billing/plans.py,
-         TODO(negocio): definir valores reales) — actualizar acá en el mismo
-         commit que ahí cuando se fijen los precios finales, para que Google
-         nunca muestre un precio que ya no es el real. -->
+    <!-- Precios reales confirmados por el negocio (2026-09-13, ver
+         backvyneural/backend/app/billing/plans.py) — actualizar acá en el
+         mismo commit que ahí si cambian, para que Google nunca muestre un
+         precio que ya no es el real. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -71,10 +71,10 @@
         }
       }
     </script>
-    <script type="module" src="./assets/premium-uns70kEl.js"></script>
-    <link rel="modulepreload" href="./assets/site-DdHMpg3V.js">
+    <script type="module" src="./assets/premium-CFEGQcby.js"></script>
+    <link rel="modulepreload" href="./assets/site-D1ZvPlwf.js">
     <link rel="modulepreload" href="./assets/starfield-CjKVWpeU.js">
-    <link rel="modulepreload" href="./assets/billing-9McIk7nl.js">
+    <link rel="modulepreload" href="./assets/billing-CnfKvOZM.js">
     <link rel="modulepreload" href="./assets/confirm-modal-eBx4xGlb.js">
     <link rel="stylesheet" href="./assets/site-U2crUEgv.css">
     <link rel="stylesheet" href="./assets/starfield-B-7bpY_e.css">
@@ -142,15 +142,25 @@
           <div class="auth-error hidden" id="premium-error" role="alert"></div>
         </div>
 
-        <!-- TEMPORAL: texto acotado a Webpay Plus/de por vida mientras Mensual/Anual
-             (Oneclick) están ocultos en src/premium.js (PLAN_ORDER) — revertir junto
-             con eso apenas Transbank asigne el código de comercio de Oneclick Mall. -->
-        <div class="page-note">
+        <div class="page-note hidden" id="premium-note-web">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
           <div>
             <strong>Pago seguro con Webpay (Transbank):</strong> nunca vemos ni guardamos
             los datos de tu tarjeta — todo el pago ocurre en el sitio de Transbank. El
-            plan de por vida es un pago único: no se renueva porque no vence nunca.
+            plan mensual y el anual se renuevan solos por default (se guarda tu tarjeta
+            de forma segura en Transbank); podés cancelar la auto-renovación cuando
+            quieras desde tu cuenta sin perder lo que ya pagaste. El de por vida no vence.
+          </div>
+        </div>
+        <div class="page-note hidden" id="premium-note-android">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <div>
+            <strong>Pago con Google Play:</strong> el cobro lo procesa Google, no
+            Transbank — tu forma de pago queda guardada en tu cuenta de Google, nunca la
+            vemos nosotros. El plan mensual y el anual se renuevan solos por default;
+            podés cancelar la auto-renovación cuando quieras desde
+            <a href="https://play.google.com/store/account/subscriptions" target="_blank" rel="noopener">Google Play</a>
+            (no desde Vyneural) sin perder lo que ya pagaste. El de por vida no vence.
           </div>
         </div>
       </div>
