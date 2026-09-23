@@ -2999,7 +2999,8 @@ body.immersive .controls {
   font-variant-numeric: tabular-nums;
 }
 
-.alarm-del {
+.alarm-del,
+.alarm-edit {
   appearance: none;
   background: none;
   border: none;
@@ -3011,9 +3012,42 @@ body.immersive .controls {
   flex: none;
 }
 
-.alarm-del:hover {
+.alarm-del:hover,
+.alarm-edit:hover {
   color: var(--text);
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* ---------------------------------------------------------------- Estado/troubleshooting colapsable */
+/* Antes eran ~6 bloques siempre visibles a la vez (permisos, alarma exacta,
+   notas de fabricante); ahora van colapsados y solo se auto-abren cuando
+   refreshAlarmPerm() detecta un problema real (ver src/main.js). */
+.alarm-troubleshoot {
+  margin: 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.alarm-troubleshoot > summary {
+  cursor: pointer;
+  padding: 10px 2px;
+  font-size: 13px;
+  color: var(--text-dim);
+  list-style: none;
+}
+
+.alarm-troubleshoot > summary::-webkit-details-marker {
+  display: none;
+}
+
+.alarm-troubleshoot[open] > summary {
+  color: var(--text);
+}
+
+.alarm-troubleshoot.has-issue > summary {
+  color: var(--warn, #e0a53c);
 }
 
 /* ---------------------------------------------------------------- Badge de la campana */

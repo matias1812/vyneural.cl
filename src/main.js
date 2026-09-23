@@ -35,7 +35,7 @@ import { createNotificationManager } from './core/notification-manager.js';
 import { getCachedPushStatus, pushStatus } from './api/push.js';
 // P0 — Separación Core / Platform: el bridge nativo (futura APK Android) y
 // la fusión honesta de capacidades. Sin bridge, todo queda como web pura.
-import { createNativeBridgeAdapter, parseBridgeResponse } from './platform/native-bridge.js';
+import { createNativeBridgeAdapter, parseBridgeResponse, pickAlarmSound } from './platform/native-bridge.js';
 import { mergePlatformCapabilities } from './platform/platform-capabilities.js';
 import { detectNotificationCapabilities, capabilitySummary } from './core/notification-capabilities.js';
 import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js';
@@ -89,7 +89,8 @@ import { isPremiumUser, openPremiumRequired } from './ui/premium-gate.js';
 // backend cuando hay sesión, para que el scheduler server-side pueda enviar
 // el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
 // rompe la alarma local.
-import { createAlarm, deleteAlarm, listAlarms as listServerAlarms } from './api/alarms.js';
+import { createAlarm, updateAlarm, deleteAlarm, listAlarms as listServerAlarms } from './api/alarms.js';
+import { listAlarmNotifications } from './api/alarm-notifications.js';
 // P1.5 Fase 5 — proveedor ÚNICO de audio (WEB | NATIVE | NONE). Nunca dos motores.
 import { assertSingleAudioProvider, providerLabel } from './core/audio-provider.js';
 
@@ -3842,6 +3843,7 @@ const alarmWave = document.getElementById('alarm-wave');
 const alarmMinutes = document.getElementById('alarm-minutes');
 const alarmPerm = document.getElementById('alarm-perm');
 const alarmSave = document.getElementById('alarm-save');
+const alarmEditCancel = document.getElementById('alarm-edit-cancel');
 const alarmGcal = document.getElementById('alarm-gcal');
 const alarmIcs = document.getElementById('alarm-ics');
 const alarmListWrap = document.getElementById('alarm-list-wrap');
@@ -3850,6 +3852,39 @@ const alarmView = document.getElementById('alarms-view');
 const alarmViewList = document.getElementById('alarms-view-list');
 const alarmViewAdd = document.getElementById('alarms-view-add');
 const alarmBadge = document.getElementById('alarm-badge');
+// P7 — personalización de alarma (sonido/vibración/posponer, solo APK). Ver
+// mismo patrón en rutina.js::wireReminderForm().
+const alarmVibration = document.getElementById('alarm-vibration');
+const alarmSoundPick = document.getElementById('alarm-sound-pick');
+const alarmSoundName = document.getElementById('alarm-sound-name');
+const alarmSnoozeEnabled = document.getElementById('alarm-snooze-enabled');
+const alarmSnoozeMinutes = document.getElementById('alarm-snooze-minutes');
+const alarmTroubleshoot = document.getElementById('alarm-troubleshoot');
+const alarmHistoryWrap = document.getElementById('alarm-history-wrap');
+const alarmHistoryList = document.getElementById('alarm-history-list');
+
+// P7 — sonido elegido con el picker del sistema: vive fuera del form porque
+// no hay que perderlo al re-renderizar (mismo criterio que
+// rutina.js::pendingReminderSoundUri).
+let pendingAlarmSoundUri = null;
+// Modo edición: si tiene valor, alarmSave actualiza esa alarma (local +
+// nube) en vez de crear una nueva. Ver beginEditAlarm()/endEditAlarm().
+let editingAlarmId = null;
+
+if (alarmSoundPick) {
+  alarmSoundPick.addEventListener('click', async () => {
+    alarmSoundPick.disabled = true;
+    try {
+      const result = await pickAlarmSound();
+      if (result && result.uri) {
+        pendingAlarmSoundUri = result.uri;
+        if (alarmSoundName) alarmSoundName.textContent = result.name || 'Tono elegido';
+      }
+    } finally {
+      alarmSoundPick.disabled = false;
+    }
+  });
+}
 
 // Selector de estados: presets + personalizado.
 STATES.forEach((s) => {
@@ -3867,6 +3902,18 @@ function defaultAlarmTime() {
   const d = new Date(Date.now() + 15 * 60000);
   d.setMinutes(Math.ceil(d.getMinutes() / 5) * 5, 0, 0);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// Abre/cierra automáticamente el <details> de troubleshooting según si hay
+// de verdad algo para resolver — antes estos bloques quedaban siempre
+// visibles aunque todo estuviera bien, generando el "mucho texto de sobra"
+// reportado en el celular.
+function setAlarmTroubleshootIssue(issue) {
+  if (!alarmTroubleshoot) return;
+  alarmTroubleshoot.classList.toggle('has-issue', issue);
+  alarmTroubleshoot.open = issue;
+  const summary = document.getElementById('alarm-troubleshoot-summary');
+  if (summary) summary.textContent = issue ? '⚠️ Hay algo que revisar en las notificaciones' : '🔔 Estado de las notificaciones';
 }
 
 function refreshAlarmPerm() {
@@ -3904,13 +3951,16 @@ function refreshAlarmPerm() {
           ? '🚫 Notificaciones bloqueadas de forma permanente en Android: la alarma se guardará pero no podrá avisarte. Activá el permiso en los ajustes del sistema.'
           : '⚠️ Notificaciones bloqueadas en Android: la alarma se guardará pero no podrá avisarte. Activá el permiso en los ajustes.';
       if (settingsBtn) settingsBtn.classList.remove('hidden');
+      setAlarmTroubleshootIssue(true);
       return;
     }
     if (np === 'GRANTED') {
       alarmPerm.textContent = '✅ Notificaciones de Android activadas: la alarma avisa aunque la app esté cerrada.';
+      setAlarmTroubleshootIssue(exact === false);
       return;
     }
     alarmPerm.textContent = '🔔 Al guardar, te pediremos permiso de notificaciones en Android.';
+    setAlarmTroubleshootIssue(false);
     return;
   }
   if (nativeNote) nativeNote.classList.add('hidden');
@@ -3918,6 +3968,7 @@ function refreshAlarmPerm() {
   if (exactBtn) exactBtn.classList.add('hidden');
   if (!notificationSupported()) {
     alarmPerm.textContent = 'Tu navegador no soporta notificaciones: usá el respaldo de calendario.';
+    setAlarmTroubleshootIssue(true);
     return;
   }
   const p = Notification.permission;
@@ -3927,6 +3978,7 @@ function refreshAlarmPerm() {
   if (iosNeedsInstall()) {
     alarmPerm.textContent += ' En iPhone, instala Vyneural (Compartir → Añadir a pantalla de inicio) para recibir notificaciones.';
   }
+  setAlarmTroubleshootIssue(p === 'denied');
   refreshAlarmHonestNote();
 }
 
@@ -3993,6 +4045,10 @@ function openAlarmModal() {
       return;
     }
     updateAlarmGating();
+    // Abrir desde la campana (no desde "editar" en la lista) siempre arranca
+    // en modo "crear" — beginEditAlarm() abre el modal directo, sin pasar
+    // por acá.
+    endEditAlarm();
     if (!alarmTime.value) {
       alarmTime.value = defaultAlarmTime();
       resyncApkTimePicker('alarm-time');
@@ -4000,12 +4056,49 @@ function openAlarmModal() {
     refreshAlarmPerm();
     refreshAlarmHonestNote();
     renderAlarms();
+    renderAlarmHistory();
     alarmModal.classList.remove('hidden');
+  });
+}
+
+// Historial de notificaciones ENVIADAS por el backend (ver
+// api/alarm-notifications.js) — no es confirmación de entrega/reproducción
+// (REGLA DE ORO), se etiqueta como "enviada" en la UI a propósito.
+const ALARM_CHANNEL_LABEL = { fcm: 'App (FCM)', web_push: 'Navegador (Web Push)', none: 'No se pudo enviar' };
+async function renderAlarmHistory() {
+  if (!alarmHistoryWrap || !alarmHistoryList) return;
+  if (!getAccessToken()) {
+    alarmHistoryWrap.classList.add('hidden');
+    return;
+  }
+  let items = [];
+  try {
+    items = (await listAlarmNotifications(20)) || [];
+  } catch (_) {
+    /* sin red / sin sesión válida: se deja la sección vacía, no rompe el modal */
+  }
+  alarmHistoryWrap.classList.toggle('hidden', items.length === 0);
+  alarmHistoryList.innerHTML = '';
+  items.forEach((n) => {
+    const li = document.createElement('li');
+    li.className = 'alarm-item';
+    const info = document.createElement('span');
+    info.className = 'alarm-item-info';
+    const b = document.createElement('b');
+    b.textContent = n.name || 'Recordatorio';
+    const small = document.createElement('small');
+    const when = n.created_at ? new Date(n.created_at).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    const chan = ALARM_CHANNEL_LABEL[n.channel] || n.channel;
+    small.textContent = `${when} · ${chan}${n.delivered ? '' : ' · no se pudo entregar'}`;
+    info.append(b, small);
+    li.append(info);
+    alarmHistoryList.appendChild(li);
   });
 }
 
 function closeAlarmModal() {
   alarmModal.classList.add('hidden');
+  endEditAlarm();
 }
 
 alarmBtn.addEventListener('click', openAlarmModal);
@@ -4129,6 +4222,12 @@ function scheduleNativeAlarm(alarm) {
     freq: alarm.freq,
     beat: alarm.beat,
     wave: alarm.wave || 'sine',
+    // P7 — personalización de alarma (sonido/vibración/posponer), mismos
+    // campos que rutina.js::scheduleNativeReminder.
+    soundUri: alarm.soundUri || undefined,
+    vibrationId: alarm.vibrationId || 'default',
+    snoozeEnabled: !!alarm.snoozeEnabled,
+    snoozeMinutes: alarm.snoozeMinutes || 5,
   });
   return !!(r && r.ok);
 }
@@ -4146,6 +4245,62 @@ function cancelAlarmBoth(alarmId) {
   alarmManager.cancel(alarmId);
 }
 
+// Editar = crear con el mismo id (AlarmManager.create() y scheduleAlarm()
+// del bridge son idempotentes por id, ver core/alarm-manager.js::create) +
+// PUT a la nube en vez de POST si ya tenía cloudId. endEditAlarm() vuelve el
+// modal a modo "crear" (botón, cancelar, sonido pendiente).
+function endEditAlarm() {
+  editingAlarmId = null;
+  pendingAlarmSoundUri = null;
+  if (alarmEditCancel) alarmEditCancel.classList.add('hidden');
+  alarmSave.textContent = 'Guardar recordatorio';
+}
+
+function beginEditAlarm(alarm) {
+  editingAlarmId = alarm.id;
+  alarmTime.value = alarm.time || defaultAlarmTime();
+  resyncApkTimePicker('alarm-time');
+  const presetMatch = STATES.find(
+    (s) => !s.custom && Math.abs(s.base - alarm.freq) < 0.001 && Math.abs(s.beat - alarm.beat) < 0.001,
+  );
+  const customState = STATES.find((s) => s.custom);
+  alarmState.value = presetMatch ? presetMatch.id : customState ? customState.id : alarmState.value;
+  const custom = !presetMatch;
+  alarmCustom.classList.toggle('hidden', !custom);
+  if (custom) {
+    alarmBase.value = String(alarm.freq);
+    alarmBeat.value = String(alarm.beat);
+    alarmWave.value = alarm.wave || 'sine';
+  }
+  alarmMinutes.value = String(alarm.minutes || 30);
+  if (alarmDaysEl) {
+    alarmDaysEl.querySelectorAll('.alarm-day').forEach((b) => {
+      const day = parseInt(b.dataset.day, 10);
+      b.setAttribute('aria-pressed', String((alarm.days || []).includes(day)));
+    });
+  }
+  if (alarmVibration) alarmVibration.value = alarm.vibrationId || 'default';
+  pendingAlarmSoundUri = alarm.soundUri || null;
+  if (alarmSoundName) alarmSoundName.textContent = alarm.soundUri ? 'Tono personalizado' : 'Predeterminado';
+  if (alarmSnoozeEnabled) alarmSnoozeEnabled.checked = !!alarm.snoozeEnabled;
+  if (alarmSnoozeMinutes) alarmSnoozeMinutes.value = String(alarm.snoozeMinutes || 5);
+  if (alarmEditCancel) alarmEditCancel.classList.remove('hidden');
+  alarmSave.textContent = 'Guardar cambios';
+  refreshAlarmPerm();
+  refreshAlarmHonestNote();
+  alarmModal.classList.remove('hidden');
+}
+
+if (alarmEditCancel) {
+  alarmEditCancel.addEventListener('click', () => {
+    endEditAlarm();
+    if (alarmVibration) alarmVibration.value = 'default';
+    if (alarmSoundName) alarmSoundName.textContent = 'Predeterminado';
+    if (alarmSnoozeEnabled) alarmSnoozeEnabled.checked = false;
+    if (alarmSnoozeMinutes) alarmSnoozeMinutes.value = '5';
+  });
+}
+
 alarmSave.addEventListener('click', async () => {
   const time = alarmTime.value || defaultAlarmTime();
   const cfg = alarmConfig();
@@ -4154,13 +4309,21 @@ alarmSave.addEventListener('click', async () => {
   const nextAt = days.length
     ? nextOccurrenceAt(hh, mm, days) || nextAlarmAt(time).getTime()
     : nextAlarmAt(time).getTime();
+  const editing = editingAlarmId ? getAlarms().find((a) => a.id === editingAlarmId) : null;
   const alarm = {
-    id: `al-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    id: editing ? editing.id : `al-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     time,
     ...cfg,
     days,
     nextAt,
+    // P7 — personalización de alarma (solo APK, ver bloque in-app-only en
+    // index.html). pendingAlarmSoundUri viene del picker del sistema.
+    soundUri: pendingAlarmSoundUri || undefined,
+    vibrationId: alarmVibration ? alarmVibration.value : 'default',
+    snoozeEnabled: !!(alarmSnoozeEnabled && alarmSnoozeEnabled.checked),
+    snoozeMinutes: alarmSnoozeMinutes ? parseInt(alarmSnoozeMinutes.value, 10) || 5 : 5,
   };
+  if (editing && editing.cloudId) alarm.cloudId = editing.cloudId;
   // APK: el dueño real es el AlarmManager nativo; el web queda como espejo
   // de la UI (external → nunca dispara). Web/PWA: dueño web.
   const nativeOwned = scheduleNativeAlarm(alarm);
@@ -4169,6 +4332,8 @@ alarmSave.addEventListener('click', async () => {
   // P6-FEAT-001 — sincronizar al backend con sesión: el recordatorio vive en
   // la nube y el scheduler server-side envía el Web Push a la hora exacta
   // aunque la app esté cerrada. Best-effort (nunca rompe la alarma local).
+  // Si ya tenía cloudId (edición), PUT en vez de POST — misma fila, no un
+  // duplicado.
   if (getAccessToken()) {
     let timezone = 'UTC';
     try {
@@ -4176,7 +4341,7 @@ alarmSave.addEventListener('click', async () => {
     } catch (_) {
       /* sin zona del navegador */
     }
-    createAlarm({
+    const body = {
       name: alarm.name || 'Recordatorio',
       enabled: true,
       scheduled_at: new Date(alarm.nextAt).toISOString(),
@@ -4190,14 +4355,19 @@ alarmSave.addEventListener('click', async () => {
         // mismo tag que la notificación local → el navegador la REEMPLAZA y
         // no se muestran dos avisos cuando la app está abierta.
         localId: alarm.id,
+        soundUri: alarm.soundUri,
+        vibrationId: alarm.vibrationId,
+        snoozeEnabled: alarm.snoozeEnabled,
+        snoozeMinutes: alarm.snoozeMinutes,
       },
       repeat_rule: days.length ? rruleFor(days) : null,
       notification_enabled: true,
-    })
-      .then((created) => {
-        // Recordar el id del backend en la copia local para poder borrarla.
-        if (created && created.id) {
-          alarm.cloudId = created.id;
+    };
+    (alarm.cloudId ? updateAlarm(alarm.cloudId, body) : createAlarm(body))
+      .then((saved) => {
+        // Recordar el id del backend en la copia local para poder borrarla/editarla.
+        if (saved && saved.id) {
+          alarm.cloudId = saved.id;
           saveAlarms(getAlarms().map((a) => (a.id === alarm.id ? alarm : a)));
         }
       })
@@ -4207,15 +4377,18 @@ alarmSave.addEventListener('click', async () => {
   }
   renderAlarms();
   showToast(
-    days.length
-      ? `Rutina guardada: ${time}${daysLabelFor(days)}`
-      : `Recordatorio guardado para las ${time}`,
+    editing
+      ? `Recordatorio actualizado para las ${time}`
+      : days.length
+        ? `Rutina guardada: ${time}${daysLabelFor(days)}`
+        : `Recordatorio guardado para las ${time}`,
   );
   const perm = await requestPermission();
   if (perm !== 'granted' && perm !== 'unsupported') {
     showToast('Activá las notificaciones o usá el respaldo de calendario');
   }
   refreshAlarmPerm();
+  endEditAlarm();
 });
 
 function renderAlarms() {
@@ -4236,6 +4409,11 @@ function renderAlarms() {
     small.textContent = `${a.time}${daysLabelFor(a.days)}${extra} · ${Math.round(a.freq)} Hz · ${a.beat} Hz`;
     info.append(b, small);
     if (a.days && a.days.length) info.appendChild(weekStripEl(a.days));
+    const edit = document.createElement('button');
+    edit.className = 'alarm-edit';
+    edit.setAttribute('aria-label', 'Editar recordatorio');
+    edit.textContent = '✎';
+    edit.addEventListener('click', () => beginEditAlarm(a));
     const del = document.createElement('button');
     del.className = 'alarm-del';
     del.setAttribute('aria-label', 'Eliminar recordatorio');
@@ -4244,7 +4422,7 @@ function renderAlarms() {
       cancelAlarmBoth(a.id);
       renderAlarms();
     });
-    li.append(info, del);
+    li.append(info, edit, del);
     alarmList.appendChild(li);
   });
   // Vista en la página: lista visible + botón para agregar + badge de la campana.
@@ -4263,6 +4441,11 @@ function renderAlarms() {
       small.textContent = `${a.time} · ${Math.round(a.freq)} Hz · ${a.beat} Hz`;
       info.append(b, small);
       if (a.days && a.days.length) info.appendChild(weekStripEl(a.days));
+      const edit = document.createElement('button');
+      edit.className = 'alarm-edit';
+      edit.setAttribute('aria-label', 'Editar recordatorio');
+      edit.textContent = '✎';
+      edit.addEventListener('click', () => beginEditAlarm(a));
       const del = document.createElement('button');
       del.className = 'alarm-del';
       del.setAttribute('aria-label', 'Eliminar recordatorio');
@@ -4271,7 +4454,7 @@ function renderAlarms() {
         cancelAlarmBoth(a.id);
         renderAlarms();
       });
-      li.append(info, del);
+      li.append(info, edit, del);
       alarmViewList.appendChild(li);
     });
   }
@@ -4767,20 +4950,38 @@ if (!(deepState || deepF1 || deepCarrier || isFinite(deepFreq)) && !savedSession
 // recurrente reutiliza el mismo id en cada semana — sin el momento en la
 // clave, la primera vez que se marca "vista" la dejaría sin avisar NUNCA
 // más, ni siquiera en ocurrencias futuras genuinamente nuevas.
+// Antes se guardaba UN solo string (la última clave vista), que se pisaba
+// en cada marcado. Si dos alarmas quedaban vencidas a la vez dentro de la
+// ventana de gracia y la más próxima ya estaba vista, checkPendingReminder
+// cortaba ahí y la segunda (genuinamente no vista) nunca abría el modal
+// mientras la primera siguiera en gracia. Ahora se guarda una lista corta
+// de claves recientes, así "vista" no es un slot único que se pierde.
 const PENDING_SEEN_KEY = 'vyneural_pending_seen';
+const PENDING_SEEN_MAX = 10;
 function pendingSeenKey(id, occurrenceMs) {
   return `${id}:${occurrenceMs}`;
 }
-function pendingAlreadySeen(id, occurrenceMs) {
+function readPendingSeenList() {
   try {
-    return localStorage.getItem(PENDING_SEEN_KEY) === pendingSeenKey(id, occurrenceMs);
+    const raw = localStorage.getItem(PENDING_SEEN_KEY);
+    if (!raw) return [];
+    // Compat: builds anteriores guardaban un string suelto, no un array.
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [String(raw)];
   } catch (_) {
-    return false;
+    return [];
   }
+}
+function pendingAlreadySeen(id, occurrenceMs) {
+  return readPendingSeenList().includes(pendingSeenKey(id, occurrenceMs));
 }
 function markPendingSeen(id, occurrenceMs) {
   try {
-    localStorage.setItem(PENDING_SEEN_KEY, pendingSeenKey(id, occurrenceMs));
+    const list = readPendingSeenList();
+    const key = pendingSeenKey(id, occurrenceMs);
+    if (!list.includes(key)) list.push(key);
+    while (list.length > PENDING_SEEN_MAX) list.shift();
+    localStorage.setItem(PENDING_SEEN_KEY, JSON.stringify(list));
   } catch (_) {
     /* localStorage no disponible (modo privado, etc.): peor caso, vuelve a preguntar */
   }
@@ -4813,9 +5014,14 @@ async function checkPendingReminder() {
         const fired = a.last_fired_at ? new Date(a.last_fired_at).getTime() : null;
         return fired !== null && now - fired <= GRACE_MS ? fired : null;
       };
-      const due = (serverAlarms || [])
+      // Recorrer TODAS las vencidas en orden, no solo la más próxima: si esa
+      // ya fue vista, hay que seguir mirando — puede haber otra vencida a la
+      // vez, genuinamente no vista, que antes quedaba tapada (ver comentario
+      // de PENDING_SEEN_KEY más arriba).
+      const dueList = (serverAlarms || [])
         .filter((a) => a.enabled && dueAt(a) !== null)
-        .sort((a, b) => dueAt(a) - dueAt(b))[0];
+        .sort((a, b) => dueAt(a) - dueAt(b));
+      const due = dueList.find((a) => !pendingAlreadySeen(a.id, dueAt(a)));
       if (due && due.config && due.config.freq > 0) {
         pending = {
           id: due.id,
@@ -4833,8 +5039,9 @@ async function checkPendingReminder() {
       /* sin red: no bloquea la carga normal, se reintenta la próxima visita */
     }
   }
+  // No hace falta re-chequear "ya vista" acá: dueList.find() de más arriba
+  // ya descartó las vencidas ya vistas al elegir `due`.
   if (!pending) return;
-  if (pending.id && pendingAlreadySeen(pending.id, pending.occurrence)) return;
   // selectState() PRIMERO: si `selected` no era ya el estado Personalizado,
   // entrar a él resetea `carrier` a 'personalizado' (arranque limpio, ver su
   // declaración) — seteando carrier/loadedCustomBase ANTES, ese reset los

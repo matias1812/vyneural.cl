@@ -622,31 +622,79 @@
           </select>
         </label>
 
-        <p id="alarm-perm" class="alarm-perm"></p>
-        <!-- P4: si Android bloqueó las notificaciones de la APK, se ofrece
-             abrir los ajustes del sistema (OPEN_NOTIFICATION_SETTINGS). -->
-        <button id="alarm-perm-settings" class="alarm-settings-btn hidden" type="button">⚙️ Activar notificaciones en Android</button>
-
-        <!-- P5: estado real de las alarmas exactas (SCHEDULE_EXACT_ALARM). En
-             Android 14+ no se conceden por defecto → alarma aproximada ±60 s. -->
-        <p id="alarm-exact" class="alarm-perm"></p>
-        <button id="alarm-exact-settings" class="alarm-settings-btn hidden" type="button">⚙️ Activar alarmas exactas en Android</button>
-
-        <!-- P5: notas honestas solo visibles en la APK (la web ya tiene la suya). -->
-        <div id="alarm-native-note" class="alarm-native-note hidden">
-          <p>📵 <strong>La alarma no aparece en la app Reloj de tu teléfono:</strong> Android no
-            permite escribir en la app de Reloj. La hora la dispara el reloj del sistema y
-            Vyneural muestra su propia notificación a esa hora.</p>
-          <p>🔋 <strong>En Xiaomi, Huawei o Samsung:</strong> si cierras la app con “Eliminar”
-            desde recientes o la fuerzas a detener, Android puede no entregar la notificación.
-            No fuerces el cierre: sal con la tecla atrás o con “Inicio”.</p>
+        <!-- P7 — personalización de alarma (sonido/vibración/posponer): mismo
+             patrón e IDs (prefijo alarm- en vez de reminder-) que
+             #reminder-custom-alarm-wrap en rutina.html, wireado igual contra
+             el bridge nativo (scheduleAlarm ya acepta estos campos). Exclusivo
+             de la APK: no hay canal de notificación real que los respete en
+             web/PWA. -->
+        <div class="alarm-field in-app-only">
+          <span class="alarm-label">Sonido y vibración</span>
+          <div class="cuenta-form-row">
+            <label>Vibración
+              <select id="alarm-vibration">
+                <option value="default">Predeterminada</option>
+                <option value="short">Corta</option>
+                <option value="long">Larga</option>
+                <option value="pulse">Pulsos</option>
+              </select>
+            </label>
+            <label>Sonido
+              <button type="button" class="cuenta-btn" id="alarm-sound-pick">
+                <span id="alarm-sound-name">Predeterminado</span>
+              </button>
+            </label>
+          </div>
+          <div class="cuenta-form-row">
+            <label class="it-step-notify-wrap">
+              <input type="checkbox" id="alarm-snooze-enabled" />
+              Permitir posponer
+            </label>
+            <label>Minutos al posponer
+              <select id="alarm-snooze-minutes">
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="20">20</option>
+              </select>
+            </label>
+          </div>
         </div>
+
+        <!-- Recorte de texto: los bloques de estado/permisos/troubleshooting
+             (antes todos visibles a la vez) van colapsados acá. refreshAlarmPerm()
+             abre <details> automáticamente cuando de verdad hay un problema
+             (permiso denegado, alarma no exacta); si todo está en orden queda
+             cerrado por defecto. -->
+        <details id="alarm-troubleshoot" class="alarm-troubleshoot">
+          <summary id="alarm-troubleshoot-summary">🔔 Estado de las notificaciones</summary>
+          <p id="alarm-perm" class="alarm-perm"></p>
+          <!-- P4: si Android bloqueó las notificaciones de la APK, se ofrece
+               abrir los ajustes del sistema (OPEN_NOTIFICATION_SETTINGS). -->
+          <button id="alarm-perm-settings" class="alarm-settings-btn hidden" type="button">⚙️ Activar notificaciones en Android</button>
+
+          <!-- P5: estado real de las alarmas exactas (SCHEDULE_EXACT_ALARM). En
+               Android 14+ no se conceden por defecto → alarma aproximada ±60 s. -->
+          <p id="alarm-exact" class="alarm-perm"></p>
+          <button id="alarm-exact-settings" class="alarm-settings-btn hidden" type="button">⚙️ Activar alarmas exactas en Android</button>
+
+          <!-- P5: notas honestas solo visibles en la APK (la web ya tiene la suya). -->
+          <div id="alarm-native-note" class="alarm-native-note hidden">
+            <p>📵 <strong>La alarma no aparece en la app Reloj de tu teléfono:</strong> Android no
+              permite escribir en la app de Reloj. La hora la dispara el reloj del sistema y
+              Vyneural muestra su propia notificación a esa hora.</p>
+            <p>🔋 <strong>En Xiaomi, Huawei o Samsung:</strong> si cierras la app con “Eliminar”
+              desde recientes o la fuerzas a detener, Android puede no entregar la notificación.
+              No fuerces el cierre: sal con la tecla atrás o con “Inicio”.</p>
+          </div>
+
+          <p class="alarm-honest-note">⚠️ Con la app cerrada o congelada, la notificación local no puede dispararse (límite del navegador). El respaldo del calendario sí avisa a la hora exacta. Las notificaciones con la app cerrada (Web Push) requieren sesión y servidor configurado (este texto se actualiza según el estado real).</p>
+        </details>
 
         <div class="alarm-actions">
+          <button id="alarm-edit-cancel" class="alarm-settings-btn hidden" type="button">Cancelar edición</button>
           <button id="alarm-save" class="quick-start">Guardar recordatorio</button>
         </div>
-
-        <p class="alarm-honest-note">⚠️ Con la app cerrada o congelada, la notificación local no puede dispararse (límite del navegador). El respaldo del calendario sí avisa a la hora exacta. Las notificaciones con la app cerrada (Web Push) requieren sesión y servidor configurado (este texto se actualiza según el estado real).</p>
         <div class="alarm-backup">
           <p class="alarm-backup-title">¿La app va a estar cerrada? Respalda el aviso en tu calendario:</p>
           <div class="alarm-backup-btns">
@@ -658,6 +706,13 @@
         <div id="alarm-list-wrap" class="alarm-list-wrap hidden">
           <h4 class="alarm-list-title">Recordatorios activos</h4>
           <ul id="alarm-list" class="alarm-list"></ul>
+        </div>
+
+        <!-- Historial de notificaciones ENVIADAS por el backend (FCM/Web Push) —
+             no es confirmación de entrega, ver GET /api/v1/alarms/notifications. -->
+        <div id="alarm-history-wrap" class="alarm-list-wrap hidden">
+          <h4 class="alarm-list-title">Notificaciones enviadas</h4>
+          <ul id="alarm-history-list" class="alarm-list"></ul>
         </div>
       </div>
     </div>

@@ -389,6 +389,11 @@ class MainActivity : ComponentActivity() {
         // creadas en la web mientras la app estuvo cerrada llegan al instante
         // (no hay que esperar el ciclo periódico). No-op si no hay token.
         AlarmSync.run(this)
+        // Limpia el badge del ícono al volver a primer plano por CUALQUIER vía
+        // (recientes, ícono del launcher), no solo al tocar la notificación
+        // directamente (setAutoCancel(true) en alarmNotification() solo cubre
+        // ese caso). No-op si ya no había notificación activa.
+        NotificationHelper.cancelAlarm(this)
     }
 
     // AlarmSync corre en 2do plano SIEMPRE (esté la Activity pausada o no) y
