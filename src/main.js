@@ -2298,6 +2298,16 @@ document.addEventListener('vyneural:auth', (e) => {
   } else if (e.detail && e.detail.type === 'logout') {
     savedFrequencies = [];
     renderSavedFrequencyOptions();
+    // El estado en curso puede ser Premium (personalizado o un preset
+    // premiumOnly, ej. "Divino") — mismo criterio que el chequeo periódico
+    // de Premium más abajo (isPremiumUser cada 60s mientras se reproduce):
+    // sin sesión ya no hay forma de que esta persona sea premium, así que
+    // no debe quedar seleccionado (ni sonando) como si nada tras deslogear.
+    if (selected.custom || selected.premiumOnly) {
+      if (playing) stop(false);
+      const fallback = STATES.find((s) => !s.custom && !s.premiumOnly) || STATES[0];
+      selectState(fallback);
+    }
   }
 });
 
@@ -4112,6 +4122,13 @@ function openAlarmModal() {
 // api/alarm-notifications.js) — no es confirmación de entrega/reproducción
 // (REGLA DE ORO), se etiqueta como "enviada" en la UI a propósito.
 const ALARM_CHANNEL_LABEL = { fcm: 'App (FCM)', web_push: 'Navegador (Web Push)', none: 'No se pudo enviar' };
+// "De un solo uso": el backend guarda el historial completo (útil para
+// diagnóstico), pero la vista solo debe mostrar lo nuevo desde la última
+// vez que se abrió — un aviso de "llegó esto", no un log permanente que se
+// acumula en pantalla. Mismo patrón que PENDING_SEEN_KEY: un watermark en
+// localStorage, comparación por string funciona porque created_at es ISO
+// 8601 (orden lexicográfico = orden cronológico).
+const ALARM_NOTIF_SEEN_KEY = 'vyneural_alarm_notif_seen_before';
 async function renderAlarmHistory() {
   if (!alarmHistoryWrap || !alarmHistoryList) return;
   if (!getAccessToken()) {
@@ -4124,6 +4141,9 @@ async function renderAlarmHistory() {
   } catch (_) {
     /* sin red / sin sesión válida: se deja la sección vacía, no rompe el modal */
   }
+  const seenBefore = lsGet(ALARM_NOTIF_SEEN_KEY, null);
+  if (seenBefore) items = items.filter((n) => n.created_at && n.created_at > seenBefore);
+  if (items[0] && items[0].created_at) lsSet(ALARM_NOTIF_SEEN_KEY, items[0].created_at);
   alarmHistoryWrap.classList.toggle('hidden', items.length === 0);
   alarmHistoryList.innerHTML = '';
   items.forEach((n) => {
@@ -5105,6 +5125,7 @@ async function checkPendingReminder() {
           ambient: due.config.ambient,
           carrier: due.config.carrier,
           ownBase: due.config.ownBase,
+          minutes: due.config.minutes,
         };
       }
     } catch (_) {
@@ -5139,6 +5160,17 @@ async function checkPendingReminder() {
   }
   customBeat.value = String(pending.beat > 0 ? Math.round(pending.beat * 10) / 10 : 10);
   selectedWave = pending.wave || 'sine';
+  // La duración configurada al crear el recordatorio se perdía acá: el
+  // camino local (AlarmManager.onFire, más abajo) ya la aplicaba
+  // correctamente — este es el mismo bloque, portado al camino del
+  // servidor (el que se usa cuando el recordatorio llega con la app
+  // cerrada, el caso más común).
+  if (pending.minutes > 0) {
+    timerMinutes = pending.minutes;
+    timerOptions.querySelectorAll('.timer-btn').forEach((btn) =>
+      btn.classList.toggle('active', parseInt(btn.dataset.minutes, 10) === pending.minutes),
+    );
+  }
   ambientTypes = new Set(
     Array.isArray(pending.ambient) ? pending.ambient.filter((id) => AMBIENT_IDS.includes(id)) : [],
   );
