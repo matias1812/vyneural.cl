@@ -87,14 +87,25 @@ object AlarmSync {
             return
         }
         Thread {
+            // Cada paso en su propio try/catch: antes, una excepción en
+            // syncAlarms() (una alarma puntual con datos raros del servidor)
+            // impedía que reportDevice() corriera SIQUIERA UNA VEZ en ese
+            // ciclo — bug real, invisible desde afuera (el único rastro era
+            // un log nativo en logcat, nunca en los logs del backend): el
+            // reporte del token FCM/permiso podía no intentarse nunca,
+            // ciclo tras ciclo, mientras se veía "todo bien" salvo por la
+            // ausencia total de PUT /devices/me en el servidor.
             try {
                 syncAlarms(context)
+            } catch (e: Exception) {
+                BineuralLog.e("alarmsync", "syncAlarms falló", e)
+            }
+            try {
                 reportDevice(context)
             } catch (e: Exception) {
-                BineuralLog.e("alarmsync", "ciclo de sincronización falló", e)
-            } finally {
-                schedulePeriodic(context)
+                BineuralLog.e("alarmsync", "reportDevice falló", e)
             }
+            schedulePeriodic(context)
         }.start()
     }
 
