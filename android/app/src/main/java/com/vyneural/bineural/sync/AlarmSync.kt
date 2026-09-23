@@ -265,10 +265,23 @@ object AlarmSync {
         val refreshToken = AuthStore.refreshToken(context) ?: return RefreshOutcome.REJECTED
         val body = JSONObject().put("refresh_token", refreshToken)
         val result = httpPost("${BuildConfig.API_BASE}/api/v1/auth/refresh", body)
-        // code == -1 es httpPost's propio marcador de fallo de red/timeout (ver
-        // HttpResult más abajo) — cualquier código HTTP real (incluido 401) es
-        // un rechazo explícito del servidor, no un problema de conectividad.
+        // code == -1 es httpPost's propio marcador de fallo de red/timeout.
+        // Bug real visto en producción: un 422 (body truncado/malformado en
+        // una subida por datos móviles — POST /auth/refresh SOLO puede
+        // devolver 401 "token inválido" o 429 "rate limit" desde código de
+        // aplicación; un 422 es SIEMPRE un fallo de parseo de FastAPI, nunca
+        // un rechazo real del refresh token) se trataba igual que un 401 y
+        // limpiaba AuthStore entero — matando la sincronización de alarmas y
+        // el reporte del token FCM hasta el próximo login manual, con una
+        // sesión que en realidad seguía siendo válida. Solo un 401 explícito
+        // significa "el refresh token no sirve"; cualquier otro código (422,
+        // 429, 5xx) se trata como fallo transitorio — se reintenta en el
+        // próximo ciclo sin tocar la sesión.
         if (result.code == -1) return RefreshOutcome.NETWORK_FAILURE
+        if (result.code != 401 && (result.code !in 200..299 || result.body == null)) {
+            BineuralLog.e("alarmsync", "refresh: respuesta inesperada ${result.code}, sesión intacta")
+            return RefreshOutcome.NETWORK_FAILURE
+        }
         if (result.code !in 200..299 || result.body == null) return RefreshOutcome.REJECTED
         return try {
             val json = JSONObject(result.body)
