@@ -2,6 +2,7 @@ import './site.css';
 import './report-bug.js';
 import './ui/auth.js';
 import { initPermissionsModal, openPermissions } from './ui/permissions-modal.js';
+import { unsubscribeFromPush } from './api/push.js';
 import { inject } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
 
@@ -21,6 +22,17 @@ const IN_APP =
   typeof window !== 'undefined' &&
   (typeof window.AndroidBridgeNative !== 'undefined' || location.protocol === 'file:');
 if (IN_APP) document.documentElement.classList.add('in-app');
+
+// Limpieza proactiva de una PushSubscription (Web Push) vieja de antes del
+// gate de subscribeToPush() (ver api/push.js) — antes esto solo se daba de
+// baja la próxima vez que el usuario tocara login/ajustes, así que un
+// dispositivo actualizado por Play podía seguir recibiendo el fallback de
+// Web Push (sin sonido/vibración/canal real, ver reminders.py) indefinidamente
+// hasta esa próxima interacción. Corre en TODAS las páginas (igual que el
+// resto de este archivo) para que se limpie apenas se abre la app, no
+// después. unsubscribeFromPush() ya es barato cuando no hay nada que dar de
+// baja (dos chequeos locales, sin red).
+if (IN_APP) unsubscribeFromPush().catch(() => {});
 
 // Dentro de la app instalada, la tarjeta de descarga se convierte en un aviso
 // de que la aplicación ya está en uso (sin botón de instalar). El botón del
