@@ -170,6 +170,40 @@ object AlarmSync {
         BineuralLog.d("alarmsync", "alarmas sincronizadas: ${newSynced.size} programada(s)")
     }
 
+    // El registro del token dependía ENTERAMENTE de onNewToken() (solo dispara
+    // cuando Play Services decide rotar el token por su cuenta) — si esa
+    // rotación coincidía con un momento sin sesión nativa viva (ver el fix
+    // de refreshAccessToken más abajo), el token nuevo se guardaba local
+    // (FcmTokenStore) pero JAMÁS se reportaba al backend hasta la próxima
+    // rotación real, que puede tardar semanas. Mientras tanto el backend
+    // seguía con el token VIEJO (ya invalidado por Firebase, ver
+    // push/fcm.py::UnregisteredError) y cada intento de FCM fallaba en
+    // silencio, cayendo siempre a Web Push. Bug real reportado en vivo:
+    // "a veces llega, a veces no llega nada". Fix: en cada ciclo se le
+    // pregunta a Firebase directamente cuál es el token VIGENTE ahora mismo
+    // (no el que quedó cacheado la última vez que onNewToken() disparó) —
+    // esto es idempotente y barato (el SDK de Firebase cachea internamente,
+    // no pega a la red si no hace falta), y garantiza que reportDevice()
+    // nunca reenvíe un token que Firebase ya sabe que está muerto.
+    private fun currentFcmToken(context: Context): String? {
+        val cached = com.vyneural.bineural.util.FcmTokenStore.get(context)
+        return try {
+            val fresh = com.google.android.gms.tasks.Tasks.await(
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().token,
+                8, java.util.concurrent.TimeUnit.SECONDS,
+            )
+            if (!fresh.isNullOrBlank() && fresh != cached) {
+                com.vyneural.bineural.util.FcmTokenStore.set(context, fresh)
+            }
+            fresh ?: cached
+        } catch (e: Exception) {
+            // Sin Play Services disponibles, sin red, o timeout: usar el
+            // último valor conocido en vez de dejar el reporte sin token.
+            BineuralLog.e("alarmsync", "no se pudo confirmar el token FCM vigente con Firebase, uso el guardado", e)
+            cached
+        }
+    }
+
     // ── Reporte del dispositivo (estado de push) ────────────────────────────
     private fun reportDevice(context: Context) {
         // En segundo plano no hay Activity (el detalle DENIED_PERMANENTLY lo
@@ -187,7 +221,7 @@ object AlarmSync {
         // Play Services, reinstalación) SIEMPRE dispara un reporte, aunque
         // permiso/versión no hayan cambiado — si no, el backend seguiría
         // mandando push al token viejo hasta el próximo cambio de versión.
-        val fcmToken = com.vyneural.bineural.util.FcmTokenStore.get(context)
+        val fcmToken = currentFcmToken(context)
         val syncedPrefs = context.getSharedPreferences(PREFS_SYNCED, Context.MODE_PRIVATE)
         val fingerprint = "$permission|${BuildConfig.VERSION_NAME}|${fcmToken ?: ""}"
         if (syncedPrefs.getString(KEY_LAST_REPORTED, null) == fingerprint) return
