@@ -990,8 +990,16 @@ function selectState(state) {
 
   // P5.6 (H1) — en la APK el estado seleccionado también retunea el motor
   // NATIVO en vivo: antes solo cambiaba la UI y el sonido seguía en el estado
-  // anterior hasta el próximo START (divergencia UI↔nativo).
-  if (playing) syncNativeAudioRetune();
+  // anterior hasta el próximo START (divergencia UI↔nativo). También cubre
+  // PAUSADO-pero-vivo (bug real reportado en vivo): pausar no detiene el
+  // servicio nativo (por diseño, para poder reanudar la MISMA sesión) — si
+  // el usuario cambiaba de preset en pausa, el servicio seguía con la
+  // frecuencia vieja cargada y el próximo play mandaba RESUME (retomar lo
+  // cargado), no un retune, así que sonaba la sesión anterior.
+  // syncNativeAudioRetune() ya es seguro sin reproducir (el lado nativo lo
+  // descarta si el servicio no está vivo; retune() en BinauralToneEngine.kt
+  // solo actualiza target base/beat, nunca toca gain/estado de reproducción).
+  if (playing || nativeServiceRunning()) syncNativeAudioRetune();
 
   // Registro de eventos: el cambio de estímulo queda documentado (P19), solo
   // durante una sesión activa (seleccionar estados sin sesión es ruido).
