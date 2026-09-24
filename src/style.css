@@ -2394,11 +2394,11 @@ body.immersive .controls {
   background: linear-gradient(135deg, var(--accent), #6366f1);
   color: #fff;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   transition: filter 0.15s ease, transform 0.15s ease;
 }
 .quick-start:hover {
-  filter: brightness(1.1);
+  filter: brightness(1.06);
 }
 .quick-start:active {
   transform: scale(0.98);

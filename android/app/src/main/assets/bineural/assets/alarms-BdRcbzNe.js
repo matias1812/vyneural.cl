@@ -1,0 +1,1 @@
+import{H as t,d as l,p as r,G as e}from"./site-CAtRaTAK.js";const p=()=>t("/api/v1/alarms"),c=a=>e("/api/v1/alarms",a),o=(a,s)=>r(`/api/v1/alarms/${a}`,s),d=a=>l(`/api/v1/alarms/${a}`);export{c,d,p as l,o as u};

@@ -285,14 +285,15 @@ a:hover {
   border-radius: 999px;
   background: linear-gradient(135deg, #a78bfa, #6366f1);
   color: #fff;
-  font-weight: 700;
-  box-shadow: 0 12px 34px -8px rgba(167, 139, 250, 0.55);
-  transition: transform 0.2s ease;
+  font-weight: 600;
+  box-shadow: 0 4px 14px -6px rgba(167, 139, 250, 0.35);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
   text-decoration: none;
 }
 
 .page-hero .hero-cta:hover {
-  transform: translateY(-2px) scale(1.03);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px -6px rgba(167, 139, 250, 0.45);
   text-decoration: none;
 }
 
@@ -1303,7 +1304,7 @@ body.immersive .bug-fab {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 12px 30px -6px rgba(167, 139, 250, 0.55);
+  box-shadow: 0 4px 12px -4px rgba(167, 139, 250, 0.3);
   transition: transform 0.2s ease, box-shadow 0.25s ease;
 }
 
@@ -1313,8 +1314,8 @@ body.immersive .bug-fab {
 }
 
 .bug-fab:hover {
-  transform: translateY(-2px) scale(1.06);
-  box-shadow: 0 16px 36px -6px rgba(167, 139, 250, 0.7);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -4px rgba(167, 139, 250, 0.4);
 }
 
 .bug-fab-pulse {
@@ -1483,10 +1484,10 @@ body.immersive .bug-fab {
   background: linear-gradient(135deg, var(--accent), #6366f1);
   color: #fff;
   font: inherit;
-  font-weight: 700;
+  font-weight: 600;
   font-size: 15px;
   cursor: pointer;
-  box-shadow: 0 10px 26px -8px rgba(167, 139, 250, 0.55);
+  box-shadow: 0 4px 12px -6px rgba(167, 139, 250, 0.3);
   transition: transform 0.15s ease, opacity 0.2s ease;
 }
 
@@ -2986,10 +2987,10 @@ html:not(.in-app) .in-app-only {
   background: linear-gradient(135deg, #a78bfa, #6366f1);
   color: #fff;
   font-size: 14.5px;
-  font-weight: 700;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  box-shadow: 0 12px 30px -10px rgba(167, 139, 250, 0.6);
+  box-shadow: 0 4px 12px -6px rgba(167, 139, 250, 0.35);
   transition: transform 0.15s ease, opacity 0.15s ease;
 }
 
@@ -3817,7 +3818,7 @@ html:not(.in-app) .in-app-only {
   background: linear-gradient(135deg, #a78bfa, #6366f1);
   color: #fff;
   font-size: 13.5px;
-  font-weight: 700;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: transform 0.15s ease;
