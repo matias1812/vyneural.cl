@@ -59,12 +59,13 @@ export async function changePassword(currentPassword, newPassword) {
   });
 }
 
-// Desactiva la cuenta (backend: User.is_active=False — bloquea login y
-// cualquier request autenticado de ahí en más). No borra datos ni es
-// reversible por el propio usuario. Limpia la sesión local al confirmar: el
-// access token vigente ya no serviría para nada de todos modos.
-export async function deactivateAccount(password) {
-  const result = await post('/api/v1/users/me/deactivate', { password });
+// Borra la cuenta y TODOS los datos asociados (backend: DELETE del User,
+// cascadea alarmas/itinerarios/frecuencias/pagos/dispositivos/comentarios —
+// ver routers/users.py::delete_account). Irreversible, no hay "deshacer".
+// Limpia la sesión local al confirmar: el access token vigente ya no
+// serviría para nada de todos modos.
+export async function deleteAccount(password) {
+  const result = await post('/api/v1/users/me/delete', { password });
   clearSession();
   return result;
 }

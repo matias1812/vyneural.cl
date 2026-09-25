@@ -11,14 +11,14 @@
 // Aditiva: si no hay sesión muestra la puerta de entrada; sin backend la
 // app sigue funcionando igual.
 
-import { me, changePassword, resendVerification, deactivateAccount } from './api/auth.js';
+import { me, changePassword, resendVerification, deleteAccount } from './api/auth.js';
 import { getAccessToken, notifyNativeAlarmsChanged } from './api/client.js';
 import { listFavorites, removeFavorite } from './api/favorites.js';
 import {
   listFrequencies,
   deleteFrequency,
 } from './api/frequencies.js';
-import { listAlarms, deleteAlarm } from './api/alarms.js';
+import { listAlarms, deleteAlarm, updateAlarm } from './api/alarms.js';
 import { listItineraries } from './api/itineraries.js';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
 import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
@@ -210,14 +210,20 @@ function renderAlarms(alarms, its) {
         : 'sin horario fijo';
       const rep = a.repeat_rule ? ` · ${escapeHtml(a.repeat_rule)}` : '';
       const linked = linkedIds.has(a.id);
-      const del = linked
-        ? `<small class="cuenta-item-note">🔗 Parte de un itinerario — editalo en /rutina</small>`
-        : `<button type="button" class="cuenta-item-del" data-act="delalarm" data-id="${escapeHtml(a.id)}" aria-label="Eliminar alarma">✕</button>`;
+      // El toggle de enabled/disabled funciona para CUALQUIER alarma, ligada
+      // o no — el backend ya no pisa `enabled` al re-sincronizar un paso de
+      // itinerario existente (itineraries.py::_sync_item_alarm, 2026-09-24),
+      // solo al crearla. El borrado sigue bloqueado para las ligadas (409 del
+      // backend: se editan/borran desde su itinerario en /rutina).
+      const toggle = `<button type="button" class="cuenta-item-toggle" data-act="togglealarm" data-id="${escapeHtml(a.id)}" data-enabled="${a.enabled ? '1' : '0'}" aria-label="${a.enabled ? 'Desactivar' : 'Activar'} alarma">${a.enabled ? '⏸️' : '▶️'}</button>`;
+      const actions = linked
+        ? `${toggle}<small class="cuenta-item-note">🔗 Parte de un itinerario — editalo en /rutina</small>`
+        : `${toggle}<button type="button" class="cuenta-item-del" data-act="delalarm" data-id="${escapeHtml(a.id)}" aria-label="Eliminar alarma">✕</button>`;
       return `<div class="cuenta-item-body">
           <b>${escapeHtml(a.name || 'Recordatorio')} ${a.enabled ? '' : '<em>(desactivada)</em>'}</b>
           <small>${escapeHtml(when)} · ${escapeHtml(a.timezone || 'UTC')}${rep}</small>
         </div>
-        ${del}`;
+        ${actions}`;
     },
   );
 }
@@ -823,6 +829,10 @@ async function handleAction(e) {
   } else if (act === 'delalarm') {
     await deleteAlarm(id).catch(() => {});
     notifyNativeAlarmsChanged();
+  } else if (act === 'togglealarm') {
+    const wasEnabled = btn.dataset.enabled === '1';
+    await updateAlarm(id, { enabled: !wasEnabled }).catch(() => {});
+    notifyNativeAlarmsChanged();
   } else if (act === 'forgetdev') {
     await forgetDevice(id).catch(() => {});
   }
@@ -919,9 +929,9 @@ function wirePasswordForm() {
   });
 }
 
-// ── Desactivar cuenta ───────────────────────────────────────────────────────
+// ── Eliminar cuenta ───────────────────────────────────────────────────────
 
-function wireDeactivateAccount() {
+function wireDeleteAccount() {
   const openBtn = $('deactivate-open');
   const modal = $('deactivate-modal');
   const closeBtn = $('deactivate-close');
@@ -954,20 +964,21 @@ function wireDeactivateAccount() {
     ev.preventDefault();
     errEl.classList.add('hidden');
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Desactivando…';
+    submitBtn.textContent = 'Eliminando…';
     try {
-      await deactivateAccount(pwEl.value);
+      await deleteAccount(pwEl.value);
       // Misma señal que un logout real: la nav y el resto de la app deben
       // verse igual de "sin sesión" que si el usuario hubiera cerrado sesión
-      // a mano — la cuenta quedó bloqueada, no hay nada más que sincronizar.
+      // a mano — la cuenta y sus datos ya no existen, no hay nada más que
+      // sincronizar.
       document.dispatchEvent(new CustomEvent('vyneural:auth', { detail: { type: 'logout' } }));
       close();
       renderGate();
     } catch (err) {
-      showErr((err && err.detail) || 'No se pudo desactivar la cuenta. Verificá la contraseña.');
+      showErr((err && err.detail) || 'No se pudo eliminar la cuenta. Verificá la contraseña.');
     } finally {
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Sí, desactivar mi cuenta';
+      submitBtn.textContent = 'Sí, eliminar mi cuenta y mis datos';
     }
   });
 }
@@ -1027,7 +1038,7 @@ function init() {
   }
   wireVerify();
   wirePasswordForm();
-  wireDeactivateAccount();
+  wireDeleteAccount();
 
   // Estado de sincronización en vivo.
   const syncEl = $('cuenta-sync-status');
