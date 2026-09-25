@@ -3,7 +3,7 @@
 //
 // Arquitectura objetivo (P0.5): un único pipeline
 //
-//   AudioContext → masterGain → compressor → analyser → outputTap
+//   AudioContext → masterGain → compressor → analyser → limiter → outputTap
 //                                                          │
 //                                     ┌────────────────────┴──────────┐
 //                                'element' (Android/desktop)     'direct' (iOS)

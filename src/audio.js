@@ -68,7 +68,15 @@ export class BinauralEngine {
   ensure() {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AC();
+      try {
+        // 48kHz + 'playback' (en vez del 'interactive' por defecto, pensado
+        // para UI de baja latencia): más estable para sesiones binaurales
+        // largas y continuas. Algunos navegadores viejos rechazan estas
+        // opciones en vez de ignorarlas — el catch cae al constructor plano.
+        this.ctx = new AC({ sampleRate: 48000, latencyHint: 'playback' });
+      } catch (_) {
+        this.ctx = new AC();
+      }
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = 0;
       this.analyser = this.ctx.createAnalyser();
@@ -82,14 +90,30 @@ export class BinauralEngine {
       this.compressor.ratio.value = 4;
       this.compressor.attack.value = 0.005;
       this.compressor.release.value = 0.25;
+      // Limiter duro final: el compresor de arriba es suave (ratio 4:1) y
+      // pensado para pegar capas, no para garantizar que nunca se pase de
+      // 0dB — combinaciones de tono + ambiente a volumen alto podían
+      // saturar igual. Este va justo antes de la salida.
+      this.limiter = this.ctx.createDynamicsCompressor();
+      // threshold/knee/release ajustados (2026-09-24): el release de 100ms
+      // (~10Hz) caía dentro del rango de batido binaural que la app genera
+      // (~0.5-12Hz delta/theta/alpha) — se reportó como interferencia/pumping
+      // audible. Subido a 180ms para salir de ese rango sin volverlo lento.
+      // ratio/attack sin tocar: son los que garantizan que nunca pase de 0dB.
+      this.limiter.threshold.value = -2;
+      this.limiter.knee.value = 3;
+      this.limiter.ratio.value = 20;
+      this.limiter.attack.value = 0.001;
+      this.limiter.release.value = 0.18;
       this.masterGain.connect(this.compressor);
       this.compressor.connect(this.analyser);
+      this.analyser.connect(this.limiter);
       // Salida: el transporte decide dónde llega la señal (elemento real o
       // destination directa). Sin transporte (antes de asignarlo): directa.
       if (this.transport) {
-        this.transport.attach(this.ctx, this.analyser);
+        this.transport.attach(this.ctx, this.limiter);
       } else {
-        this.analyser.connect(this.ctx.destination);
+        this.limiter.connect(this.ctx.destination);
       }
       // Estado real del contexto como fuente de verdad del ciclo de vida:
       // iOS al bloquear, pérdida de audio focus o congelación de la pestaña
