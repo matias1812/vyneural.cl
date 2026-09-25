@@ -49,13 +49,13 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/rutina-D4gPus5l.js"></script>
-    <link rel="modulepreload" href="./assets/site-CAtRaTAK.js">
-    <link rel="modulepreload" href="./assets/freq-cover-CuWWt7L-.js">
-    <link rel="modulepreload" href="./assets/alarms-BdRcbzNe.js">
-    <link rel="modulepreload" href="./assets/billing-npaTbfYv.js">
-    <link rel="modulepreload" href="./assets/premium-gate-DAQcFuWn.js">
-    <link rel="stylesheet" href="./assets/site-fA-KVjDA.css">
+    <script type="module" src="./assets/rutina-pHETuigj.js"></script>
+    <link rel="modulepreload" href="./assets/site-6Ad-N4f7.js">
+    <link rel="modulepreload" href="./assets/freq-cover-BCk4oKg-.js">
+    <link rel="modulepreload" href="./assets/alarms-CJd359K7.js">
+    <link rel="modulepreload" href="./assets/billing-C8kGNIzb.js">
+    <link rel="modulepreload" href="./assets/premium-gate-C_CpF6IF.js">
+    <link rel="stylesheet" href="./assets/site-CzgXxyGL.css">
   </head>
   <body>
     <header class="site-nav">
@@ -333,10 +333,16 @@
             <label>Horario
               <input id="it-step-time" type="time" />
             </label>
-            <label class="it-step-notify-wrap hidden" id="it-step-notify-wrap">
-              <input type="checkbox" id="it-step-notify" checked />
-              🔔 Avisarme con notificación a esa hora
-            </label>
+            <div class="it-step-notify-group hidden" id="it-step-notify-group">
+              <label class="it-step-notify-wrap" id="it-step-notify-wrap">
+                <input type="checkbox" id="it-step-notify" checked />
+                🔔 Avisarme con notificación a esa hora
+              </label>
+              <label class="it-step-notify-wrap it-step-notify-sub" id="it-step-alarm-wrap">
+                <input type="checkbox" id="it-step-alarm" checked />
+                ⏰ Que suene como alarma (despierta el teléfono, ideal para dormir/madrugar)
+              </label>
+            </div>
             <p class="cuenta-empty" id="it-step-time-hint">
               Todo paso necesita un horario (desmarcá el aviso de arriba si preferís que quede
               solo agendado, sin notificación). Se repite cada semana en el día del itinerario;
