@@ -240,7 +240,7 @@
           </button>
         </div>
         <div class="visualizer-wrap">
-          <canvas id="visualizer"></canvas>
+          <canvas id="visualizer" aria-hidden="true"></canvas>
           <!-- Controles individuales sobre las gotas: play abajo a la derecha,
                compartir abajo a la izquierda y volumen a su derecha. -->
           <button id="play-btn" class="play-btn ov-play" aria-label="Comenzar sesión" title="Comenzar sesión"></button>
@@ -353,10 +353,10 @@
 
       <section class="panel alarms-view hidden" id="alarms-view" aria-label="Recordatorios programados">
         <h2 class="section-title">Recordatorios programados</h2>
-        <p class="section-hint">Tus alarmas de sesión. Tocá la campana para agregar o editar una.</p>
+        <p class="section-hint">Tus alarmas de sesión. Editalas con el ✎ de la lista; para agregar una nueva, armala en tu rutina.</p>
         <ul id="alarms-view-list" class="alarms-view-list"></ul>
         <div class="alarms-view-actions">
-          <button id="alarms-view-add" class="alarms-view-add"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Agregar recordatorio</button>
+          <a id="alarms-view-add" class="alarms-view-add" href="/rutina"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Agregar en tu rutina</a>
           <a class="alarms-view-link" href="/rutina">📋 Ver mi rutina</a>
         </div>
       </section>
@@ -557,81 +557,113 @@
       <button id="install-close" class="ib-close" aria-label="Cerrar aviso">✕</button>
     </div>
 
-    <div id="alarm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Recordatorio de sesión">
+    <div id="alarm-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Notificaciones">
       <div class="modal-card alarm-card">
         <div class="modal-head">
-          <h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg> Recordatorio de sesión</h3>
-          <button id="alarm-close" class="modal-close" aria-label="Cerrar recordatorio">✕</button>
+          <h3><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg> Notificaciones</h3>
+          <button id="alarm-close" class="modal-close" aria-label="Cerrar notificaciones">✕</button>
         </div>
 
-        <label class="alarm-field">
-          <span class="alarm-label">Hora del recordatorio</span>
-          <input id="alarm-time" type="time" class="alarm-input" />
-        </label>
+        <!-- Las sesiones/alarmas solo se crean desde /rutina — la campana ya
+             no tiene un formulario de "crear desde cero" (ver
+             #alarms-view-add, que ahora enlaza ahí). Lo único que queda acá
+             arriba es el historial; editar hora/frecuencia de un recordatorio
+             YA existente se hace desde la lista de la página principal
+             (#alarms-view-list → ✎ → beginEditAlarm), que reabre este mismo
+             modal con #alarm-edit-fields visible. -->
+        <div class="alarm-history-head">
+          <h4 class="alarm-list-title">Notificaciones nuevas</h4>
+        </div>
+        <div id="alarm-history-wrap" class="hidden">
+          <ul id="alarm-history-list" class="alarm-list"></ul>
+        </div>
 
-        <!-- P5 — rutina: días de repetición (vacío = una sola vez).
-             Exclusivo de la APK (.in-app-only): el reloj del sistema puede
-             reprogramar alarmas con la app cerrada; la web no puede repetir. -->
-        <div class="alarm-field in-app-only">
-          <span class="alarm-label">Se repite <em class="alarm-days-hint">(vacío = una sola vez)</em></span>
-          <div id="alarm-days" class="alarm-days" role="group" aria-label="Días de la semana">
-            <button type="button" class="alarm-day" data-day="1" aria-pressed="false">L</button>
-            <button type="button" class="alarm-day" data-day="2" aria-pressed="false">M</button>
-            <button type="button" class="alarm-day" data-day="3" aria-pressed="false">X</button>
-            <button type="button" class="alarm-day" data-day="4" aria-pressed="false">J</button>
-            <button type="button" class="alarm-day" data-day="5" aria-pressed="false">V</button>
-            <button type="button" class="alarm-day" data-day="6" aria-pressed="false">S</button>
-            <button type="button" class="alarm-day" data-day="0" aria-pressed="false">D</button>
+        <!-- Solo visible en modo edición (beginEditAlarm/endEditAlarm togglean
+             .hidden acá) — nunca para crear un recordatorio desde cero. -->
+        <div id="alarm-edit-fields" class="hidden">
+          <label class="alarm-field">
+            <span class="alarm-label">Hora del recordatorio</span>
+            <input id="alarm-time" type="time" class="alarm-input" />
+          </label>
+
+          <!-- P5 — rutina: días de repetición (vacío = una sola vez).
+               Exclusivo de la APK (.in-app-only): el reloj del sistema puede
+               reprogramar alarmas con la app cerrada; la web no puede repetir. -->
+          <div class="alarm-field in-app-only">
+            <span class="alarm-label">Se repite <em class="alarm-days-hint">(vacío = una sola vez)</em></span>
+            <div id="alarm-days" class="alarm-days" role="group" aria-label="Días de la semana">
+              <button type="button" class="alarm-day" data-day="1" aria-pressed="false">L</button>
+              <button type="button" class="alarm-day" data-day="2" aria-pressed="false">M</button>
+              <button type="button" class="alarm-day" data-day="3" aria-pressed="false">X</button>
+              <button type="button" class="alarm-day" data-day="4" aria-pressed="false">J</button>
+              <button type="button" class="alarm-day" data-day="5" aria-pressed="false">V</button>
+              <button type="button" class="alarm-day" data-day="6" aria-pressed="false">S</button>
+              <button type="button" class="alarm-day" data-day="0" aria-pressed="false">D</button>
+            </div>
+          </div>
+
+          <label class="alarm-field">
+            <span class="alarm-label">Frecuencia a activar</span>
+            <select id="alarm-state" class="alarm-input"></select>
+          </label>
+
+          <div id="alarm-custom" class="alarm-custom hidden">
+            <label class="alarm-field">
+              <span class="alarm-label">Frecuencia base (Hz)</span>
+              <input id="alarm-base" type="number" min="40" max="800" step="1" value="220" class="alarm-input" />
+            </label>
+            <label class="alarm-field">
+              <span class="alarm-label">Ritmo binaural (Hz)</span>
+              <input id="alarm-beat" type="number" min="0.5" max="40" step="0.5" value="10" class="alarm-input" />
+            </label>
+            <label class="alarm-field">
+              <span class="alarm-label">Forma de onda</span>
+              <select id="alarm-wave" class="alarm-input">
+                <option value="sine" selected>Senoidal (suave)</option>
+                <option value="triangle">Triangular</option>
+                <option value="sawtooth">Diente de sierra</option>
+                <option value="square">Cuadrada</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="alarm-field">
+            <span class="alarm-label">Duración de la sesión</span>
+            <select id="alarm-minutes" class="alarm-input">
+              <option value="15">15 minutos</option>
+              <option value="20">20 minutos</option>
+              <option value="25">25 minutos</option>
+              <option value="30" selected>30 minutos</option>
+              <option value="60">60 minutos</option>
+              <option value="0">Sin límite</option>
+            </select>
+          </label>
+
+          <div class="alarm-actions">
+            <button id="alarm-edit-cancel" class="alarm-settings-btn hidden" type="button">Cancelar edición</button>
+            <button id="alarm-save" class="quick-start">Guardar cambios</button>
+          </div>
+          <div class="alarm-backup">
+            <p class="alarm-backup-title">¿La app va a estar cerrada? Respalda el aviso en tu calendario:</p>
+            <div class="alarm-backup-btns">
+              <a id="alarm-gcal" class="alarm-backup-btn" target="_blank" rel="noopener noreferrer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Google Calendar</a>
+              <button id="alarm-ics" class="alarm-backup-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg> Descargar .ics</button>
+            </div>
           </div>
         </div>
 
-        <label class="alarm-field">
-          <span class="alarm-label">Frecuencia a activar</span>
-          <select id="alarm-state" class="alarm-input"></select>
-        </label>
-
-        <div id="alarm-custom" class="alarm-custom hidden">
-          <label class="alarm-field">
-            <span class="alarm-label">Frecuencia base (Hz)</span>
-            <input id="alarm-base" type="number" min="40" max="800" step="1" value="220" class="alarm-input" />
-          </label>
-          <label class="alarm-field">
-            <span class="alarm-label">Ritmo binaural (Hz)</span>
-            <input id="alarm-beat" type="number" min="0.5" max="40" step="0.5" value="10" class="alarm-input" />
-          </label>
-          <label class="alarm-field">
-            <span class="alarm-label">Forma de onda</span>
-            <select id="alarm-wave" class="alarm-input">
-              <option value="sine" selected>Senoidal (suave)</option>
-              <option value="triangle">Triangular</option>
-              <option value="sawtooth">Diente de sierra</option>
-              <option value="square">Cuadrada</option>
-            </select>
-          </label>
-        </div>
-
-        <label class="alarm-field">
-          <span class="alarm-label">Duración de la sesión</span>
-          <select id="alarm-minutes" class="alarm-input">
-            <option value="15">15 minutos</option>
-            <option value="20">20 minutos</option>
-            <option value="25">25 minutos</option>
-            <option value="30" selected>30 minutos</option>
-            <option value="60">60 minutos</option>
-            <option value="0">Sin límite</option>
-          </select>
-        </label>
-
-        <!-- P7 — personalización de alarma (sonido/vibración/posponer): mismo
-             wireado de siempre (soundUri/vibrationId/snoozeEnabled/snoozeMinutes,
-             el bridge nativo ya los acepta), ahora agrupado en una sección
-             plegable con el estilo propio del modal (.alarm-field/.alarm-input,
-             en vez de las clases prestadas de /cuenta) para que no se vea
-             "pegado" al resto. Exclusivo de la APK: no hay canal de
-             notificación real que los respete en web/PWA. -->
-        <details id="alarm-settings" class="alarm-troubleshoot alarm-settings-card in-app-only">
-          <summary>⚙️ Ajustes de sonido y vibración</summary>
-          <div class="alarm-settings-grid">
+        <!-- Siempre visible, sin depender de estar editando un recordatorio
+             puntual: sonido/vibración/posponer + estado de permisos, todo lo
+             que antes vivía disperso en dos <details> separados. -->
+        <button type="button" id="alarm-settings-toggle" class="alarm-settings-btn alarm-settings-toggle">⚙️ Ajustes de alarma</button>
+        <div id="alarm-settings-panel" class="alarm-settings-card hidden">
+          <!-- P7 — personalización de alarma (sonido/vibración/posponer): mismo
+               wireado de siempre (soundUri/vibrationId/snoozeEnabled/snoozeMinutes,
+               el bridge nativo ya los acepta). Exclusivo de la APK: no hay canal
+               de notificación real que los respete en web/PWA. Opera sobre el
+               recordatorio actualmente en edición (mismo PUT /alarms/{id} que
+               el resto del modal). -->
+          <div class="alarm-settings-grid in-app-only">
             <label class="alarm-field">
               <span class="alarm-label">📳 Vibración</span>
               <select id="alarm-vibration" class="alarm-input">
@@ -649,7 +681,7 @@
               </button>
             </label>
           </div>
-          <div class="alarm-settings-grid">
+          <div class="alarm-settings-grid in-app-only">
             <label class="alarm-field alarm-snooze-toggle">
               <span class="alarm-label">⏰ Posponer</span>
               <span class="alarm-checkbox-row">
@@ -667,24 +699,17 @@
               </select>
             </label>
           </div>
-        </details>
 
-        <!-- Recorte de texto: los bloques de estado/permisos/troubleshooting
-             (antes todos visibles a la vez) van colapsados acá. refreshAlarmPerm()
-             abre <details> automáticamente cuando de verdad hay un problema
-             (permiso denegado, alarma no exacta); si todo está en orden queda
-             cerrado por defecto. -->
-        <details id="alarm-troubleshoot" class="alarm-troubleshoot">
-          <summary id="alarm-troubleshoot-summary">🔔 Estado de las notificaciones</summary>
           <p id="alarm-perm" class="alarm-perm"></p>
-          <!-- P4: si Android bloqueó las notificaciones de la APK, se ofrece
-               abrir los ajustes del sistema (OPEN_NOTIFICATION_SETTINGS). -->
-          <button id="alarm-perm-settings" class="alarm-settings-btn hidden" type="button">⚙️ Activar notificaciones en Android</button>
+          <!-- P4/P8/P5 (2026-09-24): notificaciones bloqueadas, canal degradado
+               y alarmas exactas comparten UN solo botón de arreglo — el de
+               "Permisos de la web" (permissions-modal.js). Acá solo queda el
+               texto explicando el estado (refreshAlarmPerm en main.js), sin
+               botón propio duplicado. -->
 
           <!-- P5: estado real de las alarmas exactas (SCHEDULE_EXACT_ALARM). En
                Android 14+ no se conceden por defecto → alarma aproximada ±60 s. -->
           <p id="alarm-exact" class="alarm-perm"></p>
-          <button id="alarm-exact-settings" class="alarm-settings-btn hidden" type="button">⚙️ Activar alarmas exactas en Android</button>
 
           <!-- P5: notas honestas solo visibles en la APK (la web ya tiene la suya). -->
           <div id="alarm-native-note" class="alarm-native-note hidden">
@@ -697,36 +722,6 @@
           </div>
 
           <p class="alarm-honest-note">⚠️ Con la app cerrada o congelada, la notificación local no puede dispararse (límite del navegador). El respaldo del calendario sí avisa a la hora exacta. Las notificaciones con la app cerrada (Web Push) requieren sesión y servidor configurado (este texto se actualiza según el estado real).</p>
-        </details>
-
-        <div class="alarm-actions">
-          <button id="alarm-edit-cancel" class="alarm-settings-btn hidden" type="button">Cancelar edición</button>
-          <button id="alarm-save" class="quick-start">Guardar recordatorio</button>
-        </div>
-        <div class="alarm-backup">
-          <p class="alarm-backup-title">¿La app va a estar cerrada? Respalda el aviso en tu calendario:</p>
-          <div class="alarm-backup-btns">
-            <a id="alarm-gcal" class="alarm-backup-btn" target="_blank" rel="noopener noreferrer"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Google Calendar</a>
-            <button id="alarm-ics" class="alarm-backup-btn"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg> Descargar .ics</button>
-          </div>
-        </div>
-
-        <div id="alarm-list-wrap" class="alarm-list-wrap hidden">
-          <h4 class="alarm-list-title">Recordatorios activos</h4>
-          <ul id="alarm-list" class="alarm-list"></ul>
-        </div>
-
-        <!-- Historial de notificaciones ENVIADAS por el backend (FCM/Web Push) —
-             no es confirmación de entrega, ver GET /api/v1/alarms/notifications.
-             El botón de prueba dispara un push AHORA (POST /alarms/test-notification),
-             sin esperar una alarma vencida: sirve para aislar en un toque si el
-             envío funciona o no, en vez de tener que agendar y esperar. -->
-        <div class="alarm-history-head">
-          <h4 class="alarm-list-title">Notificaciones enviadas</h4>
-          <button id="alarm-test-notification" type="button" class="alarm-settings-btn">🔔 Enviar notificación de prueba</button>
-        </div>
-        <div id="alarm-history-wrap" class="hidden">
-          <ul id="alarm-history-list" class="alarm-list"></ul>
         </div>
       </div>
     </div>
@@ -837,28 +832,11 @@
           <button id="perm-battery-settings" class="perm-test hidden">Quitar restricción de batería</button>
           <button id="perm-autostart-settings" class="perm-test hidden">Revisar inicio automático</button>
         </div>
-        <!-- Recorte de texto: el detalle de plataforma/estado puro va
-             colapsado — mismo patrón que #alarm-troubleshoot. Auto-abierto
-             por main.js solo si hay algo accionable ahí adentro. -->
+        <!-- Recorte de texto: el detalle técnico puro va colapsado acá, y
+             NUNCA se auto-abre (antes sí, reportado como "relleno" en vivo) —
+             solo para quien explícitamente busca más detalle. -->
         <details id="perm-details" class="alarm-troubleshoot">
           <summary>Ver más detalles</summary>
-          <div class="perm-diff-box" id="perm-diff-box">
-            <div class="pdb-title">Diferencias de plataforma</div>
-            <div class="pdb-grid">
-              <div class="pdb-item">
-                <b>Audio Background</b>
-                <span id="pdb-audio">Web: Limitado<br>APK: Foreground Service</span>
-              </div>
-              <div class="pdb-item">
-                <b>Alarmas</b>
-                <span id="pdb-alarms">Web: Solo app abierta<br>APK: Scheduler del SO</span>
-              </div>
-              <div class="pdb-item">
-                <b>Notificaciones</b>
-                <span id="pdb-notif">Web: Push (con back)<br>APK: Locales (sin back)</span>
-              </div>
-            </div>
-          </div>
           <div class="perm-row" id="perm-platform-row" style="display:none"><span>Plataforma</span><b id="perm-platform" class="perm-state">—</b></div>
           <div class="perm-row"><span>Control del reproductor (Media Session)</span><b id="perm-mediasession" class="perm-state">—</b></div>
           <div class="perm-row"><span>Pantalla activa (Wake Lock)</span><b id="perm-wakelock" class="perm-state">—</b></div>
@@ -923,6 +901,7 @@
           <h3>Sitio</h3>
           <a href="/privacidad">Privacidad</a>
           <a href="/terminos">Términos de uso</a>
+          <a href="/reembolso">Política de reembolso</a>
           <a href="/aviso-medico">Aviso médico</a>
           <a href="/cookies">Cookies</a>
           <a href="#" id="cookie-manage">Gestionar cookies</a>

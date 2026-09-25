@@ -1,5 +1,6 @@
 package com.vyneural.bineural
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
@@ -116,6 +117,19 @@ class MainActivity : ComponentActivity() {
 
         webView = WebView(this)
         setContentView(webView)
+        // P8 — antes el permiso de notificaciones era estrictamente "bajo
+        // demanda" (el usuario tenía que entrar a la campana y tocar
+        // "Activar"). Para una app de alarmas eso deja a mucha gente sin
+        // notificaciones simplemente porque nunca llegó a pedirlo — se pide
+        // directo al abrir la app por primera vez. notificationState() ya
+        // devuelve NOT_REQUESTED solo la primerísima vez (PermissionManager
+        // guarda el flag apenas se pide), así que esto no vuelve a molestar en
+        // aperturas siguientes. El delay corto evita pedirlo antes de que la
+        // ventana termine de dibujarse (confirmado que algunos fabricantes
+        // ignoran el diálogo si se lanza demasiado pronto en onCreate).
+        if (permissions.notificationState() == "NOT_REQUESTED") {
+            webView.postDelayed({ permissions.requestNotifications() }, 400)
+        }
         // targetSdk 36 fuerza edge-to-edge sin ningún opt-out (el atributo
         // legacy solo existía para targetSdk 35) — sin esto, el WebView
         // dibuja contenido debajo de la barra de estado/navegación en vez de
@@ -453,5 +467,26 @@ class MainActivity : ComponentActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         this.permissions.onRequestPermissionsResult(requestCode, grantResults)
+        // P8 — el momento de más atención del usuario es justo después de
+        // conceder el permiso (recién instaló/abrió la app): en dispositivos
+        // donde el canal queda degradado al instante (ver
+        // NotificationHelper.channelDegraded, confirmado en vivo en Honor/
+        // Magic OS), ofrecer el arreglo de un toque ACÁ MISMO en vez de
+        // depender de que encuentren el botón dentro de la campana.
+        if (this.permissions.isNotificationGranted()) {
+            // Pequeño margen: el estado del canal que aplica el sistema tras
+            // conceder el permiso puede no estar 100% asentado en el mismo
+            // tick de este callback.
+            webView.postDelayed({
+                if (NotificationHelper.channelDegraded(this)) {
+                    AlertDialog.Builder(this)
+                        .setTitle("Las alarmas están silenciadas")
+                        .setMessage("Android bajó el aviso de las alarmas de Vyneural sin que lo pidieras. Tocá \"Revisar\" para subirlo a Alta en un toque.")
+                        .setPositiveButton("Revisar") { _, _ -> NotificationHelper.openAlarmChannelSettings(this) }
+                        .setNegativeButton("Ahora no", null)
+                        .show()
+                }
+            }, 300)
+        }
     }
 }

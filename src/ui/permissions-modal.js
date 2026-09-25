@@ -157,21 +157,11 @@ const MODAL_HTML = `
       <button id="perm-autostart-settings" class="perm-test hidden">Revisar inicio automático</button>
     </div>
     <!-- Recorte de texto ("agota la vista" en mobile, reportado en vivo):
-         el detalle de plataforma/estado puro va colapsado acá — mismo patrón
-         que #alarm-troubleshoot en index.html. renderPermissionState() lo
-         auto-abre solo si hay algo realmente accionable ahí adentro
-         (batería/autostart/alarmas exactas pendientes), reutilizando las
-         mismas condiciones que ya muestran esos botones. -->
+         el detalle técnico puro va colapsado acá, y NUNCA se auto-abre (antes
+         sí — reportado como "relleno" que aparece siempre, aunque no haga
+         falta) — solo para quien explícitamente busca más detalle. -->
     <details id="perm-details" class="alarm-troubleshoot">
       <summary>Ver más detalles</summary>
-      <div class="perm-diff-box" id="perm-diff-box">
-        <div class="pdb-title">Diferencias de plataforma</div>
-        <div class="pdb-grid">
-          <div class="pdb-item"><b>Audio Background</b><span id="pdb-audio">Web: Limitado<br>APK: Foreground Service</span></div>
-          <div class="pdb-item"><b>Alarmas</b><span id="pdb-alarms">Web: Solo app abierta<br>APK: Scheduler del SO</span></div>
-          <div class="pdb-item"><b>Notificaciones</b><span id="pdb-notif">Web: Push (con back)<br>APK: Locales (sin back)</span></div>
-        </div>
-      </div>
       <div class="perm-row" id="perm-platform-row" style="display:none"><span>Plataforma</span><b id="perm-platform" class="perm-state">—</b></div>
       <div class="perm-row"><span>Control del reproductor (Media Session)</span><b id="perm-mediasession" class="perm-state">—</b></div>
       <div class="perm-row"><span>Pantalla activa (Wake Lock)</span><b id="perm-wakelock" class="perm-state">—</b></div>
@@ -217,26 +207,6 @@ function renderPermissionState() {
     permPlatformRow.style.display = isNative ? '' : 'none';
     permPlatform.textContent = isNative ? `Android (bridge v${nativeBridge.getState().version || '?'})` : 'Web / PWA';
     permPlatform.className = 'perm-state ok';
-  }
-  const pdbAudio = document.getElementById('pdb-audio');
-  const pdbAlarms = document.getElementById('pdb-alarms');
-  const pdbNotif = document.getElementById('pdb-notif');
-  if (pdbAudio) {
-    pdbAudio.innerHTML = isNative
-      ? 'APK: Foreground Service ✓<br>Audio estable en background'
-      : 'Web: Limitado<br>Requiere pestaña abierta';
-  }
-  if (pdbAlarms) {
-    pdbAlarms.innerHTML = isNative
-      ? 'APK: Scheduler del SO ✓<br>Funcionan con la app cerrada'
-      : 'Web: Solo app abierta<br>Respaldo: Calendario';
-  }
-  if (pdbNotif) {
-    pdbNotif.innerHTML = isNative
-      ? 'APK: Locales nativas ✓<br>Sin necesidad de servidor'
-      : caps.push.configured
-        ? 'Web: Web Push ✓<br>Con sesión, avisa con la app cerrada'
-        : 'Web: Web Push<br>Requiere backend (inactivo)';
   }
   const permPush = document.getElementById('perm-push');
   if (permPush) {
@@ -309,18 +279,13 @@ function renderPermissionState() {
   if (btnAutostartSettings) {
     btnAutostartSettings.classList.toggle('hidden', !(isNative && caps.autostartGuidance.supported));
   }
-  // Auto-abrir el detalle colapsado solo si hay algo ahí adentro que de
-  // verdad requiera acción — mismas condiciones que ya deciden mostrar los
-  // botones de batería/autostart/alarmas exactas, no una señal nueva.
-  const permDetails = document.getElementById('perm-details');
-  if (permDetails) {
-    const needsAttention =
-      isNative &&
-      ((caps.exactAlarms.supported && !caps.exactAlarms.granted) ||
-        !caps.batteryUnrestricted.granted ||
-        caps.autostartGuidance.supported);
-    permDetails.open = needsAttention;
-  }
+  // P8 — antes se auto-abría ("permDetails.open = needsAttention") apenas
+  // había algo accionable ahí adentro (batería/autostart/alarmas exactas) —
+  // reportado en vivo como "relleno" que aparece siempre, sin que el usuario
+  // lo pida. Lo accionable YA tiene su propio botón visible arriba (perm-
+  // notif-settings/perm-exact-settings/etc.), así que este detalle queda
+  // siempre plegado por defecto — el usuario lo abre si de verdad quiere ver
+  // más.
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);
   permEnabled.className = 'perm-state' + (disabled ? ' bad' : ' ok');

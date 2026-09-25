@@ -1091,6 +1091,11 @@ body {
   outline: none;
 }
 
+.select-row select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 /* Las opciones del desplegable se leen: fondo oscuro + texto claro. */
 .select-row select option {
   background: #14162b;
@@ -3062,6 +3067,16 @@ body.immersive .controls {
   margin-top: 10px;
 }
 
+/* Separación real antes del botón de ajustes: sin esto quedaba pegado
+   directo debajo de la lista de notificaciones (reportado en vivo). Mismo
+   criterio visual que .alarm-history-head (línea divisoria + aire) para
+   marcar el cambio de sección dentro del mismo modal. */
+#alarm-settings-toggle {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
 .alarm-list {
   list-style: none;
   margin: 0;
@@ -3150,6 +3165,11 @@ body.immersive .controls {
   color: var(--warn, #e0a53c);
 }
 
+.alarm-settings-toggle.has-issue {
+  color: var(--warn, #e0a53c);
+  border-color: var(--warn, #e0a53c);
+}
+
 /* ---------------------------------------------------------------- Badge de la campana */
 /* Campana bloqueada sin sesión: se ve deshabilitada y el click avisa que hay
    que iniciar sesión (el handler de openAlarmModal no abre el modal). */
@@ -3182,6 +3202,12 @@ body.immersive .controls {
   background: var(--accent);
   border-radius: 999px;
   border: 2px solid #0d0f1e;
+}
+
+/* Problema de permisos/canal pendiente (2026-09-24): visible en el ícono
+   ANTES de abrir la campana, no solo en el toggle de ajustes de adentro. */
+.alarm-btn.has-issue .alarm-badge {
+  background: var(--warn, #e0a53c);
 }
 
 /* ---------------------------------------------------------------- Vista de recordatorios */
@@ -3235,97 +3261,13 @@ body.immersive .controls {
   border: 1px solid var(--border);
   border-radius: 999px;
   cursor: pointer;
+  text-decoration: none;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .alarms-view-add:hover {
   border-color: var(--accent);
   background: var(--accent-soft);
-}
-
-/* ---------------------------------------------------------------- Aviso de cookies */
-.cookie-banner {
-  position: fixed;
-  left: 50%;
-  bottom: 18px;
-  transform: translateX(-50%);
-  z-index: 400;
-  width: min(540px, calc(100vw - 32px));
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
-  background: #14162b;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
-  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
-  animation: modalIn 0.2s ease;
-}
-
-.cookie-text {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: var(--text-dim);
-}
-
-.cookie-link {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  white-space: nowrap;
-}
-
-.cookie-link:hover {
-  color: var(--text);
-}
-
-.cookie-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.cookie-btn {
-  appearance: none;
-  border: 1px solid var(--border);
-  cursor: pointer;
-  padding: 8px 16px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-dim);
-  font-size: 12.5px;
-  font-weight: 600;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
-
-.cookie-btn:hover {
-  color: var(--text);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.cookie-btn-primary {
-  background: linear-gradient(135deg, var(--accent), #6366f1);
-  border-color: transparent;
-  color: #fff;
-}
-
-.cookie-btn-primary:hover {
-  filter: brightness(1.1);
-  color: #fff;
-  border-color: transparent;
-}
-
-@media (max-width: 560px) {
-  .cookie-banner {
-    bottom: 10px;
-    width: calc(100vw - 24px);
-  }
-
-  .cookie-actions .cookie-btn {
-    flex: 1;
-  }
 }
 
 /* ---------------------------------------------------------------- Forma de onda */

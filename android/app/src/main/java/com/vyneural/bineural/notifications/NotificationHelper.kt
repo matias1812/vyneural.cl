@@ -89,7 +89,19 @@ object NotificationHelper {
     // sesión (crear/descartar notificaciones de prueba repetidamente). Mismo
     // patrón que v6/v7/v8/v9 — un canal ya creado en el dispositivo no se
     // puede "reparar" con código, solo un ID nuevo empieza limpio.
-    const val CHANNEL_ALARMS = "bineural_alarms_v11"
+    // v12 (2026-09-24) — MISMO síntoma reportado apenas se activaron los
+    // permisos ("llega la notificación pero desapercibida y sin alarma"),
+    // confirmado en vivo por `adb shell dumpsys notification` (no logcat esta
+    // vez, directo el estado real): v11 ya estaba en mImportance=2 (LOW),
+    // mOriginalImp=4 — degradado de nuevo, con mUserLockedFields marcado (ni
+    // el usuario puede subirlo desde la propia app, solo desde Ajustes del
+    // sistema o con un canal nuevo). Motivo probable: la campana rediseñada
+    // en esta misma sesión (P8) tenía un botón "🔔 Enviar notificación de
+    // prueba" que se usó/descartó repetidas veces durante testing — YA SE
+    // ELIMINÓ esa UI (ver bineural/index.html), lo que debería frenar esta
+    // degradación por testing repetido en el futuro; el endpoint backend
+    // sigue vivo para diagnóstico vía API directa, ya no vía botón.
+    const val CHANNEL_ALARMS = "bineural_alarms_v12"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.
@@ -182,6 +194,44 @@ object NotificationHelper {
             )
         } catch (e: Exception) {
             com.vyneural.bineural.util.BineuralLog.e("notif-channel", "no se pudo leer el estado del canal", e)
+        }
+    }
+
+    /** P8 — confirmado en vivo (dumpsys) en un dispositivo Honor/Magic OS: el
+     *  canal puede quedar en Importancia baja INSTANTÁNEAMENTE al conceder el
+     *  permiso, sin que se haya mostrado ni descartado una sola notificación
+     *  — la teoría de "Android la baja sola tras varios descartes" (ver
+     *  historial v3→v11 arriba) no explica este caso. Por código no hay forma
+     *  de subirla de vuelta (ver openAlarmChannelSettings) — esto solo lee el
+     *  estado real para decidir si hace falta ofrecer el arreglo ya mismo. */
+    fun channelDegraded(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val ch = nm.getNotificationChannel(CHANNEL_ALARMS) ?: return false
+        return ch.importance < NotificationManager.IMPORTANCE_HIGH
+    }
+
+    /** Salta directo a los ajustes del canal "Alarmas Vyneural" (mismo intent
+     *  que AndroidBridge.kt::OPEN_ALARM_CHANNEL_SETTINGS, extraído acá para
+     *  reusarlo también desde MainActivity justo después de conceder el
+     *  permiso — ver P8 arriba, el momento en que más importa ofrecerlo). */
+    fun openAlarmChannelSettings(context: Context) {
+        try {
+            val i = Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, CHANNEL_ALARMS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(i)
+        } catch (e: Exception) {
+            com.vyneural.bineural.util.BineuralLog.e("notif-channel", "open alarm channel settings", e)
+            try {
+                val i = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(i)
+            } catch (e2: Exception) {
+                com.vyneural.bineural.util.BineuralLog.e("notif-channel", "open alarm channel settings fallback", e2)
+            }
         }
     }
 

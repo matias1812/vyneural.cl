@@ -42,6 +42,24 @@ html {
   scroll-behavior: smooth;
 }
 
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 1rem;
+  z-index: 1000;
+  padding: 0.75rem 1.25rem;
+  background: var(--accent, #7c5cff);
+  color: #fff;
+  border-radius: 0 0 0.5rem 0.5rem;
+  text-decoration: none;
+  font-weight: 600;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   background:
@@ -3373,6 +3391,25 @@ html:not(.in-app) .in-app-only {
   border-color: rgba(248, 113, 113, 0.4);
 }
 
+.cuenta-item-toggle {
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.cuenta-item-toggle:hover {
+  color: var(--text);
+  border-color: rgba(167, 139, 250, 0.5);
+}
+
 .cuenta-item-note {
   flex: none;
   max-width: 160px;
@@ -3621,17 +3658,56 @@ html:not(.in-app) .in-app-only {
   white-space: nowrap;
 }
 
-.it-step-notify-wrap {
+/* P8 — antes cada fila era texto suelto atenuado (--text-dim, 0.9em): se
+   leía como ayuda menor, no como una decisión real ("organizalos mejor que
+   se noten", reportado en vivo). Ahora es una tarjeta propia, mismo criterio
+   visual que .alarm-field/.page-note del resto del sitio. */
+.it-step-notify-group {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  font-size: 0.9em;
-  color: var(--text-dim);
-  margin: 4px 0;
+  margin: 10px 0;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* label.it-step-notify-wrap (no solo .it-step-notify-wrap): el formulario de
+   rutina vive dentro de .cuenta-form, cuya regla ".cuenta-form label" (misma
+   especificidad que una clase sola, pero como selector compuesto le gana a
+   ".it-step-notify-wrap" a secas) forzaba flex-direction:column y el texto
+   atenuado — exactamente lo que esta fase quería cambiar. Iguala la
+   especificidad (clase+elemento) para que gane por orden en la cascada. */
+label.it-step-notify-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95em;
+  color: var(--text);
+}
+
+.it-step-notify-wrap input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  accent-color: var(--accent);
 }
 
 .it-step-notify-wrap.hidden {
   display: none;
+}
+
+/* Sub-opción: solo tiene sentido si la de arriba está marcada — la sangría +
+   borde izquierdo la muestran como dependiente, no como una fila hermana
+   suelta al mismo nivel. */
+label.it-step-notify-sub {
+  margin-left: 22px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.9em;
 }
 
 /* Chips de día (L M X J V S D): usados por el formulario de recordatorio
@@ -4367,5 +4443,106 @@ html:not(.in-app) .in-app-only {
   .push-banner-btn {
     flex: 1;
     text-align: center;
+  }
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------------------------------------------------------------- Aviso de cookies */
+/* Movido acá desde style.css: el banner ahora se inyecta desde este mismo
+   archivo (ensureCookieBanner(), más arriba) en TODAS las páginas, no solo
+   index.html — vivía en style.css, que solo cargan las páginas con
+   reproductor (main.js), así que en el resto (rutina, premium, términos...)
+   el banner se insertaba en el DOM sin ningún estilo (position:fixed
+   perdido, aparecía como bloque suelto al final del documento en vez de
+   flotante abajo). */
+.cookie-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 400;
+  width: min(540px, calc(100vw - 32px));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #14162b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+  animation: modalIn 0.2s ease;
+}
+
+.cookie-text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.cookie-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+.cookie-link:hover {
+  color: var(--text);
+}
+
+.cookie-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cookie-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.cookie-btn:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.cookie-btn-primary {
+  background: linear-gradient(135deg, var(--accent), #6366f1);
+  border-color: transparent;
+  color: #fff;
+}
+
+.cookie-btn-primary:hover {
+  filter: brightness(1.1);
+  color: #fff;
+  border-color: transparent;
+}
+
+@media (max-width: 560px) {
+  .cookie-banner {
+    bottom: 10px;
+    width: calc(100vw - 24px);
+  }
+
+  .cookie-actions .cookie-btn {
+    flex: 1;
   }
 }

@@ -90,7 +90,7 @@ import { isPremiumUser, openPremiumRequired } from './ui/premium-gate.js';
 // el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
 // rompe la alarma local.
 import { createAlarm, updateAlarm, deleteAlarm, listAlarms as listServerAlarms } from './api/alarms.js';
-import { listAlarmNotifications, testAlarmNotification } from './api/alarm-notifications.js';
+import { listAlarmNotifications } from './api/alarm-notifications.js';
 // P1.5 Fase 5 — proveedor ÚNICO de audio (WEB | NATIVE | NONE). Nunca dos motores.
 import { assertSingleAudioProvider, providerLabel } from './core/audio-provider.js';
 
@@ -3492,28 +3492,6 @@ function renderPermissionState() {
     permPlatform.textContent = isNative ? `Android (bridge v${nativeBridge.getState().version || '?'})` : 'Web / PWA';
     permPlatform.className = 'perm-state ok';
   }
-  // Diferencias de plataforma en el cuadro informativo.
-  const pdbAudio = document.getElementById('pdb-audio');
-  const pdbAlarms = document.getElementById('pdb-alarms');
-  const pdbNotif = document.getElementById('pdb-notif');
-  if (pdbAudio) {
-    pdbAudio.innerHTML = isNative
-      ? 'APK: Foreground Service ✓<br>Audio estable en background'
-      : 'Web: Limitado<br>Requiere pestaña abierta';
-  }
-  if (pdbAlarms) {
-    pdbAlarms.innerHTML = isNative
-      ? 'APK: Scheduler del SO ✓<br>Funcionan con la app cerrada'
-      : 'Web: Solo app abierta<br>Respaldo: Calendario';
-  }
-  if (pdbNotif) {
-    pdbNotif.innerHTML = isNative
-      ? 'APK: Locales nativas ✓<br>Sin necesidad de servidor'
-      : caps.push.configured
-        ? 'Web: Web Push ✓<br>Con sesión, avisa con la app cerrada'
-        : 'Web: Web Push<br>Requiere backend (inactivo)';
-  }
-
   // Fila Push: refleja el estado REAL del backend (consultado en el arranque).
   const permPush = document.getElementById('perm-push');
   if (permPush) {
@@ -3586,20 +3564,11 @@ function renderPermissionState() {
     btnAutostartSettings.classList.toggle('hidden', !(isNative && caps.autostartGuidance.supported));
   }
 
-  // Auto-abrir el detalle colapsado solo si hay algo ahí adentro que de
-  // verdad requiera acción — mismas condiciones que ya deciden mostrar los
-  // botones de batería/autostart/alarmas exactas (ver mismo bloque en
-  // ui/permissions-modal.js), no una señal nueva.
-  const permDetails = document.getElementById('perm-details');
-  if (permDetails) {
-    const needsAttention =
-      isNative &&
-      ((caps.exactAlarms.supported && !caps.exactAlarms.granted) ||
-        !caps.batteryUnrestricted.granted ||
-        caps.autostartGuidance.supported);
-    permDetails.open = needsAttention;
-  }
-
+  // P8 — antes se auto-abría el detalle colapsado si había algo accionable
+  // ahí adentro (mismo bloque en ui/permissions-modal.js) — reportado como
+  // "relleno" que aparece siempre. Lo accionable ya tiene su propio botón
+  // visible arriba; el detalle queda siempre plegado, el usuario lo abre si
+  // quiere.
   const disabled = permsDisabled();
   permEnabled.textContent = enabledStateText(disabled);
   permEnabled.className = 'perm-state' + (disabled ? ' bad' : ' ok');
@@ -3898,11 +3867,8 @@ const alarmSave = document.getElementById('alarm-save');
 const alarmEditCancel = document.getElementById('alarm-edit-cancel');
 const alarmGcal = document.getElementById('alarm-gcal');
 const alarmIcs = document.getElementById('alarm-ics');
-const alarmListWrap = document.getElementById('alarm-list-wrap');
-const alarmList = document.getElementById('alarm-list');
 const alarmView = document.getElementById('alarms-view');
 const alarmViewList = document.getElementById('alarms-view-list');
-const alarmViewAdd = document.getElementById('alarms-view-add');
 const alarmBadge = document.getElementById('alarm-badge');
 // P7 — personalización de alarma (sonido/vibración/posponer, solo APK). Ver
 // mismo patrón en rutina.js::wireReminderForm().
@@ -3911,10 +3877,11 @@ const alarmSoundPick = document.getElementById('alarm-sound-pick');
 const alarmSoundName = document.getElementById('alarm-sound-name');
 const alarmSnoozeEnabled = document.getElementById('alarm-snooze-enabled');
 const alarmSnoozeMinutes = document.getElementById('alarm-snooze-minutes');
-const alarmTroubleshoot = document.getElementById('alarm-troubleshoot');
 const alarmHistoryWrap = document.getElementById('alarm-history-wrap');
 const alarmHistoryList = document.getElementById('alarm-history-list');
-const alarmTestNotification = document.getElementById('alarm-test-notification');
+const alarmEditFields = document.getElementById('alarm-edit-fields');
+const alarmSettingsToggle = document.getElementById('alarm-settings-toggle');
+const alarmSettingsPanel = document.getElementById('alarm-settings-panel');
 
 // Minutos al posponer solo importa si "Permitir posponer" está activado —
 // atenuarlo/deshabilitarlo cuando no aplica es más claro que dejarlo
@@ -3969,26 +3936,68 @@ function defaultAlarmTime() {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-// Abre/cierra automáticamente el <details> de troubleshooting según si hay
-// de verdad algo para resolver — antes estos bloques quedaban siempre
-// visibles aunque todo estuviera bien, generando el "mucho texto de sobra"
-// reportado en el celular.
+// Marca visualmente el botón "Ajustes de alarma" y auto-abre el panel
+// cuando hay de verdad algo para resolver (permiso denegado, alarma no
+// exacta) — antes esto vivía en un <details> propio ("Estado de las
+// notificaciones"), ahora consolidado dentro de Ajustes de alarma.
 function setAlarmTroubleshootIssue(issue) {
-  if (!alarmTroubleshoot) return;
-  alarmTroubleshoot.classList.toggle('has-issue', issue);
-  alarmTroubleshoot.open = issue;
-  const summary = document.getElementById('alarm-troubleshoot-summary');
-  if (summary) summary.textContent = issue ? '⚠️ Hay algo que revisar en las notificaciones' : '🔔 Estado de las notificaciones';
+  if (alarmSettingsToggle) alarmSettingsToggle.classList.toggle('has-issue', issue);
+  // 2026-09-24: ya no fuerza abrir el panel en cada apertura de la campana
+  // (mismo fix que permissions-modal.js — reportado como "relleno" volver a
+  // ver el panel desplegado cada vez). El dot de .has-issue basta como aviso;
+  // el usuario lo abre si quiere.
+  applyAlarmBellBadge();
+}
+
+// 2026-09-24: la campana (el ícono, no solo el modal ya abierto) tiene que
+// avisar sin que el usuario tenga que entrar — cantidad de notificaciones no
+// vistas si no hay ningún problema, o "!" en ámbar si sí lo hay (prioridad:
+// un problema de permisos es más urgente que un conteo). El botón para
+// arreglarlo sigue siendo el único consolidado hoy (permissions-modal.js) —
+// esto solo hace que el aviso sea visible ANTES de abrir la campana.
+let cachedUnseenNotifCount = 0;
+function applyAlarmBellBadge() {
+  if (!alarmBadge) return;
+  const hasIssue = !!(alarmSettingsToggle && alarmSettingsToggle.classList.contains('has-issue'));
+  if (alarmBtn) alarmBtn.classList.toggle('has-issue', hasIssue);
+  if (hasIssue) {
+    alarmBadge.textContent = '!';
+    alarmBadge.classList.remove('hidden');
+  } else if (cachedUnseenNotifCount > 0 && getAccessToken()) {
+    alarmBadge.textContent = String(cachedUnseenNotifCount);
+    alarmBadge.classList.remove('hidden');
+  } else {
+    alarmBadge.classList.add('hidden');
+  }
+}
+
+// Consulta el historial SIN avanzar el watermark (eso lo hace solo
+// renderAlarmHistory, al abrir la campana) — mismo criterio de "primerísima
+// apertura no cuenta como no vistas" para evitar el mismo efecto de
+// "aparecen y se borran solas" ya resuelto para la lista (ver
+// ALARM_NOTIF_SEEN_KEY más abajo).
+async function refreshAlarmBellBadge() {
+  if (!getAccessToken()) {
+    cachedUnseenNotifCount = 0;
+    applyAlarmBellBadge();
+    return;
+  }
+  try {
+    const items = (await listAlarmNotifications(20)) || [];
+    const seenBefore = lsGet(ALARM_NOTIF_SEEN_KEY, null);
+    cachedUnseenNotifCount = seenBefore ? items.filter((n) => n.created_at && n.created_at > seenBefore).length : 0;
+  } catch (_) {
+    /* sin red: se mantiene el último valor conocido, no se oculta el badge por un error transitorio */
+  }
+  applyAlarmBellBadge();
 }
 
 function refreshAlarmPerm() {
-  const settingsBtn = document.getElementById('alarm-perm-settings');
-  if (settingsBtn) settingsBtn.classList.add('hidden');
-  // Estado real de las alarmas exactas (P5): Android 14+ no concede
-  // SCHEDULE_EXACT_ALARM por defecto → alarma aproximada ±60 s. Se muestra
-  // siempre el estado verdadero y se ofrece el diálogo del sistema.
+  // 2026-09-24 (simplificar permisos): notificaciones bloqueadas, canal
+  // degradado y alarmas exactas comparten UN solo botón de arreglo — el de
+  // "Permisos de la web" (permissions-modal.js). Acá solo queda el texto de
+  // estado + el dot de .has-issue, sin botones propios duplicados.
   const exactP = document.getElementById('alarm-exact');
-  const exactBtn = document.getElementById('alarm-exact-settings');
   const nativeNote = document.getElementById('alarm-native-note');
   // APK: el permiso de notificaciones REAL es el de Android (POST_NOTIFICATIONS),
   // lo consulta el bridge (nunca inventa estado). Si está denegado, la
@@ -4001,27 +4010,29 @@ function refreshAlarmPerm() {
     if (nativeNote) nativeNote.classList.remove('hidden');
     const exact = info ? info.exactAlarmsGranted : null;
     if (exactP) {
-      if (exact === false) {
-        exactP.textContent =
-          '⏰ Alarma aproximada (±1 min): Android bloqueó las alarmas exactas para esta app. Tocá el botón para activarlas.';
-        if (exactBtn) exactBtn.classList.remove('hidden');
-      } else {
-        exactP.textContent = '⏰ Alarma exacta: dispara a la hora indicada aunque la app esté cerrada.';
-        if (exactBtn) exactBtn.classList.add('hidden');
-      }
+      exactP.textContent =
+        exact === false
+          ? '⏰ Alarma aproximada (±1 min): Android bloqueó las alarmas exactas para esta app. Arreglalo desde Permisos de la web.'
+          : '⏰ Alarma exacta: dispara a la hora indicada aunque la app esté cerrada.';
     }
     if (np === 'DENIED' || np === 'DENIED_PERMANENTLY') {
       alarmPerm.textContent =
         np === 'DENIED_PERMANENTLY'
-          ? '🚫 Notificaciones bloqueadas de forma permanente en Android: la alarma se guardará pero no podrá avisarte. Activá el permiso en los ajustes del sistema.'
-          : '⚠️ Notificaciones bloqueadas en Android: la alarma se guardará pero no podrá avisarte. Activá el permiso en los ajustes.';
-      if (settingsBtn) settingsBtn.classList.remove('hidden');
+          ? '🚫 Notificaciones bloqueadas de forma permanente en Android: la alarma se guardará pero no podrá avisarte. Activá el permiso desde Permisos de la web.'
+          : '⚠️ Notificaciones bloqueadas en Android: la alarma se guardará pero no podrá avisarte. Activalo desde Permisos de la web.';
       setAlarmTroubleshootIssue(true);
       return;
     }
     if (np === 'GRANTED') {
-      alarmPerm.textContent = '✅ Notificaciones de Android activadas: la alarma avisa aunque la app esté cerrada.';
-      setAlarmTroubleshootIssue(exact === false);
+      const ch = info ? info.alarmChannel : null;
+      const importanceDegraded = !!(ch && ch.exists && typeof ch.importance === 'number' && ch.importance < 4);
+      if (importanceDegraded) {
+        alarmPerm.textContent =
+          '⚠️ Las alarmas están silenciadas: Android bajó el aviso de este canal sin avisarte (pasa si se descartan notificaciones sin abrirlas). Arreglalo desde Permisos de la web.';
+      } else {
+        alarmPerm.textContent = '✅ Notificaciones de Android activadas: la alarma avisa aunque la app esté cerrada.';
+      }
+      setAlarmTroubleshootIssue(exact === false || importanceDegraded);
       return;
     }
     alarmPerm.textContent = '🔔 Al guardar, te pediremos permiso de notificaciones en Android.';
@@ -4030,7 +4041,6 @@ function refreshAlarmPerm() {
   }
   if (nativeNote) nativeNote.classList.add('hidden');
   if (exactP) exactP.textContent = '';
-  if (exactBtn) exactBtn.classList.add('hidden');
   if (!notificationSupported()) {
     alarmPerm.textContent = 'Tu navegador no soporta notificaciones: usá el respaldo de calendario.';
     setAlarmTroubleshootIssue(true);
@@ -4068,62 +4078,47 @@ function refreshAlarmHonestNote() {
     'configurado: activalas desde tu cuenta.';
 }
 
-// ── Gating por sesión y Premium: campana + notificaciones ──────────────────
-// Sin sesión no hay backend al que sincronizar el recordatorio (y el Web Push
-// con la app cerrada requiere sesión). Además, crear un recordatorio nuevo es
-// Premium — mismo criterio que guardNewReminder en /rutina (ver
-// src/ui/premium-gate.js): la campana queda bloqueada en ambos casos. Los
-// recordatorios YA creados siguen viéndose y pudiéndose borrar igual
-// (grandfathering, ver renderAlarms) — esto solo bloquea abrir el modal para
-// agregar uno nuevo. Igual en web y APK (el bundle es el mismo). Se
-// re-evalúa al iniciar/cerrar sesión y antes de abrir.
+// ── Gating por sesión: campana + notificaciones ─────────────────────────────
+// Sin sesión no hay backend al que sincronizar nada (historial, recordatorios,
+// ajustes de alarma) — la campana queda bloqueada. Crear un recordatorio
+// nuevo YA no pasa por acá (P8: solo se crea desde /rutina, Premium-gateado
+// ahí mismo — ver guardNewReminder en src/ui/premium-gate.js); la campana
+// es ahora una vista de historial + edición/ajustes de lo que ya existe, así
+// que no tiene sentido bloquearla completa para un usuario no-Premium con
+// recordatorios grandfathered. Se re-evalúa al iniciar/cerrar sesión.
 function updateAlarmGating() {
   const logged = !!getAccessToken();
   if (!logged) {
     alarmBtn.classList.add('locked');
     alarmBtn.setAttribute('aria-disabled', 'true');
-    alarmBtn.setAttribute('title', 'Iniciá sesión para programar recordatorios y notificaciones');
-    alarmBtn.setAttribute('aria-label', 'Iniciá sesión para programar recordatorios');
+    alarmBtn.setAttribute('title', 'Iniciá sesión para ver tus notificaciones y recordatorios');
+    alarmBtn.setAttribute('aria-label', 'Iniciá sesión para ver tus notificaciones');
     if (alarmView) alarmView.classList.add('hidden');
     if (alarmBadge) alarmBadge.classList.add('hidden');
     return;
   }
-  // La vista/badge de recordatorios YA creados no dependen de Premium.
+  alarmBtn.classList.remove('locked');
+  alarmBtn.removeAttribute('aria-disabled');
+  alarmBtn.setAttribute('title', 'Notificaciones');
+  alarmBtn.setAttribute('aria-label', 'Notificaciones');
   if (alarmView) alarmView.classList.toggle('hidden', getAlarms().length === 0);
   if (alarmBadge) alarmBadge.classList.toggle('hidden', getAlarms().length === 0);
-  isPremiumUser().then((premium) => {
-    alarmBtn.classList.toggle('locked', !premium);
-    alarmBtn.setAttribute('aria-disabled', String(!premium));
-    alarmBtn.setAttribute('title', premium ? 'Recordatorio de sesión' : 'Crear un recordatorio es parte de Vyneural Premium');
-    alarmBtn.setAttribute('aria-label', premium ? 'Recordatorio de sesión' : 'Crear un recordatorio es parte de Vyneural Premium');
-  });
 }
 
 function openAlarmModal() {
   if (!getAccessToken()) {
-    showToast('🔒 Iniciá sesión para activar notificaciones y recordatorios');
+    showToast('🔒 Iniciá sesión para ver tus notificaciones y recordatorios');
     return;
   }
-  isPremiumUser().then((premium) => {
-    if (!premium) {
-      openPremiumRequired('Crear un recordatorio es parte de Vyneural Premium.');
-      return;
-    }
-    updateAlarmGating();
-    // Abrir desde la campana (no desde "editar" en la lista) siempre arranca
-    // en modo "crear" — beginEditAlarm() abre el modal directo, sin pasar
-    // por acá.
-    endEditAlarm();
-    if (!alarmTime.value) {
-      alarmTime.value = defaultAlarmTime();
-      resyncApkTimePicker('alarm-time');
-    }
-    refreshAlarmPerm();
-    refreshAlarmHonestNote();
-    renderAlarms();
-    renderAlarmHistory();
-    alarmModal.classList.remove('hidden');
-  });
+  updateAlarmGating();
+  // La campana ya no crea desde cero — abrir desde el ícono siempre muestra
+  // historial + ajustes, nunca el formulario de hora/frecuencia (eso solo
+  // aparece vía beginEditAlarm(), al editar un recordatorio ya existente).
+  endEditAlarm();
+  refreshAlarmPerm();
+  refreshAlarmHonestNote();
+  renderAlarmHistory();
+  alarmModal.classList.remove('hidden');
 }
 
 // Historial de notificaciones ENVIADAS por el backend (ver
@@ -4150,8 +4145,21 @@ async function renderAlarmHistory() {
     /* sin red / sin sesión válida: se deja la sección vacía, no rompe el modal */
   }
   const seenBefore = lsGet(ALARM_NOTIF_SEEN_KEY, null);
+  // Primerísima apertura en este dispositivo/navegador (nunca hubo
+  // watermark): sin este caso especial, acá se mostraba TODO el historial
+  // acumulado del backend una vez, y en la siguiente apertura (watermark ya
+  // fijado) la lista se veía "vacía" — reportado en vivo como que las
+  // notificaciones "aparecen y después se borran solas". Tratarlas como ya
+  // vistas desde el arranque (mismo estado estable que cualquier apertura
+  // posterior sin novedades) evita ese efecto sin cambiar el criterio de
+  // "solo lo nuevo desde la última vez".
+  const firstEverOpen = seenBefore === null;
   if (seenBefore) items = items.filter((n) => n.created_at && n.created_at > seenBefore);
   if (items[0] && items[0].created_at) lsSet(ALARM_NOTIF_SEEN_KEY, items[0].created_at);
+  if (firstEverOpen) items = [];
+  // Se acaba de avanzar el watermark a "ahora" — ya no hay nada sin ver.
+  cachedUnseenNotifCount = 0;
+  applyAlarmBellBadge();
   alarmHistoryWrap.classList.toggle('hidden', items.length === 0);
   alarmHistoryList.innerHTML = '';
   items.forEach((n) => {
@@ -4171,29 +4179,6 @@ async function renderAlarmHistory() {
   });
 }
 
-if (alarmTestNotification) {
-  alarmTestNotification.addEventListener('click', async () => {
-    if (!getAccessToken()) {
-      showToast('🔒 Iniciá sesión para enviar una notificación de prueba');
-      return;
-    }
-    alarmTestNotification.disabled = true;
-    try {
-      const res = await testAlarmNotification();
-      if (res && res.delivered) {
-        showToast(`✅ Enviada por ${ALARM_CHANNEL_LABEL[res.channel] || res.channel}`);
-      } else {
-        showToast('⚠️ No se pudo enviar — revisá la configuración de push (FCM/Web Push)');
-      }
-    } catch (_) {
-      showToast('⚠️ No se pudo enviar — revisá tu conexión');
-    } finally {
-      alarmTestNotification.disabled = false;
-      renderAlarmHistory();
-    }
-  });
-}
-
 function closeAlarmModal() {
   alarmModal.classList.add('hidden');
   endEditAlarm();
@@ -4206,6 +4191,11 @@ document.getElementById('alarm-close').addEventListener('click', closeAlarmModal
 alarmModal.addEventListener('click', (e) => {
   if (e.target === alarmModal) closeAlarmModal();
 });
+if (alarmSettingsToggle && alarmSettingsPanel) {
+  alarmSettingsToggle.addEventListener('click', () => {
+    alarmSettingsPanel.classList.toggle('hidden');
+  });
+}
 
 alarmState.addEventListener('change', () => {
   const custom = !!alarmPreset().custom;
@@ -4247,12 +4237,6 @@ function nextOccurrenceAt(hh, mm, days, fromMs = Date.now()) {
   }
   return null;
 }
-function daysLabelFor(days) {
-  if (!days || days.length === 0) return '';
-  if (days.length === 7) return ' · Todos los días';
-  return ' · ' + days.map((d) => DAY_LETTERS[d]).join(' · ');
-}
-
 // Tira semanal (L M X J V S D) con los días marcados de la rutina. Solo
 // existe en la APK (la web no guarda días): muestra de un vistazo qué días
 // se repite el recordatorio.
@@ -4351,11 +4335,13 @@ function endEditAlarm() {
   editingAlarmId = null;
   pendingAlarmSoundUri = null;
   if (alarmEditCancel) alarmEditCancel.classList.add('hidden');
-  alarmSave.textContent = 'Guardar recordatorio';
+  if (alarmEditFields) alarmEditFields.classList.add('hidden');
+  alarmSave.textContent = 'Guardar cambios';
 }
 
 function beginEditAlarm(alarm) {
   editingAlarmId = alarm.id;
+  if (alarmEditFields) alarmEditFields.classList.remove('hidden');
   alarmTime.value = alarm.time || defaultAlarmTime();
   resyncApkTimePicker('alarm-time');
   const presetMatch = STATES.find(
@@ -4402,6 +4388,15 @@ if (alarmEditCancel) {
 }
 
 alarmSave.addEventListener('click', async () => {
+  // P8 — la campana ya no crea alarmas desde cero (solo se crean desde
+  // /rutina): #alarm-edit-fields, donde vive este botón, solo se muestra
+  // vía beginEditAlarm(), así que en la práctica editingAlarmId siempre
+  // está seteado acá — este guard es defensivo, no un camino esperado.
+  const editing = editingAlarmId ? getAlarms().find((a) => a.id === editingAlarmId) : null;
+  if (!editing) {
+    endEditAlarm();
+    return;
+  }
   const time = alarmTime.value || defaultAlarmTime();
   const cfg = alarmConfig();
   const days = cfg.days && cfg.days.length ? cfg.days : [];
@@ -4409,9 +4404,8 @@ alarmSave.addEventListener('click', async () => {
   const nextAt = days.length
     ? nextOccurrenceAt(hh, mm, days) || nextAlarmAt(time).getTime()
     : nextAlarmAt(time).getTime();
-  const editing = editingAlarmId ? getAlarms().find((a) => a.id === editingAlarmId) : null;
   const alarm = {
-    id: editing ? editing.id : `al-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    id: editing.id,
     time,
     ...cfg,
     days,
@@ -4423,7 +4417,7 @@ alarmSave.addEventListener('click', async () => {
     snoozeEnabled: !!(alarmSnoozeEnabled && alarmSnoozeEnabled.checked),
     snoozeMinutes: alarmSnoozeMinutes ? parseInt(alarmSnoozeMinutes.value, 10) || 5 : 5,
   };
-  if (editing && editing.cloudId) alarm.cloudId = editing.cloudId;
+  if (editing.cloudId) alarm.cloudId = editing.cloudId;
   // APK: el dueño real es el AlarmManager nativo; el web queda como espejo
   // de la UI (external → nunca dispara). Web/PWA: dueño web.
   const nativeOwned = scheduleNativeAlarm(alarm);
@@ -4432,8 +4426,9 @@ alarmSave.addEventListener('click', async () => {
   // P6-FEAT-001 — sincronizar al backend con sesión: el recordatorio vive en
   // la nube y el scheduler server-side envía el Web Push a la hora exacta
   // aunque la app esté cerrada. Best-effort (nunca rompe la alarma local).
-  // Si ya tenía cloudId (edición), PUT en vez de POST — misma fila, no un
-  // duplicado.
+  // Sin cloudId (alarma local que nunca llegó a sincronizarse), POST en vez
+  // de PUT — sigue siendo una EDICIÓN desde la perspectiva del usuario, solo
+  // cambia qué verbo HTTP hace falta para reflejarla en la nube.
   if (getAccessToken()) {
     let timezone = 'UTC';
     try {
@@ -4476,13 +4471,7 @@ alarmSave.addEventListener('click', async () => {
       });
   }
   renderAlarms();
-  showToast(
-    editing
-      ? `Recordatorio actualizado para las ${time}`
-      : days.length
-        ? `Rutina guardada: ${time}${daysLabelFor(days)}`
-        : `Recordatorio guardado para las ${time}`,
-  );
+  showToast(`Recordatorio actualizado para las ${time}`);
   const perm = await requestPermission();
   if (perm !== 'granted' && perm !== 'unsupported') {
     showToast('Activá las notificaciones o usá el respaldo de calendario');
@@ -4493,40 +4482,10 @@ alarmSave.addEventListener('click', async () => {
 
 function renderAlarms() {
   const alarms = getAlarms().slice().sort((a, b) => a.nextAt - b.nextAt);
-  alarmListWrap.classList.toggle('hidden', alarms.length === 0);
-  alarmList.innerHTML = '';
-  const today = new Date().toDateString();
-  alarms.forEach((a) => {
-    const li = document.createElement('li');
-    li.className = 'alarm-item';
-    const when = new Date(a.nextAt);
-    const extra = when.toDateString() === today ? '' : ` · ${when.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`;
-    const info = document.createElement('span');
-    info.className = 'alarm-item-info';
-    const b = document.createElement('b');
-    b.textContent = a.name;
-    const small = document.createElement('small');
-    small.textContent = `${a.time}${daysLabelFor(a.days)}${extra} · ${Math.round(a.freq)} Hz · ${a.beat} Hz`;
-    info.append(b, small);
-    if (a.days && a.days.length) info.appendChild(weekStripEl(a.days));
-    const edit = document.createElement('button');
-    edit.className = 'alarm-edit';
-    edit.setAttribute('aria-label', 'Editar recordatorio');
-    edit.textContent = '✎';
-    edit.addEventListener('click', () => beginEditAlarm(a));
-    const del = document.createElement('button');
-    del.className = 'alarm-del';
-    del.setAttribute('aria-label', 'Eliminar recordatorio');
-    del.textContent = '✕';
-    del.addEventListener('click', () => {
-      cancelAlarmBoth(a.id);
-      renderAlarms();
-    });
-    li.append(info, edit, del);
-    alarmList.appendChild(li);
-  });
-  // Vista en la página: lista visible + botón para agregar + badge de la campana.
-  // Sin sesión la campana está bloqueada: la vista no se muestra (gating).
+  // La lista "Recordatorios activos" vivía también dentro del modal de la
+  // campana (#alarm-list) — se sacó de ahí por ser redundante con esta
+  // misma lista en el panel principal (#alarms-view-list, único lugar que
+  // queda). Editar (✎) sigue abriendo este mismo modal vía beginEditAlarm().
   if (alarmView && alarmViewList) {
     alarmView.classList.toggle('hidden', alarms.length === 0 || !getAccessToken());
     alarmViewList.innerHTML = '';
@@ -4558,10 +4517,7 @@ function renderAlarms() {
       alarmViewList.appendChild(li);
     });
   }
-  if (alarmBadge) {
-    alarmBadge.textContent = String(alarms.length);
-    alarmBadge.classList.toggle('hidden', alarms.length === 0 || !getAccessToken());
-  }
+  applyAlarmBellBadge();
   syncAppBadge(alarms.length);
   updateAlarmGating();
 }
@@ -4578,40 +4534,10 @@ function syncAppBadge(count) {
   }
 }
 
-// La vista en la página abre el modal para agregar o editar recordatorios.
-if (alarmViewAdd) alarmViewAdd.addEventListener('click', openAlarmModal);
 
 // Estado inicial del bloqueo por sesión (la campana arranca bloqueada si no
 // hay sesión guardada; renderAlarms() la re-evalúa en cada render).
 updateAlarmGating();
-
-// P4 — permiso denegado en Android: abre los ajustes de notificaciones de la
-// app (OPEN_NOTIFICATION_SETTINGS, whitelisted). En web no aplica (el botón
-// solo se muestra con el bridge presente y el permiso nativo denegado).
-const alarmPermSettings = document.getElementById('alarm-perm-settings');
-if (alarmPermSettings) {
-  alarmPermSettings.addEventListener('click', () => {
-    const b = nativeAudio();
-    if (b && b.openNotificationSettings) {
-      b.openNotificationSettings();
-      showToast('Abriendo los ajustes de notificaciones…');
-    }
-  });
-}
-
-// P5 — alarmas exactas denegadas por Android 14+: abre el diálogo del sistema
-// (REQUEST_EXACT_ALARM_PERMISSION, whitelisted). Sin este permiso la alarma
-// es aproximada (±1 min); con él, exacta.
-const alarmExactSettings = document.getElementById('alarm-exact-settings');
-if (alarmExactSettings) {
-  alarmExactSettings.addEventListener('click', () => {
-    const b = nativeAudio();
-    if (b && b.requestExactAlarmPermission) {
-      b.requestExactAlarmPermission();
-      showToast('Abriendo el ajuste de alarmas exactas…');
-    }
-  });
-}
 
 // Respaldo de calendario: aplican a la configuración actual del modal. En una
 // rutina (con días) se calcula la próxima ocurrencia real y el evento repite
@@ -5311,6 +5237,8 @@ window.addEventListener('load', () => {
       // La consulta real de push puede terminar después de abrir el modal:
       // actualizar el texto honesto y las capacidades cuando llegue.
       refreshAlarmPerm();
+      // Badge de la campana visible sin necesidad de abrirla (2026-09-24).
+      refreshAlarmBellBadge();
     })
     .catch(() => {});
 });
