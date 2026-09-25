@@ -49,6 +49,7 @@ export default defineConfig({
         'sobre-nosotros': resolve(__dirname, 'sobre-nosotros.html'),
         privacidad: resolve(__dirname, 'privacidad.html'),
         terminos: resolve(__dirname, 'terminos.html'),
+        reembolso: resolve(__dirname, 'reembolso.html'),
         'aviso-medico': resolve(__dirname, 'aviso-medico.html'),
         cookies: resolve(__dirname, 'cookies.html'),
         descargar: resolve(__dirname, 'descargar.html'),

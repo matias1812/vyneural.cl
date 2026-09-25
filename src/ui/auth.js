@@ -300,7 +300,7 @@ function modalHTML() {
 
           <div class="auth-terms" id="auth-terms-field" hidden>
             <label class="auth-check">
-              <input id="auth-terms" type="checkbox" />
+              <input id="auth-terms" type="checkbox" required />
               <span>Acepto los <a href="/terminos" target="_blank" rel="noopener noreferrer">Términos y condiciones</a> y la <a href="/privacidad" target="_blank" rel="noopener noreferrer">Política de privacidad</a>.</span>
             </label>
           </div>
