@@ -48,8 +48,24 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
             )
             .build()
         client = fresh
+        // 2026-09-24: startConnection() no tenía NINGUNA protección — si
+        // onBillingSetupFinished nunca llegaba (Play Store no responde,
+        // servicio no disponible), el flujo entero quedaba colgado en el
+        // primer paso, antes incluso de llegar a los timeouts de
+        // queryPurchasesAsync/queryProductDetailsAsync de más abajo. Mismo
+        // patrón de timeout+fallback que esos dos.
+        val resolved = AtomicBoolean(false)
+        val timeoutRunnable = Runnable {
+            if (resolved.compareAndSet(false, true)) {
+                BineuralLog.d("play-billing", "startConnection no contestó a tiempo")
+                onError("no pudimos conectar con Google Play, reintentá")
+            }
+        }
+        mainHandler.postDelayed(timeoutRunnable, CONNECT_TIMEOUT_MS)
         fresh.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
+                if (!resolved.compareAndSet(false, true)) return
+                mainHandler.removeCallbacks(timeoutRunnable)
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) {
                     onReady(fresh)
                 } else {
@@ -63,6 +79,8 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
                 // en curso, no dejarla colgada en silencio hasta que el
                 // timeout de 5 min del lado JS expire sin explicación — se
                 // resuelve acá mismo con un error claro y accionable.
+                mainHandler.removeCallbacks(timeoutRunnable)
+                resolved.set(true)
                 BineuralLog.d("play-billing", "servicio de facturación desconectado")
                 pendingCallback?.let { cb ->
                     pendingCallback = null
@@ -104,6 +122,8 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
 
     private companion object {
         const val QUERY_TIMEOUT_MS = 3000L
+        const val QUERY_DETAILS_TIMEOUT_MS = 6000L
+        const val CONNECT_TIMEOUT_MS = 8000L
     }
 
     private fun queryAndLaunch(
@@ -161,7 +181,23 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
             .setProductType(productType)
             .build()
         val params = QueryProductDetailsParams.newBuilder().setProductList(listOf(product)).build()
+        // Mismo gotcha que queryPurchasesAsync en queryAndLaunch(): si este
+        // callback de Play nunca llega, el botón quedaba colgado hasta el
+        // timeout de 5min del lado JS (PLAY_PURCHASE_TIMEOUT_MS) sin ningún
+        // mensaje — confirmado como causa real de "se queda cargando" en
+        // /premium al comprar "de por vida" en la APK (2026-09-24). Mismo
+        // patrón de timeout manual acotado que la consulta anterior.
+        val resolved = AtomicBoolean(false)
+        val timeoutRunnable = Runnable {
+            if (resolved.compareAndSet(false, true)) {
+                BineuralLog.d("play-billing", "queryProductDetailsAsync no contestó a tiempo")
+                onResult(JSONObject().put("error", "no pudimos consultar el producto, reintentá"))
+            }
+        }
+        mainHandler.postDelayed(timeoutRunnable, QUERY_DETAILS_TIMEOUT_MS)
         billingClient.queryProductDetailsAsync(params) { billingResult, productDetailsResult ->
+            if (!resolved.compareAndSet(false, true)) return@queryProductDetailsAsync
+            mainHandler.removeCallbacks(timeoutRunnable)
             val details = productDetailsResult.productDetailsList.firstOrNull()
             if (billingResult.responseCode != BillingClient.BillingResponseCode.OK || details == null) {
                 onResult(JSONObject().put("error", "producto no encontrado: $productId (${billingResult.debugMessage})"))
@@ -183,7 +219,26 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
                 flowParamsBuilder.setObfuscatedAccountId(userId)
             }
             activity.runOnUiThread {
-                billingClient.launchBillingFlow(activity, flowParamsBuilder.build())
+                // 2026-09-24: launchBillingFlow() devuelve un BillingResult
+                // SÍNCRONO que dice si la pantalla de compra realmente se
+                // pudo abrir — se descartaba por completo. Si Play la
+                // rechaza (ej. ITEM_ALREADY_OWNED: una compra de prueba
+                // anterior de "de por vida" quedó sin consumir/confirmar,
+                // muy plausible siendo un producto no-consumible) nunca
+                // llega ningún onPurchasesUpdated, y sin chequear esto el
+                // botón quedaba colgado hasta el timeout de 5min del lado
+                // JS sin ningún mensaje — reportado en vivo: "de por vida"
+                // se cuelga y los otros dos planes (suscripciones) sí
+                // funcionan, justo la asimetría que predice esta causa.
+                val launchResult = billingClient.launchBillingFlow(activity, flowParamsBuilder.build())
+                if (launchResult.responseCode != BillingClient.BillingResponseCode.OK) {
+                    val msg = if (launchResult.responseCode == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED) {
+                        "esta cuenta de Google ya tiene esta compra registrada — probá con otra cuenta o contactá soporte para liberarla"
+                    } else {
+                        "no se pudo abrir la pantalla de compra: ${launchResult.debugMessage} (${launchResult.responseCode})"
+                    }
+                    onResult(JSONObject().put("error", msg))
+                }
             }
         }
     }

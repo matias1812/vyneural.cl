@@ -187,6 +187,17 @@ async function verifyGooglePlayPurchaseWithRetry(purchaseToken, productId, onAtt
         savePendingGooglePlayPurchase(purchaseToken, productId);
         return { ok: false, sessionExpired: true };
       }
+      // 409: conflicto PERMANENTE — este mismo comprobante de Google ya se
+      // otorgó a otra cuenta de Vyneural (routers/payments.py::
+      // google_play_verify). Reintentar nunca lo resuelve: es la misma
+      // cuenta de Google Play en el dispositivo, no una falla transitoria.
+      // Bug real reportado en vivo (2026-09-24): los logs de Render mostraban
+      // ~10 reintentos de 409 seguidos antes de rendirse con un mensaje
+      // genérico que no explicaba nada.
+      if (err && err.status === 409) {
+        clearPendingGooglePlayPurchase();
+        return { ok: false, sessionExpired: false, permanentError: err.detail || 'esta compra ya está registrada en otra cuenta' };
+      }
       if (attempt < RETRY_DELAYS_MS.length) {
         savePendingGooglePlayPurchase(purchaseToken, productId);
         await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
@@ -214,6 +225,8 @@ async function resumePendingGooglePlayPurchase() {
     if (result.ok) {
       await loadContent();
       await notifyModal({ title: '¡Listo!', text: 'Tu compra se confirmó — ya tenés Premium.' });
+    } else if (result.permanentError) {
+      showError(`No pudimos otorgar la compra: ${result.permanentError}.`);
     } else if (!result.sessionExpired) {
       showError('Tu compra en Google Play se realizó pero no pudimos confirmarla todavía — volvé a intentarlo en un rato, se recupera sola.');
     }
@@ -324,7 +337,7 @@ function renderPlans(plans, status, oneclick) {
     } else {
       buttonHTML = `
         <button type="button" class="cuenta-btn" data-plan="${key}">
-          ${status && status.is_premium ? 'Renovar' : 'Comprar'}
+          ${status && status.is_premium ? 'Seguir con Premium' : 'Desbloquear Premium'}
         </button>
         <p class="premium-reassurance">${REASSURANCE[key]}</p>
       `;
@@ -378,6 +391,12 @@ async function buyPlan(plan, btn, activePlanKey) {
   // backend falle con 401, abrimos el login acá mismo, antes de tocar la red.
   if (!getAccessToken()) {
     openAuth('login');
+    return;
+  }
+  const consent = $('premium-consent');
+  if (consent && !consent.checked) {
+    consent.closest('label')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    showError('Aceptá los Términos, la Política de suscripción y la de reembolso para continuar.');
     return;
   }
   // Ya hay otro plan auto-renovando (ej. Mensual) y se está por pisar con
@@ -463,6 +482,14 @@ async function buyPlan(plan, btn, activePlanKey) {
         // sola, sin que haga falta tocar "Comprar" otra vez.
         showError('Tu compra en Google Play se realizó pero tu sesión expiró. Iniciá sesión de nuevo AHORA — Google puede cancelar la compra en unos minutos si no la confirmamos.');
         openAuth('login');
+        return;
+      }
+      if (verifyResult.permanentError) {
+        // Conflicto permanente (409): esta misma cuenta de Google Play ya
+        // compró este plan con OTRA cuenta de Vyneural — no hay nada que
+        // "reintentar", ni queda un pendiente guardado (ver
+        // verifyGooglePlayPurchaseWithRetry). Mensaje real, no el genérico.
+        showError(`No pudimos otorgar la compra: ${verifyResult.permanentError}.`);
         return;
       }
       if (!verifyResult.ok) {
