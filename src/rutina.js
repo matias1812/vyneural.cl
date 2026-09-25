@@ -465,7 +465,7 @@ function renderItSteps() {
   itSteps.forEach((step, i) => {
     const li = document.createElement('li');
     li.className = 'cuenta-item';
-    const bell = step.notification_enabled === false ? '🔕' : '🔔';
+    const bell = step.notification_enabled === false ? '🔕' : (step.alarm_enabled === false ? '🔔' : '⏰');
     const schedule = step.time_of_day ? `${step.time_of_day} · ${bell}` : '';
     li.innerHTML = `<div class="cuenta-item-body">
         <b>${i + 1}. ${escapeHtml(step.name)}</b>
@@ -478,9 +478,23 @@ function renderItSteps() {
 }
 
 function toggleStepNotifyWrap() {
-  const wrap = document.getElementById('it-step-notify-wrap');
+  // El grupo entero (notificación + alarma) se oculta/muestra junto según si
+  // hay horario cargado — la agrupación visual (P8) los trata como una sola
+  // decisión, no dos filas sueltas con hidden independiente.
+  const group = document.getElementById('it-step-notify-group');
   const timeEl = document.getElementById('it-step-time');
-  if (wrap) wrap.classList.toggle('hidden', !(timeEl && timeEl.value));
+  if (group) group.classList.toggle('hidden', !(timeEl && timeEl.value));
+  toggleStepAlarmWrap();
+}
+
+// El checkbox de alarma solo tiene sentido si hay notificación activada —
+// sin notificación no hay nada que suene ni que avise (mismo criterio que
+// ocultar #it-step-notify-wrap sin horario).
+function toggleStepAlarmWrap() {
+  const wrap = document.getElementById('it-step-alarm-wrap');
+  const timeEl = document.getElementById('it-step-time');
+  const notifyEl = document.getElementById('it-step-notify');
+  if (wrap) wrap.classList.toggle('hidden', !(timeEl && timeEl.value && notifyEl && notifyEl.checked));
 }
 
 // Deshabilita los días ya ocupados por OTRO itinerario (no se puede repetir);
@@ -860,6 +874,7 @@ function startEditItinerary(it) {
       duration: Math.max(1, Math.round((item.duration || 0) / 60)),
       time_of_day: item.time_of_day || null,
       notification_enabled: item.configuration ? item.configuration.notification_enabled !== false : true,
+      alarm_enabled: item.configuration ? item.configuration.alarm_enabled !== false : true,
     };
   });
   renderItSteps();
@@ -951,6 +966,8 @@ function wireItineraryForm() {
   const add = document.getElementById('it-step-add');
   const timeEl = document.getElementById('it-step-time');
   if (timeEl) timeEl.addEventListener('input', toggleStepNotifyWrap);
+  const notifyToggleEl = document.getElementById('it-step-notify');
+  if (notifyToggleEl) notifyToggleEl.addEventListener('change', toggleStepAlarmWrap);
   wireItCustomPanel();
   populateStepFreqs();
 
@@ -963,6 +980,7 @@ function wireItineraryForm() {
     const sel = document.getElementById('it-step-freq');
     const dur = document.getElementById('it-step-duration');
     const notifyEl = document.getElementById('it-step-notify');
+    const alarmEl = document.getElementById('it-step-alarm');
     if (!sel.value) return false;
     if (!timeEl || !timeEl.value) {
       alert('Elegí un horario para este paso.');
@@ -989,10 +1007,12 @@ function wireItineraryForm() {
         duration,
         time_of_day,
         notification_enabled: notifyEl ? notifyEl.checked : true,
+        alarm_enabled: alarmEl ? alarmEl.checked : true,
       });
       renderItSteps();
       if (timeEl) timeEl.value = '';
       if (notifyEl) notifyEl.checked = true;
+      if (alarmEl) alarmEl.checked = true;
       toggleStepNotifyWrap();
       pendingStepEdit = false;
       return true;
@@ -1037,6 +1057,7 @@ function wireItineraryForm() {
     const dur = document.getElementById('it-step-duration');
     const timeEl = document.getElementById('it-step-time');
     const notifyEl = document.getElementById('it-step-notify');
+    const alarmEl = document.getElementById('it-step-alarm');
     // El <select> solo se puebla con "Mis frecuencias" una vez, al abrir el
     // formulario — si este paso usa una frecuencia creada DESPUÉS de eso
     // (ej. un preset recién guardado en este mismo formulario), su opción
@@ -1047,6 +1068,7 @@ function wireItineraryForm() {
     if (timeEl) timeEl.value = step.time_of_day || '';
     resyncApkTimePicker('it-step-time');
     if (notifyEl) notifyEl.checked = step.notification_enabled !== false;
+    if (alarmEl) alarmEl.checked = step.alarm_enabled !== false;
     toggleStepNotifyWrap();
     itSteps.splice(i, 1);
     pendingStepEdit = true;
@@ -1092,7 +1114,9 @@ function wireItineraryForm() {
         frequency_id: s.frequency_id,
         position: i,
         duration: s.duration * 60,
-        configuration: s.time_of_day ? { notification_enabled: s.notification_enabled !== false } : {},
+        configuration: s.time_of_day
+          ? { notification_enabled: s.notification_enabled !== false, alarm_enabled: s.alarm_enabled !== false }
+          : {},
         time_of_day: s.time_of_day || undefined,
       }));
       const submitBtn = document.getElementById('itinerary-submit');
