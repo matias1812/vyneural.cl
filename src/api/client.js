@@ -18,6 +18,35 @@ try {
   accessToken = null;
 }
 
+// APK — lectura SÍNCRONA de AuthStore (AndroidBridge.kt::getNativeAuth), NO
+// async como STORE_AUTH/postMessage. Corre en el mismo tick en que este
+// módulo se evalúa, antes de que cualquier código de arranque de la app
+// llegue a hacer su primer request autenticado — cierra la carrera real:
+// AlarmSync.kt rota el token en 2.º plano (p. ej. con el teléfono apagado
+// varias horas) sin que la WebView, todavía sin cargar, se entere; si el
+// primer request de la propia web usara el localStorage viejo antes de que
+// llegue el push nativo (que sí es async, ver __vyneuralSyncAuthFromNative
+// abajo — por sí solo no alcanza), el backend lo trata como reuso de un
+// refresh token ya rotado y cierra la sesión entera. Pisar acá ANTES de que
+// nada más corra hace que localStorage nunca esté desactualizado al leerse.
+if (typeof window !== 'undefined') {
+  try {
+    const bridge = window.AndroidBridgeNative || window.AndroidBridge;
+    if (bridge && typeof bridge.getNativeAuth === 'function') {
+      const native = JSON.parse(bridge.getNativeAuth() || '{}');
+      if (native.access_token) {
+        accessToken = native.access_token;
+        localStorage.setItem(LS_TOKEN, native.access_token);
+      }
+      if (native.refresh_token) {
+        localStorage.setItem('vyneural_refresh_token', native.refresh_token);
+      }
+    }
+  } catch (_) {
+    /* sin bridge nativo (web/PWA) o sin storage: se sigue con lo que ya había */
+  }
+}
+
 let refreshPromise = null;
 
 export function setAccessToken(token) {

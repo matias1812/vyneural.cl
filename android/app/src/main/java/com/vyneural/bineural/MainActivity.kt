@@ -234,6 +234,17 @@ class MainActivity : ComponentActivity() {
                 injectSafeAreaCss()
                 injectBridge()
                 Diagnostics.bridgeStatus = if (view.url?.startsWith("file://") == true) "CONNECTED" else "ERROR"
+                // Bug real visto en vivo: en un arranque en frío, onResume()
+                // (que llama a syncAuthFromNativeStore) corre casi en el mismo
+                // tick que el loadUrl() de onCreate — el bundle JS (el que
+                // define window.__vyneuralSyncAuthFromNative, ver client.js)
+                // puede no haber corrido todavía, así que ese evaluateJavascript
+                // no-opea en silencio y la WebView arranca con el refresh token
+                // viejo (ya rotado del lado nativo) en localStorage → el
+                // backend lo trata como reuso y cierra la sesión. onPageFinished
+                // sí garantiza que el bundle ya se ejecutó, así que repetir la
+                // sincronización acá cierra la carrera sin tocar onResume().
+                syncAuthFromNativeStore()
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -477,6 +488,15 @@ class MainActivity : ComponentActivity() {
             // Pequeño margen: el estado del canal que aplica el sistema tras
             // conceder el permiso puede no estar 100% asentado en el mismo
             // tick de este callback.
+            // Esto y src/ui/degraded-alarm-banner.js reaccionan a la MISMA
+            // señal (NotificationHelper.channelDegraded) a propósito, sin
+            // coordinarse: este diálogo cubre solo el instante justo después
+            // de conceder el permiso (mejor momento de atención del usuario);
+            // el banner cubre cualquier degradación posterior. Ver
+            // docs/NOTIFICATION_CHANNEL_HISTORY.md antes de "simplificar"
+            // sacando uno de los dos — en fabricantes sin verificar todavía
+            // (Samsung/Xiaomi/Huawei, ver docs/HARDWARE_TEST_PLAN.md H5) el
+            // banner es la única red si este diálogo no alcanza a mostrarse.
             webView.postDelayed({
                 if (NotificationHelper.channelDegraded(this)) {
                     AlertDialog.Builder(this)

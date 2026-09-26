@@ -52,6 +52,25 @@ class AndroidBridge(
     @JavascriptInterface
     fun getVersion(): String = "1.0.0"
 
+    // Llamada SÍNCRONA (a diferencia de postMessage/evaluateJavascript, que
+    // son async) — client.js la lee en el mismo tick en que el módulo se
+    // evalúa, ANTES de que cualquier código de arranque de la app llegue a
+    // hacer su primer request autenticado. Sin esto, pisar localStorage con
+    // lo último de AuthStore recién en onPageFinished/onResume no alcanza:
+    // los módulos ES ya corren (y pueden disparar su propio fetch/API_REQUEST
+    // con el token viejo de localStorage) ANTES de que ese evaluateJavascript
+    // async llegue a ejecutarse — bug real: sesión cerrada al reabrir la app
+    // tras que AlarmSync rotara el token en 2.º plano (p. ej. el teléfono
+    // estuvo apagado varias horas) porque el primer request de la propia web
+    // seguía usando el refresh token viejo, ya rotado del lado nativo.
+    @JavascriptInterface
+    fun getNativeAuth(): String {
+        val out = JSONObject()
+        AuthStore.token(context)?.let { out.put("access_token", it) }
+        AuthStore.refreshToken(context)?.let { out.put("refresh_token", it) }
+        return out.toString()
+    }
+
     /** Capacidades REALES de esta instalación (supported/granted/active). */
     @JavascriptInterface
     fun getPlatformInfo(): String {
@@ -551,6 +570,11 @@ class AndroidBridge(
             conn.connectTimeout = 15_000
             conn.readTimeout = 25_000
             conn.setRequestProperty("Accept", "application/json")
+            // El backend usa esto para detectar tráfico real de la APK: este
+            // HttpURLConnection nativo nunca manda Origin, así que sin esta
+            // señal el backend clasifica is_apk=False y la sesión pierde la
+            // ventana de gracia de rotación de refresh token (ver auth.py).
+            conn.setRequestProperty("X-Vyneural-Client", "android-apk")
             if (headers != null) {
                 val it = headers.keys()
                 while (it.hasNext()) {
