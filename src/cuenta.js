@@ -21,7 +21,7 @@ import {
 import { listAlarms, deleteAlarm, updateAlarm } from './api/alarms.js';
 import { listItineraries } from './api/itineraries.js';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
-import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, getReferralCode, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
+import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, redeemCoupon, listCoupons, createCoupon, updateCoupon, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
 import { getStatus, onStatusChange, STATUS } from './api/status.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
 import { requestPermission } from './notifications.js';
@@ -357,6 +357,11 @@ const PLAN_LABELS = { monthly: 'Mensual', annual: 'Anual' };
 // lo lee wireOneclickButtons() al activar.
 let currentPremiumPlan = null;
 
+// Panel de admin: solo se wirea/carga una vez, la primera vez que loadAll()
+// detecta que la cuenta logueada es la admin (evita duplicar listeners si
+// el usuario recarga /cuenta sin salir de la sesión).
+let adminWired = false;
+
 function renderPremium(status, oneclick) {
   const badge = $('cuenta-premium-status');
   const text = $('cuenta-premium-text');
@@ -526,31 +531,147 @@ async function startOneclickInscription(btn, forceNewCard) {
   }
 }
 
-// `referral` es el resultado de getReferralCode() (null si el pedido falló:
-// sin conexión, sesión inválida, etc.) — a diferencia de Premium, esta
-// tarjeta siempre tiene algo que mostrar para cualquier cuenta logueada.
-function renderReferralCode(referral) {
-  const el = $('cuenta-referral-code');
-  if (!el) return;
-  el.textContent = referral && referral.code ? referral.code : '—';
+// `premium` es el resultado de premiumStatus() — ya trae has_pending_coupon/
+// has_redeemed_coupon_before, no hace falta un endpoint aparte solo para
+// pintar esta tarjeta.
+function renderCoupon(premium) {
+  const input = $('cuenta-coupon-input');
+  const btn = $('cuenta-coupon-redeem');
+  const status = $('cuenta-coupon-status');
+  if (!input || !btn || !status) return;
+  if (premium && premium.has_redeemed_coupon_before) {
+    input.disabled = true;
+    btn.disabled = true;
+    status.textContent = 'Ya usaste un cupón — solo se puede activar uno por cuenta.';
+    status.classList.remove('hidden');
+  } else if (premium && premium.has_pending_coupon) {
+    input.disabled = true;
+    btn.disabled = true;
+    status.textContent = 'Cupón activado — se aplica al elegir un plan Mensual o Anual.';
+    status.classList.remove('hidden');
+  } else {
+    input.disabled = false;
+    btn.disabled = false;
+    status.classList.add('hidden');
+  }
 }
 
-function wireReferralButton() {
-  const copyBtn = $('cuenta-referral-copy');
-  const codeEl = $('cuenta-referral-code');
-  if (!copyBtn || !codeEl) return;
-  copyBtn.addEventListener('click', async () => {
-    const code = codeEl.textContent.trim();
-    if (!code || code === '—') return;
+function wireCouponButton() {
+  const input = $('cuenta-coupon-input');
+  const btn = $('cuenta-coupon-redeem');
+  const status = $('cuenta-coupon-status');
+  if (!input || !btn || !status) return;
+  btn.addEventListener('click', async () => {
+    const code = input.value.trim();
+    if (!code) return;
+    btn.disabled = true;
     try {
-      await navigator.clipboard.writeText(code);
-      const original = copyBtn.textContent;
-      copyBtn.textContent = '¡Copiado!';
-      setTimeout(() => {
-        copyBtn.textContent = original;
-      }, 2000);
+      const result = await redeemCoupon(code);
+      status.classList.remove('hidden');
+      if (result.ok) {
+        status.textContent = 'Cupón activado — se aplica al elegir un plan Mensual o Anual.';
+        input.disabled = true;
+      } else {
+        status.textContent = result.reason || 'No se pudo activar el cupón.';
+        btn.disabled = false;
+      }
     } catch (_) {
-      /* clipboard no disponible (permiso, contexto no seguro) — sin feedback, no rompe nada */
+      status.classList.remove('hidden');
+      status.textContent = 'No se pudo conectar — probá de nuevo.';
+      btn.disabled = false;
+    }
+  });
+}
+
+// Panel de admin: SOLO visible client-side para settings.admin_email (hoy
+// matias.torres1812@gmail.com) — esto es únicamente para no mostrarle la
+// tarjeta a cualquier otra cuenta, NO es la seguridad real. Cada endpoint
+// /admin/coupons/* vuelve a chequear el email server-side (require_admin_user,
+// backend/app/deps.py) sin importar lo que haga o deje de hacer este if.
+function renderAdminCard(profile) {
+  const card = $('cuenta-admin-card');
+  if (!card) return;
+  const isAdmin = !!(profile && profile.email === 'matias.torres1812@gmail.com');
+  card.classList.toggle('hidden', !isAdmin);
+  if (isAdmin && !adminWired) {
+    adminWired = true;
+    loadAdminCoupons();
+    wireAdminCouponForm();
+  }
+}
+
+async function loadAdminCoupons() {
+  const list = $('admin-coupon-list');
+  if (!list) return;
+  try {
+    const coupons = await listCoupons();
+    renderAdminCouponList(coupons);
+  } catch (_) {
+    list.innerHTML = '<li>No se pudo cargar la lista de cupones.</li>';
+  }
+}
+
+function renderAdminCouponList(coupons) {
+  const list = $('admin-coupon-list');
+  if (!list) return;
+  if (!coupons || !coupons.length) {
+    list.innerHTML = '<li>Todavía no hay cupones creados.</li>';
+    return;
+  }
+  list.innerHTML = coupons
+    .map((c) => {
+      const limit = c.max_redemptions != null ? `${c.times_redeemed}/${c.max_redemptions}` : `${c.times_redeemed}`;
+      const label = c.label ? ` — ${escapeHtml(c.label)}` : '';
+      return `<li>
+        <code>${escapeHtml(c.code)}</code>${label} · ${c.trial_days}d · usado ${limit}
+        <button type="button" class="cuenta-btn admin-coupon-toggle" data-code="${escapeHtml(c.code)}" data-active="${c.active}">
+          ${c.active ? 'Desactivar' : 'Activar'}
+        </button>
+      </li>`;
+    })
+    .join('');
+  list.querySelectorAll('.admin-coupon-toggle').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const code = btn.dataset.code;
+      const active = btn.dataset.active === 'true';
+      btn.disabled = true;
+      try {
+        await updateCoupon(code, { active: !active });
+        await loadAdminCoupons();
+      } catch (_) {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function wireAdminCouponForm() {
+  const form = $('admin-coupon-form');
+  const errorEl = $('admin-coupon-error');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (errorEl) errorEl.classList.add('hidden');
+    const code = $('admin-coupon-code').value.trim();
+    const label = $('admin-coupon-label').value.trim() || null;
+    const days = parseInt($('admin-coupon-days').value, 10) || 30;
+    const maxRaw = $('admin-coupon-max').value.trim();
+    const max = maxRaw ? parseInt(maxRaw, 10) : null;
+    if (!code) return;
+    const btn = $('admin-coupon-create');
+    btn.disabled = true;
+    try {
+      await createCoupon({ code, label, trial_days: days, max_redemptions: max });
+      form.reset();
+      $('admin-coupon-days').value = '30';
+      await loadAdminCoupons();
+    } catch (err) {
+      if (errorEl) {
+        errorEl.textContent = (err && err.detail) || 'No se pudo crear el cupón.';
+        errorEl.classList.remove('hidden');
+      }
+    } finally {
+      btn.disabled = false;
     }
   });
 }
@@ -726,11 +847,10 @@ async function loadAll() {
     listDevices(),
     premiumStatus(),
     oneclickStatus(),
-    getReferralCode(),
   ]);
   if (seq !== loadSeq) return;
 
-  const [profile, favs, freqs, alarms, its, push, devices, premium, oneclick, referral] = results.map((r) =>
+  const [profile, favs, freqs, alarms, its, push, devices, premium, oneclick] = results.map((r) =>
     r.status === 'fulfilled' ? r.value : null,
   );
 
@@ -778,7 +898,8 @@ async function loadAll() {
   }
   renderPush();
   renderPremium(premium, oneclick);
-  renderReferralCode(referral);
+  renderCoupon(premium);
+  renderAdminCard(profile);
 
   const failed = results.filter((r) => r.status === 'rejected').length;
   if (syncEl) {
@@ -1057,7 +1178,7 @@ function init() {
   document.addEventListener('click', handleAction);
   wirePushButtons();
   wireOneclickButtons();
-  wireReferralButton();
+  wireCouponButton();
 
   // Tras el diálogo nativo de permisos (o volver de Ajustes) el WebView
   // reaparece: re-leer el estado real del permiso y repintar la tarjeta.

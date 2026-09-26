@@ -4,13 +4,13 @@
 
 import { post, cachedGet, clearSession, storeSession } from './client.js';
 
-export async function register({ email, password, username, display_name, referral_code }) {
+export async function register({ email, password, username, display_name, coupon_code }) {
   const session = await post('/api/v1/auth/register', {
     email,
     password,
     username,
     display_name,
-    referral_code,
+    coupon_code,
   });
   storeSession(session);
   return session;

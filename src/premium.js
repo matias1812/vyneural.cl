@@ -214,6 +214,10 @@ async function verifyGooglePlayPurchaseWithRetry(purchaseToken, productId, onAtt
 // huérfana del lado Kotlin en este build, podría ni abrir el diálogo de Play
 // de nuevo). Silenciosa mientras reintenta (no hay botón que actualizar acá);
 // solo se anuncia el resultado final.
+// Último premiumStatus() cargado — buyPlan() lo lee para saber si avisar
+// antes de comprar que todavía no se activó ningún cupón (ver renderPlans).
+let lastPremiumStatus = null;
+
 let resumingPendingPurchase = false;
 async function resumePendingGooglePlayPurchase() {
   if (resumingPendingPurchase || !getAccessToken()) return;
@@ -276,6 +280,7 @@ function renderActiveBanner(status) {
 function renderPlans(plans, status, oneclick) {
   const wrap = $('premium-plans');
   if (!wrap) return;
+  lastPremiumStatus = status;
   wrap.innerHTML = '';
   // De por vida no vence: no hay plan al que "renovar" ni nada que comprar
   // de nuevo (el backend también lo rechaza — ver POST /payments/create —
@@ -414,6 +419,27 @@ async function buyPlan(plan, btn, activePlanKey) {
       confirmLabel: 'Cambiar plan',
     });
     if (!ok) return;
+  }
+  // Último punto 100% cliente antes de cualquier llamada de red/compra
+  // (cubre las 3 vías: Google Play, Webpay lifetime, Oneclick) — activar un
+  // cupón DESPUÉS de pagar ya no aplica, así que si nunca activó ninguno
+  // conviene preguntarle acá, no dejar que se entere tarde en /cuenta.
+  // Vitalicio no auto-renueva (plan !== 'lifetime' en el guard de arriba
+  // filtra el cambio de plan, pero este chequeo aplica a los 3 planes: un
+  // cupón vale igual para vitalicio+Oneclick después, así que no se excluye).
+  if (lastPremiumStatus && !lastPremiumStatus.has_pending_coupon && !lastPremiumStatus.has_redeemed_coupon_before) {
+    // confirmModal tiene UN solo botón de acción (sin cancelLabel propio) —
+    // el botón lleva a activar el cupón; cerrar el aviso (✕, click afuera o
+    // Escape, todos resuelven false) es lo que deja seguir con la compra.
+    const wantsCoupon = await confirmModal({
+      title: '¿Tenés un código de cupón?',
+      text: 'Activalo desde tu cuenta ANTES de comprar para sumar tu mes de Premium gratis — después de pagar ya no se puede aplicar. Si no tenés uno, cerrá este aviso para seguir con la compra.',
+      confirmLabel: 'Ir a activar mi cupón',
+    });
+    if (wantsCoupon) {
+      window.location.href = '/cuenta';
+      return;
+    }
   }
   showError(null);
   // Chispa de confirmación al click — breve y disparada por el propio gesto

@@ -4,7 +4,7 @@
 // branchea por plataforma). Aditivo: sin backend/sesión simplemente no se
 // puede comprar, el resto de la app sigue igual.
 
-import { get, post, del } from './client.js';
+import { get, post, patch, del } from './client.js';
 
 /** Precios reales — SIEMPRE del backend (app/billing/plans.py), nunca
  * hardcodeados acá: evita que el precio mostrado se desincronice del que
@@ -28,12 +28,27 @@ export async function paymentHistory() {
   return get('/api/v1/payments');
 }
 
-/** Get-or-create el código de referido propio (ver /cuenta → "Tu código de
- * referido"): quien se registre con este código activa 1 mes de Premium
- * gratis al elegir un plan Mensual o Anual. Siempre el mismo código una vez
- * creado. */
-export async function getReferralCode() {
-  return get('/api/v1/payments/referral/code');
+/** Activa un cupón definido por el negocio (ver /cuenta → "Cupones") — nunca
+ * lanza por un código inválido/agotado, devuelve { ok, reason }. Si ok,
+ * queda pendiente hasta elegir un plan Mensual o Anual (premiumStatus()
+ * refleja esto en has_pending_coupon). */
+export async function redeemCoupon(code) {
+  return post('/api/v1/payments/coupon/redeem', { code });
+}
+
+// ── Panel de admin (SOLO la cuenta de settings.admin_email — el backend
+// vuelve a chequear esto en cada request, ver deps.py::require_admin_user) ──
+
+export async function listCoupons() {
+  return get('/api/v1/admin/coupons');
+}
+
+export async function createCoupon({ code, label, trial_days, max_redemptions }) {
+  return post('/api/v1/admin/coupons', { code, label, trial_days, max_redemptions });
+}
+
+export async function updateCoupon(code, body) {
+  return patch(`/api/v1/admin/coupons/${encodeURIComponent(code)}`, body);
 }
 
 // ── Oneclick Mall: auto-renovación opcional, activada desde /cuenta ────────
