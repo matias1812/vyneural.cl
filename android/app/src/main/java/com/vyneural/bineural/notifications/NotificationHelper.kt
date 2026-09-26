@@ -22,85 +22,23 @@ import com.vyneural.bineural.audio.AudioForegroundService
 object NotificationHelper {
 
     const val CHANNEL_PLAYER = "bineural_player"
-    // v2: los canales son inmutables una vez creados; al añadir vibración se
-    // cambió el ID para que las instalaciones existentes reciban el canal nuevo
-    // (con vibración) en lugar de heredar el viejo sin ella.
-    // v3: la alarma ahora suena con el RINGTONE DE ALARMA del sistema
-    // (USAGE_ALARM), no con el sonido de notificación genérico: es una alarma
-    // real, no un aviso pasivo. Nuevo ID para que las instalaciones existentes
-    // reciban el canal con sonido de alarma.
-    // v4: reportado que una alarma disparó SOLO la notificación, sin sonido
-    // ni vibración — un teléfono que ya tenía "bineural_alarms_v3" creado
-    // (de una build de prueba anterior de esta sesión, antes o después de
-    // que este archivo cambiara) sigue con la config VIEJA de ese canal para
-    // siempre: createNotificationChannel() es un no-op si el ID ya existe,
-    // Android no permite reconfigurar sonido/vibración de un canal existente
-    // por código. Nuevo ID otra vez para que TODAS las instalaciones (nuevas
-    // y viejas) reciban el canal con la config actual desde cero.
-    // v5: MISMO síntoma reportado otra vez (notificación sin sonido ni
-    // vibración) — el teléfono de prueba instaló varias builds de esta
-    // sesión ANTES de este archivo, así que "v4" quedó fijado con lo que
-    // fuera que tenía en ese momento.
-    // v6: confirmado en un dispositivo con instalación fresca del v5 — ni
-    // siquiera el botón "Probar notificación" (dispara al toque, sin
-    // scheduling de por medio) sonaba/vibraba. Esta vez la causa SÍ era la
-    // config de abajo: RingtoneManager.getDefaultUri() puede devolver null
-    // (tono de alarma en "Silencio"), y setSound(null, attrs) apaga el
-    // sonido del canal a propósito — se agregó un 3er fallback. Bump para
-    // que el canal se cree de cero con ese fallback ya aplicado.
-    // v7: los diagnósticos nuevos de /diagnostico (alarmChannelDiagnostics,
-    // AndroidBridge.kt) mostraron la causa REAL en el dispositivo que seguía
-    // reportando "llega pero no suena ni vibra": el canal v6 (creado con
-    // IMPORTANCE_HIGH por código) terminó en IMPORTANCE_LOW — Android puede
-    // bajar la importancia de un canal por su cuenta si el usuario descarta
-    // varias notificaciones de esa app sin abrirlas (comportamiento adaptativo
-    // de Android 12+), y pasamos varias builds de esta sesión probando/
-    // descartando notificaciones de prueba en ese mismo canal. Un canal
-    // existente es inmutable por código — ni ensureChannels() ni ninguna otra
-    // llamada puede subirle la importancia de vuelta a HIGH; solo el usuario
-    // puede hacerlo a mano en Ajustes, o se crea un canal nuevo. Bump a v7
-    // para que el canal nazca de cero en IMPORTANCE_HIGH otra vez.
-    // v8: reportado otra vez "llega pero a veces sin alarma" DESPUÉS de v7 —
-    // esta vez el hueco no es importancia ni sonido nulo, es que el canal
-    // nunca pedía bypassear No Molestar (ver setBypassDnd(true) abajo). Igual
-    // que importancia/sonido, bypassDnd es un atributo de canal que Android
-    // solo aplica al CREARSE por primera vez — createNotificationChannel()
-    // sobre un canal existente no lo cambia, así que necesita ID nuevo para
-    // que los teléfonos que ya tenían v7 lo reciban.
-    // v9: mismo síntoma reportado otra vez en vivo (llega pero no despliega
-    // heads-up, sin sonido ni vibración) DESPUÉS de v8 — consistente con que
-    // Android bajó la importancia sola (ver comentario v7): esta sesión
-    // disparó/descartó muchas notificaciones de prueba en el canal v8. Bump
-    // para que nazca de cero en IMPORTANCE_HIGH otra vez. Como esto puede
-    // volver a pasar con el uso normal (no es exclusivo de testing), ver
-    // permissions-modal.js/main.js: ahora la UI detecta importancia degradada
-    // y lo señala de forma prominente en vez de depender de otro bump manual.
-    // v10: primera prueba real post-Play (v1.7.8, instalado desde la consola,
-    // no por adb) reportó el mismo síntoma otra vez — pero la sospecha
-    // principal esta vez es que el push nunca llegó por FCM en absoluto
-    // (posible FIREBASE_CREDENTIALS_JSON sin configurar en Render) y cayó al
-    // fallback de Web Push, que nunca pasa por este canal ni por
-    // NotificationHelper. El bump igual se hace por las dudas (varias sesiones
-    // de prueba dispararon/descartaron notificaciones en v9, mismo patrón que
-    // v7/v9), pero NO reemplaza confirmar si FCM está configurado en producción.
-    // v11 (2026-09-23) — confirmado en vivo por logcat (logChannelState):
-    // v10 ya estaba en importance=2 (LOW) en el dispositivo de prueba,
-    // degradado por Android durante las mismas rondas de testing de esta
-    // sesión (crear/descartar notificaciones de prueba repetidamente). Mismo
-    // patrón que v6/v7/v8/v9 — un canal ya creado en el dispositivo no se
-    // puede "reparar" con código, solo un ID nuevo empieza limpio.
-    // v12 (2026-09-24) — MISMO síntoma reportado apenas se activaron los
-    // permisos ("llega la notificación pero desapercibida y sin alarma"),
-    // confirmado en vivo por `adb shell dumpsys notification` (no logcat esta
-    // vez, directo el estado real): v11 ya estaba en mImportance=2 (LOW),
-    // mOriginalImp=4 — degradado de nuevo, con mUserLockedFields marcado (ni
-    // el usuario puede subirlo desde la propia app, solo desde Ajustes del
-    // sistema o con un canal nuevo). Motivo probable: la campana rediseñada
-    // en esta misma sesión (P8) tenía un botón "🔔 Enviar notificación de
-    // prueba" que se usó/descartó repetidas veces durante testing — YA SE
-    // ELIMINÓ esa UI (ver bineural/index.html), lo que debería frenar esta
-    // degradación por testing repetido en el futuro; el endpoint backend
-    // sigue vivo para diagnóstico vía API directa, ya no vía botón.
+    // Los canales de notificación son inmutables una vez creados por Android
+    // (createNotificationChannel() es un no-op sobre un ID existente), así
+    // que cada vez que hizo falta cambiar su config (sonido, vibración,
+    // importancia, bypass de DND) hubo que mintar un ID nuevo — de ahí el
+    // historial v2→v12 de este canal. Historia completa, dispositivo por
+    // dispositivo: docs/NOTIFICATION_CHANNEL_HISTORY.md. Dos hallazgos de
+    // ese historial siguen vigentes hoy:
+    // - v8: el canal necesita bypassear No Molestar (setBypassDnd(true)
+    //   abajo) para una alarma real — no alcanza con importancia/sonido.
+    // - v12 (2026-09-24, Honor/Magic OS): `adb shell dumpsys notification`
+    //   mostró la importancia cayendo a LOW INSTANTÁNEAMENTE al conceder el
+    //   permiso, antes de mostrarse una sola notificación — esto invalida la
+    //   teoría v3→v11 de "Android la baja por descartes repetidos" para esta
+    //   clase de dispositivo. Bumpear el ID de nuevo (v13, v14…) NO arregla
+    //   esto ahí; el lever real es channelDegraded() + el diálogo nativo de
+    //   MainActivity.onRequestPermissionsResult que ofrece el arreglo de un
+    //   toque apenas se concede el permiso.
     const val CHANNEL_ALARMS = "bineural_alarms_v12"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
@@ -201,9 +139,16 @@ object NotificationHelper {
      *  canal puede quedar en Importancia baja INSTANTÁNEAMENTE al conceder el
      *  permiso, sin que se haya mostrado ni descartado una sola notificación
      *  — la teoría de "Android la baja sola tras varios descartes" (ver
-     *  historial v3→v11 arriba) no explica este caso. Por código no hay forma
-     *  de subirla de vuelta (ver openAlarmChannelSettings) — esto solo lee el
-     *  estado real para decidir si hace falta ofrecer el arreglo ya mismo. */
+     *  docs/NOTIFICATION_CHANNEL_HISTORY.md, v3→v11) no explica este caso. Por
+     *  código no hay forma de subirla de vuelta (ver openAlarmChannelSettings)
+     *  — esto solo lee el estado real para decidir si hace falta ofrecer el
+     *  arreglo ya mismo. Dos superficies reaccionan a esta señal a propósito,
+     *  sin coordinarse entre sí — no es duplicación accidental: el diálogo
+     *  nativo (MainActivity.onRequestPermissionsResult) cubre el instante
+     *  justo después de conceder el permiso, y src/ui/degraded-alarm-banner.js
+     *  cubre cualquier degradación posterior que no pase por ese flujo (no
+     *  hay forma de que la app se entere si el canal se degrada mientras está
+     *  cerrada, así que el banner re-chequea en cada visibilitychange). */
     fun channelDegraded(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

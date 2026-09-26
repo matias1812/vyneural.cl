@@ -62,7 +62,7 @@ Cadena completa automatizada (`scripts/alarm-chain-test.mjs`, 6/6):
 | H2 real | Teléfono con PIN/patrón | Alarma con pantalla bloqueada + keyguard → notificación visible e interactuable |
 | H3 real | Teléfono en doze | Audio nativo con screen off prolongado (5+ min) sin corte |
 | H4 | Auriculares Bluetooth reales | Play/pause/stop por los controles BT; desconexión BT → duck/pausa y recuperación |
-| H5 | Samsung / Xiaomi / Huawei | Kill del proceso por el "reciente" del fabricante → alarma sigue (OEM specific) |
+| H5 | Samsung / Xiaomi / Huawei | Kill del proceso por el "reciente" del fabricante → alarma sigue (OEM specific). **También pendiente en estos fabricantes** (agregado 2026-09-26, no cubierto por esta fila hasta ahora): la degradación instantánea de importancia del canal de alarma al conceder el permiso (confirmada solo en Honor/Magic OS, ver `docs/NOTIFICATION_CHANNEL_HISTORY.md` v12 y `NotificationHelper.channelDegraded`) — el código es agnóstico de fabricante, pero nadie confirmó todavía si el mismo síntoma aparece en Samsung OneUI / Xiaomi MIUI-HyperOS / Huawei. |
 | H6 real | Teléfono | Reboot → BootReceiver reprograma → alarma dispara con app cerrada |
 | H7 | Teléfono con SIM | Llamada entrante → audio focus LOSS_TRANSIENT → duck/pausa y recuperación al colgar |
 | H8 real | Teléfono con Chrome sano | Instalar la PWA (WebAPK) desde el menú de Chrome → standalone real con su proceso |
