@@ -8,7 +8,11 @@
 // - Refresh automático UNA vez por 401 (rotación), sin carreras (promesa única).
 // - Errores normalizados como ApiError { status, detail, code }.
 
-const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
+// Exportado (no solo interno): admin.js lo necesita para armar la URL
+// absoluta de exportación CSV mostrada en pantalla — la descarga real
+// SIEMPRE pasa por request()/getText() más abajo (headers de auth), nunca
+// por un <a href> directo a esta URL, ver admin.js::getSalesExportPath.
+export const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
 
 const LS_TOKEN = 'vyneural_access_token';
 let accessToken = null;
@@ -295,7 +299,7 @@ function tryRefresh() {
   });
 }
 
-export async function request(path, { method = 'GET', body, retry = true } = {}) {
+export async function request(path, { method = 'GET', body, retry = true, raw = false } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
 
@@ -308,7 +312,7 @@ export async function request(path, { method = 'GET', body, retry = true } = {})
 
   if (res.status === 401 && retry) {
     const { ok, network } = await tryRefresh();
-    if (ok) return request(path, { method, body, retry: false });
+    if (ok) return request(path, { method, body, retry: false, raw });
     if (network) {
       // No pudimos ni preguntar (backend caído/dormido): el refresh token
       // sigue guardado tal cual — NO es una sesión inválida, es que ahora
@@ -358,10 +362,14 @@ export async function request(path, { method = 'GET', body, retry = true } = {})
   }
 
   if (res.status === 204 || !res.text) return null;
-  return JSON.parse(res.text);
+  return raw ? res.text : JSON.parse(res.text);
 }
 
 export const get = (path) => request(path);
+
+// GET "crudo": devuelve el body como texto sin JSON.parse (CSV, etc.) — same
+// pipeline de auth/refresh/bridge nativo que get(), ver admin.js::downloadSalesCsv.
+export const getText = (path) => request(path, { raw: true });
 
 // ── Caché TTL para GET (carga de peticiones) ────────────────────────────────
 // Las listas del /cuenta y de la rutina se repiten al navegar entre páginas
