@@ -29,6 +29,13 @@ let rating = 0; // estrellas elegidas en el formulario
 let listEl = null;
 let formEl = null;
 
+// Cuántos se ven de entrada — el resto ya está en el DOM (mismo fetch, sin
+// pedir una página más) pero oculto por CSS hasta tocar "Ver todos": evita
+// que la sección tape media pantalla en el home con 10 comentarios de
+// entrada, sin perder ninguno ni pedir una segunda página al backend.
+const VISIBLE_BY_DEFAULT = 3;
+let expanded = false;
+
 function isLoggedIn() {
   return !!(window.__vyneuralAuth && window.__vyneuralAuth.isLoggedIn());
 }
@@ -91,9 +98,12 @@ function renderList(items) {
   const empty = $('comments-empty');
   const has = items && items.length > 0;
   if (empty) empty.hidden = has;
-  (items || []).forEach((c) => {
+  (items || []).forEach((c, i) => {
     const li = document.createElement('li');
     li.className = 'comment-item';
+    // Oculto por CSS, no ausente del DOM — "Ver todos" solo desoculta,
+    // nunca vuelve a pedir nada al backend.
+    if (!expanded && i >= VISIBLE_BY_DEFAULT) li.classList.add('hidden');
     li.innerHTML = `
       <div class="comment-head">
         <span class="comment-avatar" aria-hidden="true">${escapeHtml((c.author || '?').slice(0, 1).toUpperCase())}</span>
@@ -104,6 +114,19 @@ function renderList(items) {
       <p class="comment-text">${escapeHtml(c.content)}</p>`;
     listEl.appendChild(li);
   });
+  renderShowAllButton(items || []);
+}
+
+function renderShowAllButton(items) {
+  const btn = $('comments-show-all');
+  if (!btn) return;
+  const hiddenCount = items.length - VISIBLE_BY_DEFAULT;
+  if (expanded || hiddenCount <= 0) {
+    btn.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('hidden');
+  btn.textContent = `Ver todos (${items.length})`;
 }
 
 function fmtDate(iso) {
@@ -265,9 +288,20 @@ function wireForm() {
 
 // ── Arranque ────────────────────────────────────────────────────────────────
 
+function wireShowAllButton() {
+  const btn = $('comments-show-all');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    expanded = true;
+    listEl.querySelectorAll('.comment-item.hidden').forEach((li) => li.classList.remove('hidden'));
+    btn.classList.add('hidden');
+  });
+}
+
 function init() {
   listEl = $('comments-list');
   wireForm();
+  wireShowAllButton();
   loadCommentsOnBoot();
   document.addEventListener('vyneural:auth', () => {
     renderAuthHint();

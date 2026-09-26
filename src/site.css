@@ -4410,6 +4410,23 @@ label.it-step-notify-sub {
   padding: 10px 0;
 }
 
+.comments-show-all {
+  display: block;
+  margin: 14px auto 0;
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.comments-show-all:hover {
+  background: var(--accent-soft);
+}
+
 @media (max-width: 520px) {
   .comments-rank {
     flex-direction: column;
