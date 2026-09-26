@@ -3163,16 +3163,21 @@ export async function runBineuralDiagnostics() {
     }
   });
 
-  runTest('fullscreen: la burbuja de bugs se oculta en :fullscreen y .immersive', async () => {
+  runTest('fullscreen: la burbuja del chat de soporte se oculta en :fullscreen y .immersive', async () => {
     if (typeof process === 'undefined') return;
     const fsSpec = 'node:fs';
     const fs = await import(/* @vite-ignore */ fsSpec);
     const root = process.cwd();
     const css = fs.readFileSync(root + '/src/site.css', 'utf8');
-    for (const sel of ['html:fullscreen .bug-fab', 'html:-webkit-full-screen .bug-fab', 'body.immersive .bug-fab']) {
+    // NOTA: la clase se renombró de .bug-fab a .support-fab cuando la burbuja
+    // de "reportar un problema" (FormSubmit, sin backend) se convirtió en el
+    // chat de soporte 1:1 en vivo (ver src/support-chat.js). El selector
+    // cambió, pero la regla que cubre este test — nunca flotar sobre la
+    // vista inmersiva de audio — sigue siendo exactamente la misma.
+    for (const sel of ['html:fullscreen .support-fab', 'html:-webkit-full-screen .support-fab', 'body.immersive .support-fab']) {
       if (!css.includes(sel)) throw new Error(`site.css debe ocultar la burbuja con "${sel}"`);
     }
-    const ruleIdx = css.indexOf('html:fullscreen .bug-fab');
+    const ruleIdx = css.indexOf('html:fullscreen .support-fab');
     if (ruleIdx < 0 || !css.slice(ruleIdx, ruleIdx + 260).includes('display: none')) {
       throw new Error('la regla de fullscreen debe ocultar la burbuja con display:none');
     }

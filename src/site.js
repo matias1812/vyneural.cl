@@ -1,5 +1,5 @@
 import './site.css';
-import './report-bug.js';
+import './support-chat.js';
 import './ui/auth.js';
 import { initPermissionsModal, openPermissions } from './ui/permissions-modal.js';
 import { initDegradedAlarmBanner } from './ui/degraded-alarm-banner.js';

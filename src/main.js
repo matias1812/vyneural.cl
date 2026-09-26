@@ -3152,10 +3152,12 @@ if (moreBtn && moreMenu) {
       openHistory();
     } else if (action === 'bug') {
       // La burbuja flotante se oculta en pantalla completa (CSS); desde el
-      // menú ⋯ el reporte de bugs sigue accesible (window.__bugReport lo
-      // expone report-bug.js vía site.js).
+      // menú ⋯ el chat de soporte sigue accesible (window.__bugReport lo
+      // expone support-chat.js vía site.js — se mantiene ese nombre de API
+      // por compatibilidad con este único punto de integración, aunque el
+      // módulo que hay detrás ya no es el reporte de bugs por FormSubmit).
       if (window.__bugReport) window.__bugReport.open();
-      else console.warn('[vyneural] report-bug no inicializado');
+      else console.warn('[vyneural] support-chat no inicializado');
     }
   });
   document.addEventListener('click', (e) => {

@@ -44,9 +44,13 @@ object NotificationHelper {
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.
     const val CHANNEL_SESSION_END = "bineural_session_end"
+    // Chat de soporte 1:1 con el admin — importancia default, sin bypass de
+    // DND (no es una alarma), canal propio para no mezclarlo con el fin de sesión.
+    const val CHANNEL_SUPPORT_CHAT = "bineural_support_chat"
     private const val NOTIF_PLAYER = 1001
     private const val NOTIF_ALARM = 2001
     private const val NOTIF_SESSION_END = 2002
+    private const val NOTIF_SUPPORT_CHAT = 2003
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -110,6 +114,14 @@ object NotificationHelper {
             NotificationChannel(CHANNEL_SESSION_END, "Fin de sesión", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = "Aviso de que la sesión terminó"
                 setShowBadge(false)
+            },
+        )
+        // Chat de soporte: notificación de nuevo mensaje del admin (importancia
+        // default, sonido del sistema, sin bypass de DND).
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_SUPPORT_CHAT, "Chat de soporte", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Mensajes nuevos en tu conversación de soporte con Vyneural"
+                setShowBadge(true)
             },
         )
         logChannelState(nm)
@@ -492,5 +504,33 @@ object NotificationHelper {
             .build()
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIF_SESSION_END, n)
+    }
+
+    /**
+     * Chat de soporte (id 2003, canal `bineural_support_chat`): notificación
+     * de nuevo mensaje en la conversación de soporte con el admin. Toca la
+     * notificación para volver a la app. Respeta POST_NOTIFICATIONS (Android 13+).
+     */
+    fun showSupportMessage(context: Context, title: String, body: String, conversationId: String?) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        ensureChannels(context)
+        val open = PendingIntent.getActivity(
+            context, 11, Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CHANNEL_SUPPORT_CHAT)
+            .setSmallIcon(R.drawable.ic_stat_bineural)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .build()
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_SUPPORT_CHAT, n)
     }
 }

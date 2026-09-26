@@ -37,26 +37,32 @@ class VyneuralMessagingService : FirebaseMessagingService() {
         // Data-only (nunca message.notification): la app decide qué mostrar,
         // nunca el payload de FCM directamente — mismo principio que "el
         // backend nunca arranca audio", aplicado a la notificación misma.
-        if (data["kind"] != "alarm") return
+        val kind = data["kind"]
+        if (kind == "alarm") {
+            val id = data["id"] ?: return
+            val title = data["title"] ?: "Vyneural"
+            val body = data["body"] ?: "Hora de tu sesión"
+            val freq = data["freq"]?.toDoubleOrNull()
+            val beat = data["beat"]?.toDoubleOrNull()
+            val wave = data["wave"]
+            val soundUri = data["soundUri"]?.takeIf { it.isNotBlank() }
+            val vibrationId = data["vibrationId"] ?: "default"
+            val snoozeEnabled = data["snoozeEnabled"] == "true"
+            val snoozeMinutes = data["snoozeMinutes"]?.toIntOrNull() ?: 5
 
-        val id = data["id"] ?: return
-        val title = data["title"] ?: "Vyneural"
-        val body = data["body"] ?: "Hora de tu sesión"
-        val freq = data["freq"]?.toDoubleOrNull()
-        val beat = data["beat"]?.toDoubleOrNull()
-        val wave = data["wave"]
-        val soundUri = data["soundUri"]?.takeIf { it.isNotBlank() }
-        val vibrationId = data["vibrationId"] ?: "default"
-        val snoozeEnabled = data["snoozeEnabled"] == "true"
-        val snoozeMinutes = data["snoozeMinutes"]?.toIntOrNull() ?: 5
-
-        NotificationHelper.showAlarm(
-            applicationContext, title, body, freq, beat, wave, alarmId = id,
-            soundUri = soundUri, vibrationId = vibrationId,
-            snoozeEnabled = snoozeEnabled, snoozeMinutes = snoozeMinutes,
-        )
-        // Mismo límite de sonido/vibración sin respuesta que una alarma
-        // local (AlarmReceiver): se auto-silencia si nadie la toca.
-        AlarmScheduler(applicationContext).scheduleSilence(id)
+            NotificationHelper.showAlarm(
+                applicationContext, title, body, freq, beat, wave, alarmId = id,
+                soundUri = soundUri, vibrationId = vibrationId,
+                snoozeEnabled = snoozeEnabled, snoozeMinutes = snoozeMinutes,
+            )
+            // Mismo límite de sonido/vibración sin respuesta que una alarma
+            // local (AlarmReceiver): se auto-silencia si nadie la toca.
+            AlarmScheduler(applicationContext).scheduleSilence(id)
+        } else if (kind == "support_message") {
+            val title = data["title"] ?: "Vyneural Soporte"
+            val body = data["body"] ?: "Tenés un mensaje nuevo"
+            val conversationId = data["conversation_id"]
+            NotificationHelper.showSupportMessage(applicationContext, title, body, conversationId)
+        }
     }
 }
