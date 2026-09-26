@@ -1,0 +1,17 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.vyneural.bineural",
+      "sha256_cert_fingerprints": [
+        "05:1C:D7:69:D0:DE:FD:EE:A2:F5:F4:4D:ED:8C:CB:4D:BF:6C:63:3D:70:12:11:6C:A9:99:F5:B7:C8:D5:8C:9B",
+        "A4:7B:94:62:34:D6:29:F2:85:28:BC:ED:A7:80:C9:F5:58:1B:F2:56:61:A6:66:B9:0F:50:C4:06:AD:FA:27:69",
+        "3F:8A:0D:C4:F9:8A:A8:9C:FB:96:E1:B6:F6:9C:91:C9:34:DD:AD:0A:0E:40:42:10:5F:CA:32:17:1B:7F:FA:EA"
+      ]
+    }
+  }
+]

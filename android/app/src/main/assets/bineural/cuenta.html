@@ -49,14 +49,14 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/cuenta-D3BF2NHC.js"></script>
-    <link rel="modulepreload" href="./assets/site-Du92H0Px.js">
+    <script type="module" src="./assets/cuenta-CNafduTy.js"></script>
+    <link rel="modulepreload" href="./assets/site-DkS22X6-.js">
     <link rel="modulepreload" href="./assets/preload-helper-Dp1pzeXC.js">
-    <link rel="modulepreload" href="./assets/alarms-C8gVMPjY.js">
-    <link rel="modulepreload" href="./assets/freq-cover-DfWNj3ta.js">
-    <link rel="modulepreload" href="./assets/billing-Cqmz5Rbf.js">
+    <link rel="modulepreload" href="./assets/alarms-B6-PgCch.js">
+    <link rel="modulepreload" href="./assets/freq-cover-B3NfDsPR.js">
+    <link rel="modulepreload" href="./assets/billing-Dqu0X67n.js">
     <link rel="modulepreload" href="./assets/confirm-modal-eBx4xGlb.js">
-    <link rel="stylesheet" href="./assets/site-CRnRSi-4.css">
+    <link rel="stylesheet" href="./assets/site-DPwPq7Gs.css">
   </head>
   <body>
     <header class="site-nav">
@@ -157,15 +157,46 @@
             </div>
           </div>
 
-          <div class="page-card" id="cuenta-referral-card">
+          <div class="page-card" id="cuenta-coupon-card">
             <div class="rutina-head">
-              <h3>🎁 Tu código de referido</h3>
+              <h3>🎟️ Cupones</h3>
             </div>
-            <p class="rutina-hint">Compartilo: quien se registre con tu código activa 1 mes de Premium gratis al elegir un plan Mensual o Anual (con método de pago validado, cobro automático al terminar el mes de prueba).</p>
-            <div class="cuenta-referral-row">
-              <code id="cuenta-referral-code">—</code>
-              <button type="button" class="cuenta-btn" id="cuenta-referral-copy">Copiar</button>
+            <p class="rutina-hint" id="cuenta-coupon-hint">¿Tenés un código de cupón? Activalo antes de elegir un plan Mensual o Anual para sumar tu mes de Premium gratis (con método de pago validado, cobro automático al terminar el mes de prueba).</p>
+            <div class="cuenta-coupon-row">
+              <input type="text" id="cuenta-coupon-input" placeholder="Código de cupón" maxlength="32" autocapitalize="characters">
+              <button type="button" class="cuenta-btn" id="cuenta-coupon-redeem">Activar</button>
             </div>
+            <p class="cuenta-empty hidden" id="cuenta-coupon-status"></p>
+          </div>
+
+          <!-- Panel de admin: oculto por CSS por defecto, se muestra solo si
+               profile.email === admin (ver renderAdminCard en cuenta.js) —
+               solo UX, la seguridad real es require_admin_user en el backend. -->
+          <div class="page-card hidden" id="cuenta-admin-card">
+            <div class="rutina-head">
+              <h3>🛠️ Admin — Cupones</h3>
+            </div>
+            <form id="admin-coupon-form" class="cuenta-form">
+              <div class="cuenta-form-row">
+                <label>Código
+                  <input id="admin-coupon-code" type="text" maxlength="32" autocapitalize="characters" required />
+                </label>
+                <label>Etiqueta (opcional)
+                  <input id="admin-coupon-label" type="text" maxlength="120" placeholder="Influencer X" />
+                </label>
+              </div>
+              <div class="cuenta-form-row">
+                <label>Días de trial
+                  <input id="admin-coupon-days" type="number" min="1" max="365" value="30" required />
+                </label>
+                <label>Límite de usos (opcional)
+                  <input id="admin-coupon-max" type="number" min="1" />
+                </label>
+              </div>
+              <div class="auth-error hidden" id="admin-coupon-error" role="alert"></div>
+              <button type="submit" class="cuenta-btn" id="admin-coupon-create">Crear cupón</button>
+            </form>
+            <ul class="cuenta-list" id="admin-coupon-list"></ul>
           </div>
 
           <div class="card-grid">
