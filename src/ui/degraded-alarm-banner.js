@@ -112,18 +112,17 @@ function detectIssue() {
       fix: () => b.requestIgnoreBatteryOptimizations && b.requestIgnoreBatteryOptimizations(),
     };
   }
-  // permissions-modal.js ya tenía esto como fila estática; faltaba en esta
-  // cascada proactiva — mismo hueco de fabricante (MIUI/Huawei/Honor/OPPO/
-  // Vivo/OnePlus "inicio automático"/"apps protegidas") que battery/DND, así
-  // que se agrega acá con la misma prioridad relativa (después de lo que ya
-  // tiene un estado verificable; esto no lo es — needsAutostartGuidance es
-  // una recomendación por fabricante, no una lectura de permiso real).
-  if (caps.autostartGuidance.supported) {
-    return {
-      text: `⚠️ En ${caps.autostartGuidance.manufacturer || 'este fabricante'} conviene revisar "Inicio automático" para que las alarmas no se corten.`,
-      fix: () => b.requestAutostartSettings && b.requestAutostartSettings(),
-    };
-  }
+  // NO agregar una rama para caps.autostartGuidance acá — se probó y se
+  // sacó (falso positivo confirmado en vivo en un Honor real con las
+  // notificaciones funcionando bien): needsGuidance() en OemAutostart.kt es
+  // una lista estática por fabricante (Build.MANUFACTURER in
+  // KNOWN_MANUFACTURERS), no una lectura de si el autostart está REALMENTE
+  // restringido en este dispositivo — se disparaba con el mismo ⚠️ urgente
+  // que las ramas de arriba (que sí leen estado real) para CUALQUIER Honor/
+  // Xiaomi/Huawei/Oppo/Vivo/OnePlus/Realme, siempre, en cada apertura. Sigue
+  // vivo únicamente como fila estática/informativa en permissions-modal.js
+  // (sin urgencia falsa), que es donde corresponde una recomendación no
+  // verificable en vez de una alerta proactiva.
   return null;
 }
 
