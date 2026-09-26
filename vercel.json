@@ -15,11 +15,6 @@
       "has": [{ "type": "host", "value": "vyneural-six.vercel.app" }],
       "destination": "https://www.vyneural.cl/:path*",
       "permanent": true
-    },
-    {
-      "source": "/bineural.apk",
-      "destination": "/vyneural.apk",
-      "permanent": true
     }
   ],
   "rewrites": [

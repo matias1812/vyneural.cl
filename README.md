@@ -150,18 +150,15 @@ recompilar el build script):
 #   cd android/.jdk17 && unzip jdk17.zip
 
 npm run build
-# OJO: dist/ incluye public/vyneural.apk (para la descarga web). El bundle de
-# la APK NO debe llevarlo: es peso muerto (el WebView no descarga nada) y queda
-# una copia vieja adentro. Se excluye en el propio copy para que no reaparezca.
 rm -rf android/app/src/main/assets/bineural && mkdir -p android/app/src/main/assets/bineural
 (cd dist && tar cf - --exclude='*.apk' . | (cd ../android/app/src/main/assets/bineural && tar xf -))
-# verificar: unzip -l app/build/outputs/apk/release/app-release.apk | grep vyneural.apk  → 0
 
 cd android && JAVA_HOME="<ruta>/android/.jdk17/jdk-17.0.20+8" ./gradlew assembleRelease
 # release firmada → app/build/outputs/apk/release/app-release.apk
-# copiar a public/vyneural.apk y re-build para servirla en la web:
-#   cp app/build/outputs/apk/release/app-release.apk ../public/vyneural.apk
-#   cd .. && npm run build
+# La app NO se distribuye por descarga directa desde la web (ver /descargar,
+# que hoy es solo un anuncio de "próximamente en Google Play"): no hay que
+# copiar el .apk a public/ ni re-buildear el sitio por esto. Para probarla en
+# un dispositivo/emulador: adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
 La release requiere firma: keystore y credenciales en `android/local.properties`

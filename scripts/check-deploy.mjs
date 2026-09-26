@@ -8,15 +8,10 @@
 // Verifica, sin modificar nada:
 //   1. Backend /health y /health/db (servicio + PostgreSQL).
 //   2. /docs (la app FastAPI correcta, no un 404).
-//   2b. SHA-256 real de /vyneural.apk vs el publicado en /descargar (evita que
-//       vuelva a pasar desapercibido un release desincronizado — ver
-//       scripts/release-apk-meta.mjs, que es quien debe mantenerlos iguales).
 //   3. Rewrite del frontend: /api/... debe responder el backend (no el 404 de Vercel).
 //   4. CORS: la API debe admitir el origen del frontend.
 //   5. (Opcional, --email) dispara forgot-password → el correo DEBE llegar a esa
 //      bandeja (revisar spam). La respuesta es genérica a propósito.
-
-import { createHash } from 'node:crypto';
 
 const FRONTEND = process.env.FRONTEND_URL || 'https://www.vyneural.cl';
 const BACKEND = process.env.BACKEND_URL || 'https://vyneural-backend.onrender.com';
@@ -72,36 +67,6 @@ async function main() {
     else bad(`/docs → HTTP ${res.status}`);
   } catch (e) {
     bad(`/docs inalcanzable: ${e.message}`);
-  }
-
-  // 2b) Integridad de la APK: el SHA-256 real del binario servido tiene que
-  // coincidir con el que /descargar le dice al usuario que verifique. Un
-  // desajuste acá deja la instrucción de verificación de integridad del
-  // propio sitio mintiendo (hallazgo crítico de la auditoría 2026-08-18).
-  console.log('2b) SHA-256 de /vyneural.apk vs /descargar');
-  try {
-    const apkRes = await fetch(`${FRONTEND}/vyneural.apk`);
-    if (apkRes.status !== 200) {
-      bad(`/vyneural.apk → HTTP ${apkRes.status}`);
-    } else {
-      const buf = Buffer.from(await apkRes.arrayBuffer());
-      const realHash = createHash('sha256').update(buf).digest('hex');
-      const pageRes = await fetch(`${FRONTEND}/descargar`);
-      const pageHtml = await pageRes.text();
-      const m = pageHtml.match(/<code>([0-9a-f]{64})<\/code>/);
-      if (!m) {
-        bad('no se encontró el SHA-256 publicado en /descargar (¿cambió el markup?)');
-      } else if (m[1] !== realHash) {
-        bad(
-          `SHA-256 desincronizado — publicado=${m[1]} real=${realHash}. ` +
-          'Correr `node scripts/release-apk-meta.mjs` tras copiar el .apk nuevo a public/ y redesplegar.',
-        );
-      } else {
-        ok(`SHA-256 coincide (${realHash.slice(0, 16)}…, ${buf.length} bytes)`);
-      }
-    }
-  } catch (e) {
-    bad(`chequeo de integridad de la APK falló: ${e.message}`);
   }
 
   // 3) Rewrite del frontend: /api debe pasar al backend (401 "no autorizado"

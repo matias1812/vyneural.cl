@@ -9,3 +9,4 @@ emu.log
 .freebuff/*.db
 .freebuff/*.db-shm
 .freebuff/*.db-wal
+public/vyneural.apk
