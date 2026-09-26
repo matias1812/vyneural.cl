@@ -47,6 +47,10 @@ const FAQ = {
       q: 'Cambié mi contraseña y me cerró la sesión en otros dispositivos. ¿Por qué?',
       a: 'Es una medida de seguridad: al cambiar la contraseña (o restablecerla), invalidamos las sesiones antiguas para que solo los dispositivos donde vuelvas a iniciar sesión con la nueva clave accedan a tu cuenta.',
     },
+    {
+      q: '¿Cómo funcionan los cupones?',
+      a: 'Un cupón es un código que nosotros definimos (no el de otro usuario) — lo activás desde “Cupones” en tu cuenta, o al registrarte. Si es válido, te da un mes de Premium gratis apenas elijas un plan Mensual o Anual con método de pago validado; pasado ese mes, el cobro automático sigue normal salvo que canceles. Cada cuenta puede activar un solo cupón en toda su vida, y hay que activarlo ANTES de comprar — no aplica a una compra ya hecha. Ver el detalle completo en los <a href="/terminos#premium">Términos</a>.',
+    },
   ],
   alarmas: [
     {
