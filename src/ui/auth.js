@@ -298,6 +298,12 @@ function modalHTML() {
             </div>
           </div>
 
+          <div class="auth-field" id="auth-referral-field" hidden>
+            <label for="auth-referral">Código de referido <em>(opcional)</em></label>
+            <input id="auth-referral" name="referral_code" type="text" maxlength="12" autocapitalize="characters" placeholder="ej: A3F7K9QZ" />
+            <small class="auth-hint">Si te invitó otro usuario, activa 1 mes de Premium gratis al elegir un plan Mensual o Anual.</small>
+          </div>
+
           <div class="auth-terms" id="auth-terms-field" hidden>
             <label class="auth-check">
               <input id="auth-terms" type="checkbox" required />
@@ -437,6 +443,7 @@ function setView(next) {
   modal.querySelector('#auth-username-field').hidden = !isRegister;
   modal.querySelector('#auth-display-field').hidden = !isRegister;
   modal.querySelector('#auth-confirm-field').hidden = !isRegister;
+  modal.querySelector('#auth-referral-field').hidden = !isRegister;
   modal.querySelector('#auth-terms-field').hidden = !isRegister;
   modal.querySelector('#auth-title').textContent = isRegister ? 'Crear cuenta' : 'Iniciar sesión';
   modal.querySelector('#auth-sub').textContent = isRegister
@@ -533,7 +540,8 @@ async function onSubmitAuth(e) {
     if (view === 'register') {
       const username = modal.querySelector('#auth-username').value.trim() || undefined;
       const displayName = modal.querySelector('#auth-display').value.trim() || undefined;
-      await register({ email, password, username, display_name: displayName });
+      const referralCode = modal.querySelector('#auth-referral').value.trim() || undefined;
+      await register({ email, password, username, display_name: displayName, referral_code: referralCode });
       // Sesión creada: mostrar "revisá tu correo" con reenvío.
       await refreshProfile();
       renderNav();

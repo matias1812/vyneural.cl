@@ -84,7 +84,7 @@ import { syncFavoriteToCloud, syncUnfavoriteFromCloud } from './api/fav-sync.js'
 import { createFrequency, listFrequencies } from './api/frequencies.js';
 // Bloqueo Premium del modo Personalizado (aditivo): mismo criterio en el
 // generador y en /cuenta, ver src/ui/premium-gate.js.
-import { isPremiumUser, openPremiumRequired } from './ui/premium-gate.js';
+import { isPremiumUser, invalidatePremiumCache, openPremiumRequired } from './ui/premium-gate.js';
 // Alarmas en la nube (P6-FEAT-001): la alarma del generador se sincroniza al
 // backend cuando hay sesión, para que el scheduler server-side pueda enviar
 // el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
@@ -2300,22 +2300,32 @@ loadSavedFrequencies();
 // picker no vuelve a aparecer aunque el usuario haga login DESPUÉS, en la
 // misma carga de página (sin recargar). Mismo evento que ya usa el resto de
 // la app (ui/auth.js) para reaccionar a login/logout sin reload.
-document.addEventListener('vyneural:auth', (e) => {
+// Mismo criterio que el chequeo periódico de Premium más abajo (isPremiumUser
+// cada 60s mientras se reproduce): si la cuenta activa no es premium, un
+// preset Personalizado o premiumOnly (ej. "Divino") no debe quedar
+// seleccionado (ni sonando) como si nada.
+function resetIfNotEligible(isPremium) {
+  if ((selected.custom || selected.premiumOnly) && !isPremium) {
+    if (playing) stop(false);
+    const fallback = STATES.find((s) => !s.custom && !s.premiumOnly) || STATES[0];
+    selectState(fallback);
+  }
+}
+
+document.addEventListener('vyneural:auth', async (e) => {
   if (e.detail && (e.detail.type === 'login' || e.detail.type === 'register')) {
+    // El cache de isPremiumUser (TTL 30s) puede seguir teniendo el resultado
+    // de la sesión/cuenta anterior — invalidar y forzar un fetch fresco
+    // antes de decidir si el preset en pantalla sigue siendo válido.
+    invalidatePremiumCache();
     loadSavedFrequencies();
+    const isPremium = await isPremiumUser();
+    resetIfNotEligible(isPremium);
   } else if (e.detail && e.detail.type === 'logout') {
+    invalidatePremiumCache();
     savedFrequencies = [];
     renderSavedFrequencyOptions();
-    // El estado en curso puede ser Premium (personalizado o un preset
-    // premiumOnly, ej. "Divino") — mismo criterio que el chequeo periódico
-    // de Premium más abajo (isPremiumUser cada 60s mientras se reproduce):
-    // sin sesión ya no hay forma de que esta persona sea premium, así que
-    // no debe quedar seleccionado (ni sonando) como si nada tras deslogear.
-    if (selected.custom || selected.premiumOnly) {
-      if (playing) stop(false);
-      const fallback = STATES.find((s) => !s.custom && !s.premiumOnly) || STATES[0];
-      selectState(fallback);
-    }
+    resetIfNotEligible(false);
   }
 });
 
@@ -4912,6 +4922,17 @@ if (isFinite(deepFreq) && deepFreq > 0) {
   // con el carrier/loadedCustomBase todavía sin corregir — se reafirma acá.
   updateStatus();
 }
+// P-BUG — el restore de sesión de arriba (savedSession/localStorage) y el
+// deep link de alarma pueden dejar seleccionado un preset Personalizado o
+// premiumOnly SIN pasar por el gate de click (línea ~818) ni por el listener
+// vyneural:auth (más abajo, que solo corrige durante ESTA carga si hay un
+// login/logout real): si la cuenta activa en este arranque ya no es
+// premium (ej. se cerró sesión en /cuenta con Personalizado guardado de una
+// cuenta anterior, y se vuelve a abrir el generador ya logueado en la cuenta
+// free, sin que dispare un evento de login en esta carga), el preset quedaba
+// premium para una cuenta que no lo es. Mismo criterio/funciones que ya usa
+// el listener de auth de más abajo.
+isPremiumUser().then(resetIfNotEligible);
 // El filtro arranca en la vista curada 'Destacados' (los más populares), o en
 // el filtro que el usuario dejó guardado. Si el enlace profundo o la sesión
 // abren otro estado, seguir a su objetivo.

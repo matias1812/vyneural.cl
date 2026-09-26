@@ -60,7 +60,12 @@ export function collectDeviceInfo() {
       if (typeof info === 'string') info = JSON.parse(info);
     } catch (_) { info = null; }
     appVersion = (info && info.appVersion) || null;
-    permission = (info && info.notificationPermission) || 'unavailable';
+    // El bridge nativo expone PermissionManager.notificationState() en
+    // MAYÚSCULAS ("GRANTED"/"DENIED"/...) — el backend solo acepta minúsculas
+    // (ver devices.py, pattern del schema) y rechazaba este PUT con 422 en
+    // silencio (esta función está pensada para nunca romper la UI si el
+    // backend falla), así que el estado de permiso nunca se actualizaba acá.
+    permission = ((info && info.notificationPermission) || 'unavailable').toLowerCase();
     pushEnabled = permission === 'granted';
   } else {
     try {

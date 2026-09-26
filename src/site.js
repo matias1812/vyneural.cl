@@ -2,6 +2,7 @@ import './site.css';
 import './report-bug.js';
 import './ui/auth.js';
 import { initPermissionsModal, openPermissions } from './ui/permissions-modal.js';
+import { initDegradedAlarmBanner } from './ui/degraded-alarm-banner.js';
 import { unsubscribeFromPush } from './api/push.js';
 import { inject } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
@@ -170,6 +171,13 @@ document.querySelectorAll('.site-links a').forEach((a) => {
     a.setAttribute('aria-current', 'page');
   }
 });
+
+// ---------------------------------------------------------------- Aviso de canal degradado (APK)
+// Sin gate de página, a diferencia del modal de permisos de abajo: no tiene
+// una copia propia en main.js, se inicializa igual en TODAS las páginas
+// (site.js se carga también en el reproductor, ver index.html) — así se ve
+// con solo abrir la app, sin depender de que el usuario abra ningún modal.
+initDegradedAlarmBanner();
 
 // ---------------------------------------------------------------- Permisos de la web
 // El reproductor ("/") ya trae su propia copia más rica del modal (main.js —

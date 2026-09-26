@@ -83,6 +83,14 @@ const FAQ = {
       q: 'Mi teléfono (Xiaomi, Huawei, Samsung) no me avisa. ¿Qué hago?',
       a: 'Si cerrás la app con “Eliminar” desde recientes o la forzás a detener, Android congela sus alarmas. Es una limitación de los fabricantes, no de la app: no fuerces el cierre y desactivá la optimización agresiva de batería para Vyneural si la ofrece tu teléfono.',
     },
+    {
+      q: 'La alarma llega pero sin sonido ni vibración (Honor/Magic OS y otros)',
+      a: 'En algunos teléfonos (confirmado en Honor/Magic OS) Android baja la importancia del canal de alarma apenas concedés el permiso de notificaciones, sin que hayas descartado ninguna — es distinto al caso de cierre forzado de arriba. Si la app te muestra un aviso de “Las alarmas están silenciadas”, tocalo para ir directo al arreglo. Si no lo ves: abrí Ajustes del sistema → Apps → Vyneural → Notificaciones → canal “Alarmas Vyneural” → subí la Importancia a Urgente o Alta, y de paso desactivá la optimización de batería para Vyneural. Esto también puede pasar en Xiaomi (MIUI), Oppo (ColorOS) y OnePlus (OxygenOS).',
+    },
+    {
+      q: 'Vyneural me avisa que un permiso quedó desactivado. ¿Qué significa?',
+      a: 'La app revisa, cada vez que abrís cualquier página, que los permisos que ya habías concedido sigan intactos — a veces el sistema (o el propio fabricante) se los saca solo, sin que hagas nada. El aviso puede ser por notificaciones revocadas, No Molestar sin permitir la alarma, canal en importancia baja (ver pregunta de arriba), alarmas exactas desautorizadas o la optimización de batería reactivada. Tocá “Arreglarlo” en el aviso para ir directo a la pantalla del sistema que lo resuelve; si lo cerrás, vuelve a aparecer a las 24 horas si el problema sigue.',
+    },
   ],
 };
 

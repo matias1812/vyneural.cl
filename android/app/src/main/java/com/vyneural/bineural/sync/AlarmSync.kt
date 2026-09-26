@@ -6,11 +6,15 @@ import android.content.Context
 import android.content.Intent
 import android.Manifest
 import android.content.pm.PackageManager
+import android.app.NotificationManager
 import android.os.Build
+import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import com.vyneural.bineural.BuildConfig
 import com.vyneural.bineural.lifecycle.LifecycleManager
 import com.vyneural.bineural.notifications.AlarmScheduler
+import com.vyneural.bineural.notifications.NotificationHelper
+import com.vyneural.bineural.permissions.OemAutostart
 import com.vyneural.bineural.util.AuthStore
 import com.vyneural.bineural.util.BineuralLog
 import com.vyneural.bineural.util.DeviceId
@@ -233,8 +237,24 @@ object AlarmSync {
         // permiso/versión no hayan cambiado — si no, el backend seguiría
         // mandando push al token viejo hasta el próximo cambio de versión.
         val fcmToken = currentFcmToken(context)
+
+        // Salud real del canal de alarmas (P8, ver NotificationHelper.kt): la
+        // importancia puede degradarse sola (algunos fabricantes, confirmado
+        // en Honor/Magic OS) sin que cambie el permiso ni la versión — por eso
+        // entra al fingerprint aparte, para que un cambio de importancia SOLO
+        // dispare igual un reporte nuevo.
+        val channelImportance = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.getNotificationChannel(NotificationHelper.CHANNEL_ALARMS)?.importance
+        } else null
+        val batteryUnrestricted = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)
+            ?.isIgnoringBatteryOptimizations(context.packageName)
+        val autostartNeeded = OemAutostart.needsGuidance()
+        val manufacturer = OemAutostart.manufacturer()
+
         val syncedPrefs = context.getSharedPreferences(PREFS_SYNCED, Context.MODE_PRIVATE)
-        val fingerprint = "$permission|${BuildConfig.VERSION_NAME}|${fcmToken ?: ""}"
+        val fingerprint = "$permission|${BuildConfig.VERSION_NAME}|${fcmToken ?: ""}|" +
+            "$channelImportance|$batteryUnrestricted"
         if (syncedPrefs.getString(KEY_LAST_REPORTED, null) == fingerprint) return
 
         val body = JSONObject()
@@ -244,7 +264,11 @@ object AlarmSync {
             .put("notification_permission", permission)
             .put("push_enabled", granted)
             .put("user_agent", "Vyneural-APK/${BuildConfig.VERSION_NAME}")
+            .put("battery_unrestricted", batteryUnrestricted)
+            .put("autostart_needed", autostartNeeded)
+            .put("manufacturer", manufacturer)
         if (fcmToken != null) body.put("fcm_token", fcmToken)
+        if (channelImportance != null) body.put("channel_importance", channelImportance)
         val ok = authorizedPut(context, "${BuildConfig.API_BASE}/api/v1/devices/me", body)
         if (ok) syncedPrefs.edit().putString(KEY_LAST_REPORTED, fingerprint).apply()
     }

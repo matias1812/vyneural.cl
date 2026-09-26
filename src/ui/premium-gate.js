@@ -31,6 +31,14 @@ export async function isPremiumUser() {
   }
 }
 
+// El resultado cacheado pertenece a la sesión/cuenta que estaba activa
+// cuando se pidió — un login o logout puede cambiar de cuenta dentro del
+// TTL de 30s, así que hay que invalidar explícitamente en cada evento de
+// auth para no arrastrar el is_premium de la cuenta anterior.
+export function invalidatePremiumCache() {
+  cache = null;
+}
+
 const GEM_ICON =
   '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12l4 6-10 13L2 9Z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/></svg>';
 

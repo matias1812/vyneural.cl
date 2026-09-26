@@ -21,7 +21,7 @@ import {
 import { listAlarms, deleteAlarm, updateAlarm } from './api/alarms.js';
 import { listItineraries } from './api/itineraries.js';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
-import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
+import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, getReferralCode, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
 import { getStatus, onStatusChange, STATUS } from './api/status.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
 import { requestPermission } from './notifications.js';
@@ -526,6 +526,35 @@ async function startOneclickInscription(btn, forceNewCard) {
   }
 }
 
+// `referral` es el resultado de getReferralCode() (null si el pedido falló:
+// sin conexión, sesión inválida, etc.) — a diferencia de Premium, esta
+// tarjeta siempre tiene algo que mostrar para cualquier cuenta logueada.
+function renderReferralCode(referral) {
+  const el = $('cuenta-referral-code');
+  if (!el) return;
+  el.textContent = referral && referral.code ? referral.code : '—';
+}
+
+function wireReferralButton() {
+  const copyBtn = $('cuenta-referral-copy');
+  const codeEl = $('cuenta-referral-code');
+  if (!copyBtn || !codeEl) return;
+  copyBtn.addEventListener('click', async () => {
+    const code = codeEl.textContent.trim();
+    if (!code || code === '—') return;
+    try {
+      await navigator.clipboard.writeText(code);
+      const original = copyBtn.textContent;
+      copyBtn.textContent = '¡Copiado!';
+      setTimeout(() => {
+        copyBtn.textContent = original;
+      }, 2000);
+    } catch (_) {
+      /* clipboard no disponible (permiso, contexto no seguro) — sin feedback, no rompe nada */
+    }
+  });
+}
+
 function wireOneclickButtons() {
   const activateBtn = $('cuenta-oneclick-activate');
   const updateCardBtn = $('cuenta-oneclick-update-card');
@@ -697,10 +726,11 @@ async function loadAll() {
     listDevices(),
     premiumStatus(),
     oneclickStatus(),
+    getReferralCode(),
   ]);
   if (seq !== loadSeq) return;
 
-  const [profile, favs, freqs, alarms, its, push, devices, premium, oneclick] = results.map((r) =>
+  const [profile, favs, freqs, alarms, its, push, devices, premium, oneclick, referral] = results.map((r) =>
     r.status === 'fulfilled' ? r.value : null,
   );
 
@@ -748,6 +778,7 @@ async function loadAll() {
   }
   renderPush();
   renderPremium(premium, oneclick);
+  renderReferralCode(referral);
 
   const failed = results.filter((r) => r.status === 'rejected').length;
   if (syncEl) {
@@ -1026,6 +1057,7 @@ function init() {
   document.addEventListener('click', handleAction);
   wirePushButtons();
   wireOneclickButtons();
+  wireReferralButton();
 
   // Tras el diálogo nativo de permisos (o volver de Ajustes) el WebView
   // reaparece: re-leer el estado real del permiso y repintar la tarjeta.

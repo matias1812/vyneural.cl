@@ -28,6 +28,14 @@ export async function paymentHistory() {
   return get('/api/v1/payments');
 }
 
+/** Get-or-create el código de referido propio (ver /cuenta → "Tu código de
+ * referido"): quien se registre con este código activa 1 mes de Premium
+ * gratis al elegir un plan Mensual o Anual. Siempre el mismo código una vez
+ * creado. */
+export async function getReferralCode() {
+  return get('/api/v1/payments/referral/code');
+}
+
 // ── Oneclick Mall: auto-renovación opcional, activada desde /cuenta ────────
 // (De por vida nunca aplica: no vence, no tiene nada que auto-renovar.)
 

@@ -42,6 +42,44 @@ html {
   scroll-behavior: smooth;
 }
 
+/* -------------------------------------------- Aviso de canal de alarma degradado (APK) */
+.alarm-degraded-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(10px + var(--safe-top)) 16px 10px;
+  background: rgba(248, 113, 113, 0.16);
+  border-bottom: 1px solid rgba(248, 113, 113, 0.35);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.alarm-degraded-banner.hidden {
+  display: none;
+}
+.alarm-degraded-banner-text {
+  flex: 1;
+}
+.alarm-degraded-banner-fix {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: none;
+  background: #f87171;
+  color: #1a0505;
+  font-weight: 600;
+  cursor: pointer;
+}
+.alarm-degraded-banner-dismiss {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+
 .skip-link {
   position: absolute;
   top: -100%;
@@ -3263,6 +3301,24 @@ html:not(.in-app) .in-app-only {
 .cuenta-oneclick p {
   margin: 0;
   flex: 1 1 100%;
+}
+
+.cuenta-referral-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.cuenta-referral-row code {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  color: var(--text);
 }
 
 .cuenta-session-recovery {

@@ -15,6 +15,12 @@ const MESSAGES = {
     text: 'Tu auto-renovación ahora es para el nuevo plan — no hizo falta volver a ingresar la tarjeta. El cobro va a pasar en tu próximo vencimiento, sumando el tiempo que ya tenías.',
     actions: [{ label: 'Ver mi cuenta', url: '/cuenta' }],
   },
+  trial_started: {
+    emoji: '🎁',
+    title: '¡Tu mes de prueba gratis ya está activo!',
+    text: 'Guardamos tu tarjeta como método de pago validado, pero todavía no te cobramos nada: tenés Premium gratis por 30 días. Al terminar el mes de prueba, cobramos automáticamente tu plan — podés cancelarlo antes desde tu cuenta si no querés continuar.',
+    actions: [{ label: 'Ver mi cuenta', url: '/cuenta' }],
+  },
   charged: {
     emoji: '✅',
     title: '¡Listo, ya sos Premium!',

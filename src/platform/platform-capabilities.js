@@ -42,15 +42,20 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
   });
 
   // Notificaciones: nativo puede avisar con la app cerrada; la web no.
+  // Bug real: PermissionManager.notificationState() (Kotlin) manda el estado
+  // en MAYÚSCULAS ("GRANTED"/"DENIED"/...) — comparar sin normalizar contra
+  // 'granted' (minúsculas) daba SIEMPRE false en la APK, así que el modal de
+  // permisos (y cualquier aviso que dependa de esta cascada) creía que el
+  // permiso de notificaciones nunca estaba concedido, aunque lo estuviera.
+  const nativeNotifPermRaw = native && native.info && native.info.notificationPermission;
+  const nativeNotifPerm = typeof nativeNotifPermRaw === 'string' ? nativeNotifPermRaw.toLowerCase() : null;
   const notif = isNative
     ? {
         provider: 'native',
         supported: !!native.info && !!native.info.notifications,
-        granted: (native.info && native.info.notificationPermission) === 'granted',
-        permission: native.info && native.info.notificationPermission
-          ? native.info.notificationPermission
-          : web.notifications.permission,
-        label: notifNativeLabel(native),
+        granted: nativeNotifPerm === 'granted',
+        permission: nativeNotifPerm || web.notifications.permission,
+        label: notifNativeLabel(nativeNotifPerm),
       }
     : { provider: 'web', granted: web.notifications.permission === 'granted', ...web.notifications };
 
@@ -166,6 +171,18 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
         provider: 'native',
         supported: !!native.info && !!native.info.alarmChannel && !!native.info.alarmChannel.exists,
         dndBypassGranted: !!(native.info && native.info.alarmChannel && native.info.alarmChannel.canBypassDnd),
+        // Bug real: este campo faltaba acá (el único consumidor probado era la
+        // copia independiente de main.js::refreshAlarmPerm, que lee
+        // info.alarmChannel directo sin pasar por este merge) — sin él,
+        // caps.alarmChannel.importance quedaba siempre undefined y el botón
+        // "⚠️ Las alarmas están silenciadas" del modal de permisos (y
+        // cualquier otro consumidor de mergePlatformCapabilities) nunca se
+        // activaba pese a que el Kotlin sí manda el dato (ver
+        // AndroidBridge.kt::alarmChannelDiagnostics).
+        importance:
+          native.info && native.info.alarmChannel && typeof native.info.alarmChannel.importance === 'number'
+            ? native.info.alarmChannel.importance
+            : null,
         label:
           native.info && native.info.alarmChannel && native.info.alarmChannel.exists
             ? (native.info.alarmChannel.canBypassDnd
@@ -177,6 +194,7 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
         provider: 'web',
         supported: false,
         dndBypassGranted: false,
+        importance: null,
         label: 'No aplica en el navegador',
       };
 
@@ -199,9 +217,8 @@ export function mergePlatformCapabilities({ web, native = null, env = {} }) {
   };
 }
 
-function notifNativeLabel(native) {
-  const perm = native.info && native.info.notificationPermission;
+function notifNativeLabel(perm) {
   if (perm === 'granted') return 'Nativa — concedido ✓';
-  if (perm === 'denied') return 'Nativa — denegado en el sistema';
+  if (perm === 'denied' || perm === 'denied_permanently') return 'Nativa — denegado en el sistema';
   return 'Nativa — sin decidir';
 }
