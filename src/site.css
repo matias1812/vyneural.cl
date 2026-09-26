@@ -1461,6 +1461,45 @@ body.immersive .support-fab {
   font-size: 18px;
   color: var(--text);
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Indicador de transporte del chat — WebSocket (ver src/api/support-ws-client.js)
+   conectado/reconectando/caído. NUNCA implica que el chat dejó de
+   funcionar: el polling REST sigue corriendo siempre en paralelo, esto es
+   solo información visual de si hay "tiempo real" además de eso. */
+.support-conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex: none;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.support-conn-dot.is-open {
+  background: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.18);
+}
+
+.support-conn-dot.is-connecting {
+  background: #facc15;
+  animation: support-conn-pulse 1.1s ease-in-out infinite;
+}
+
+.support-conn-dot.is-down {
+  background: var(--text-dim);
+}
+
+@keyframes support-conn-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .support-close {
@@ -1499,12 +1538,34 @@ body.immersive .support-fab {
   margin-bottom: 12px;
 }
 
+.support-messages:empty::after {
+  content: '👋 Escribinos y te contestamos apenas podamos.';
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 112px;
+  color: var(--text-dim);
+  font-size: 13.5px;
+  text-align: center;
+  padding: 0 12px;
+}
+
 .support-msg {
   max-width: 82%;
   padding: 8px 12px;
   border-radius: 14px;
   font-size: 14px;
   line-height: 1.45;
+}
+
+.support-msg-sender {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.65;
+  margin-bottom: 2px;
 }
 
 .support-msg-text {
@@ -3893,6 +3954,41 @@ html:not(.in-app) .in-app-only {
   background: rgba(255, 255, 255, 0.02);
 }
 
+.admin-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+/* Mismo indicador que .support-conn-dot (lado usuario, ver support-chat.js)
+   para el WebSocket del chat — ver src/api/support-ws-client.js. */
+.admin-conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex: none;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.admin-conn-dot.is-open {
+  background: #4ade80;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.18);
+}
+
+.admin-conn-dot.is-connecting {
+  background: #facc15;
+  animation: support-conn-pulse 1.1s ease-in-out infinite;
+}
+
+.admin-conn-dot.is-down {
+  background: var(--text-dim);
+}
+
 /* Chat de soporte del admin — burbujas simples, mismo criterio de color que
    .cuenta-btn (violeta = "esto lo mandó el admin"). */
 .admin-chat {
@@ -4856,5 +4952,182 @@ label.it-step-notify-sub {
 
   .cookie-actions .cookie-btn {
     flex: 1;
+  }
+}
+
+/* ---------------------------------------------------------------- Cupón (Código de referido) */
+/* Fila input+botón "Buscar" de la card de /cuenta — antes era solo un input
+   con un botón "Activar" al lado, ver src/cuenta.js::wireCouponButton. */
+.cuenta-coupon-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.cuenta-coupon-row input {
+  flex: 1 1 200px;
+}
+
+/* Card de resultado del lookup (o del cupón ya pendiente al recargar la
+   página) — info del cupón + el switch para activarlo/cancelarlo. */
+.cuenta-coupon-result {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cuenta-coupon-result p {
+  margin: 0;
+  flex: 1 1 200px;
+}
+
+/* Switch on/off genérico (hoy solo lo usa el cupón, pero sin nombre atado a
+   "coupon" por si algo más lo necesita después) — <label class="cuenta-switch">
+   envolviendo el <input type="checkbox"> real (accesible, togglea con
+   teclado/lector de pantalla) + el track dibujado con ::before. */
+.cuenta-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cuenta-switch input[type='checkbox'] {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.cuenta-switch-track {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--border);
+  transition: background 0.2s ease;
+  flex: none;
+}
+
+.cuenta-switch-track::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+}
+
+.cuenta-switch input[type='checkbox']:checked + .cuenta-switch-track {
+  background: linear-gradient(135deg, var(--accent), #6366f1);
+  border-color: transparent;
+}
+
+.cuenta-switch input[type='checkbox']:checked + .cuenta-switch-track::before {
+  transform: translateX(18px);
+}
+
+.cuenta-switch input[type='checkbox']:focus-visible + .cuenta-switch-track {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.cuenta-switch input[type='checkbox']:disabled + .cuenta-switch-track {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------- Página /admin */
+/* Página propia, fuera de /cuenta (ver plan "A. Admin fuera de /cuenta") —
+   barra mínima (sin el .site-nav completo del resto del sitio: no lleva
+   nav pública ni buscador, esta página ni siquiera se indexa) + un layout
+   full-bleed (SIN el .page-body angosto de las páginas de contenido) para
+   las 4 secciones del panel. */
+.admin-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 24px;
+  padding-top: calc(16px + var(--safe-top));
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.admin-back-link {
+  color: var(--text-dim);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.admin-back-link:hover {
+  color: var(--text);
+}
+
+.admin-shell {
+  padding: 24px;
+  padding-bottom: calc(24px + var(--safe-bottom));
+  max-width: none;
+}
+
+.admin-unauthorized {
+  max-width: 480px;
+  margin: 60px auto;
+  text-align: center;
+}
+
+.admin-unauthorized .rm-emoji {
+  font-size: 34px;
+}
+
+.admin-unauthorized .hero-cta {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 12px 26px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #a78bfa, #6366f1);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 0.2s ease;
+}
+
+.admin-unauthorized .hero-cta:hover {
+  transform: translateY(-2px) scale(1.03);
+}
+
+/* Grid responsivo de las 4 secciones — 1 columna en mobile, 2 en pantallas
+   más anchas (a diferencia de .card-grid, que es auto-fit con un mínimo
+   fijo: acá queremos siempre 2 columnas parejas desde tablet en adelante,
+   no tantas como entren). */
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.admin-grid .page-card {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .admin-grid {
+    grid-template-columns: 1fr;
   }
 }

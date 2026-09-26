@@ -21,12 +21,7 @@ import {
 import { listAlarms, deleteAlarm, updateAlarm } from './api/alarms.js';
 import { listItineraries } from './api/itineraries.js';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
-import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, redeemCoupon, listCoupons, createCoupon, updateCoupon, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
-import {
-  getSalesSummary, downloadSalesCsv,
-  listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium,
-  listAdminSupportConversations, getAdminSupportMessages, sendAdminSupportMessage,
-} from './api/admin.js';
+import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, lookupCoupon, redeemCoupon, cancelCoupon, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
 import { getStatus, onStatusChange, STATUS } from './api/status.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
 import { requestPermission } from './notifications.js';
@@ -362,11 +357,6 @@ const PLAN_LABELS = { monthly: 'Mensual', annual: 'Anual' };
 // lo lee wireOneclickButtons() al activar.
 let currentPremiumPlan = null;
 
-// Panel de admin: solo se wirea/carga una vez, la primera vez que loadAll()
-// detecta que la cuenta logueada es la admin (evita duplicar listeners si
-// el usuario recarga /cuenta sin salir de la sesión).
-let adminWired = false;
-
 function renderPremium(status, oneclick) {
   const badge = $('cuenta-premium-status');
   const text = $('cuenta-premium-text');
@@ -538,591 +528,164 @@ async function startOneclickInscription(btn, forceNewCard) {
 
 // `premium` es el resultado de premiumStatus() — ya trae has_pending_coupon/
 // has_redeemed_coupon_before, no hace falta un endpoint aparte solo para
-// pintar esta tarjeta.
+// pintar esta tarjeta. Código guardado tras un lookup exitoso — cancelCoupon()
+// no lo necesita (el backend cancela el pending del usuario logueado, sin
+// importar el código), pero redeemCoupon(code) sí.
+let couponLookupCode = null;
+
+function resetCouponCard() {
+  const input = $('cuenta-coupon-input');
+  const lookupBtn = $('cuenta-coupon-lookup');
+  const result = $('cuenta-coupon-result');
+  const switchEl = $('cuenta-coupon-switch');
+  const errorEl = $('cuenta-coupon-error');
+  couponLookupCode = null;
+  if (input) {
+    input.disabled = false;
+    input.value = '';
+  }
+  if (lookupBtn) lookupBtn.disabled = false;
+  if (result) result.classList.add('hidden');
+  if (switchEl) switchEl.checked = false;
+  if (errorEl) errorEl.classList.add('hidden');
+}
+
 function renderCoupon(premium) {
   const input = $('cuenta-coupon-input');
-  const btn = $('cuenta-coupon-redeem');
+  const lookupBtn = $('cuenta-coupon-lookup');
+  const result = $('cuenta-coupon-result');
+  const resultText = $('cuenta-coupon-result-text');
+  const switchEl = $('cuenta-coupon-switch');
+  const switchLabel = $('cuenta-coupon-switch-label');
   const status = $('cuenta-coupon-status');
-  if (!input || !btn || !status) return;
+  const errorEl = $('cuenta-coupon-error');
+  if (!input || !lookupBtn || !result || !switchEl || !status) return;
+
   if (premium && premium.has_redeemed_coupon_before) {
     input.disabled = true;
-    btn.disabled = true;
-    status.textContent = 'Ya usaste un cupón — solo se puede activar uno por cuenta.';
+    lookupBtn.disabled = true;
+    result.classList.add('hidden');
+    if (errorEl) errorEl.classList.add('hidden');
+    status.textContent = 'Ya usaste un código de referido — solo se puede activar uno por cuenta.';
     status.classList.remove('hidden');
-  } else if (premium && premium.has_pending_coupon) {
+    return;
+  }
+
+  status.classList.add('hidden');
+
+  // Cupón ya redimido en una carga anterior de la página (o desde el
+  // registro): no tenemos el código/label a mano (premiumStatus() no lo
+  // trae), pero igual se puede mostrar el switch en ON y dejar cancelarlo.
+  if (premium && premium.has_pending_coupon) {
     input.disabled = true;
-    btn.disabled = true;
-    status.textContent = 'Cupón activado — se aplica al elegir un plan Mensual o Anual.';
-    status.classList.remove('hidden');
-  } else {
-    input.disabled = false;
-    btn.disabled = false;
-    status.classList.add('hidden');
+    lookupBtn.disabled = true;
+    if (resultText) {
+      resultText.textContent = 'Tenés un código de referido activado — se aplica al elegir un plan Mensual o Anual.';
+    }
+    if (switchLabel) switchLabel.textContent = 'Activado';
+    switchEl.checked = true;
+    result.classList.remove('hidden');
+    return;
+  }
+
+  input.disabled = false;
+  lookupBtn.disabled = false;
+}
+
+async function lookupCouponCode() {
+  const input = $('cuenta-coupon-input');
+  const lookupBtn = $('cuenta-coupon-lookup');
+  const errorEl = $('cuenta-coupon-error');
+  const result = $('cuenta-coupon-result');
+  const resultText = $('cuenta-coupon-result-text');
+  const switchEl = $('cuenta-coupon-switch');
+  const switchLabel = $('cuenta-coupon-switch-label');
+  if (!input || !lookupBtn || !result) return;
+  const code = input.value.trim();
+  if (!code) return;
+  if (errorEl) errorEl.classList.add('hidden');
+  result.classList.add('hidden');
+  lookupBtn.disabled = true;
+  try {
+    const data = await lookupCoupon(code);
+    if (data && data.valid) {
+      couponLookupCode = data.code || code;
+      if (resultText) {
+        const label = data.label ? `${escapeHtml(data.label)} — ` : '';
+        resultText.textContent = `🎟️ ${label}${data.trial_days ?? 30} días de Premium gratis al activarlo.`;
+      }
+      if (switchLabel) switchLabel.textContent = 'Activar';
+      if (switchEl) {
+        switchEl.checked = false;
+        switchEl.disabled = false;
+      }
+      result.classList.remove('hidden');
+      input.disabled = true;
+    } else {
+      couponLookupCode = null;
+      if (errorEl) {
+        errorEl.textContent = (data && data.reason) || 'Código no válido.';
+        errorEl.classList.remove('hidden');
+      }
+    }
+  } catch (_) {
+    if (errorEl) {
+      errorEl.textContent = 'No se pudo conectar — probá de nuevo.';
+      errorEl.classList.remove('hidden');
+    }
+  } finally {
+    lookupBtn.disabled = false;
   }
 }
 
 function wireCouponButton() {
   const input = $('cuenta-coupon-input');
-  const btn = $('cuenta-coupon-redeem');
-  const status = $('cuenta-coupon-status');
-  if (!input || !btn || !status) return;
-  btn.addEventListener('click', async () => {
-    const code = input.value.trim();
-    if (!code) return;
-    btn.disabled = true;
-    try {
-      const result = await redeemCoupon(code);
-      status.classList.remove('hidden');
-      if (result.ok) {
-        status.textContent = 'Cupón activado — se aplica al elegir un plan Mensual o Anual.';
-        input.disabled = true;
-      } else {
-        status.textContent = result.reason || 'No se pudo activar el cupón.';
-        btn.disabled = false;
-      }
-    } catch (_) {
-      status.classList.remove('hidden');
-      status.textContent = 'No se pudo conectar — probá de nuevo.';
-      btn.disabled = false;
-    }
-  });
-}
-
-// Panel de admin: SOLO visible client-side para settings.admin_email (hoy
-// matias.torres1812@gmail.com) — esto es únicamente para no mostrarle la
-// tarjeta a cualquier otra cuenta, NO es la seguridad real. Cada endpoint
-// /admin/coupons/* vuelve a chequear el email server-side (require_admin_user,
-// backend/app/deps.py) sin importar lo que haga o deje de hacer este if.
-function renderAdminCard(profile) {
-  const card = $('cuenta-admin-card');
-  if (!card) return;
-  const isAdmin = !!(profile && profile.email === 'matias.torres1812@gmail.com');
-  card.classList.toggle('hidden', !isAdmin);
-  if (isAdmin && !adminWired) {
-    adminWired = true;
-    loadAdminCoupons();
-    wireAdminCouponForm();
-    wireAdminSalesForm();
-    loadAdminUsers();
-    wireAdminUsersForm();
-    loadAdminSupportConversations();
-  }
-}
-
-async function loadAdminCoupons() {
-  const list = $('admin-coupon-list');
-  if (!list) return;
-  try {
-    const coupons = await listCoupons();
-    renderAdminCouponList(coupons);
-  } catch (_) {
-    list.innerHTML = '<li>No se pudo cargar la lista de cupones.</li>';
-  }
-}
-
-function renderAdminCouponList(coupons) {
-  const list = $('admin-coupon-list');
-  if (!list) return;
-  if (!coupons || !coupons.length) {
-    list.innerHTML = '<li>Todavía no hay cupones creados.</li>';
-    return;
-  }
-  list.innerHTML = coupons
-    .map((c) => {
-      const limit = c.max_redemptions != null ? `${c.times_redeemed}/${c.max_redemptions}` : `${c.times_redeemed}`;
-      const label = c.label ? ` — ${escapeHtml(c.label)}` : '';
-      return `<li>
-        <code>${escapeHtml(c.code)}</code>${label} · ${c.trial_days}d · usado ${limit}
-        <button type="button" class="cuenta-btn admin-coupon-toggle" data-code="${escapeHtml(c.code)}" data-active="${c.active}">
-          ${c.active ? 'Desactivar' : 'Activar'}
-        </button>
-      </li>`;
-    })
-    .join('');
-  list.querySelectorAll('.admin-coupon-toggle').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const code = btn.dataset.code;
-      const active = btn.dataset.active === 'true';
-      btn.disabled = true;
-      try {
-        await updateCoupon(code, { active: !active });
-        await loadAdminCoupons();
-      } catch (_) {
-        btn.disabled = false;
+  const lookupBtn = $('cuenta-coupon-lookup');
+  const switchEl = $('cuenta-coupon-switch');
+  const switchLabel = $('cuenta-coupon-switch-label');
+  const errorEl = $('cuenta-coupon-error');
+  if (lookupBtn) lookupBtn.addEventListener('click', lookupCouponCode);
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        lookupCouponCode();
       }
     });
-  });
-}
-
-function wireAdminCouponForm() {
-  const form = $('admin-coupon-form');
-  const errorEl = $('admin-coupon-error');
-  if (!form) return;
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (errorEl) errorEl.classList.add('hidden');
-    const code = $('admin-coupon-code').value.trim();
-    const label = $('admin-coupon-label').value.trim() || null;
-    const days = parseInt($('admin-coupon-days').value, 10) || 30;
-    const maxRaw = $('admin-coupon-max').value.trim();
-    const max = maxRaw ? parseInt(maxRaw, 10) : null;
-    if (!code) return;
-    const btn = $('admin-coupon-create');
-    btn.disabled = true;
-    try {
-      await createCoupon({ code, label, trial_days: days, max_redemptions: max });
-      form.reset();
-      $('admin-coupon-days').value = '30';
-      await loadAdminCoupons();
-    } catch (err) {
-      if (errorEl) {
-        errorEl.textContent = (err && err.detail) || 'No se pudo crear el cupón.';
-        errorEl.classList.remove('hidden');
-      }
-    } finally {
-      btn.disabled = false;
-    }
-  });
-}
-
-// ── Admin: Ventas ────────────────────────────────────────────────────────
-// Mismo criterio de admin que Cupones arriba: solo UX, el backend vuelve a
-// chequear require_admin_user en cada request (admin_sales.py).
-
-const ADMIN_CHANNEL_LABELS = { webpay_plus: 'Webpay Plus', oneclick: 'Oneclick', google_play: 'Google Play' };
-const ADMIN_PLAN_LABELS = { monthly: 'Mensual', annual: 'Anual', lifetime: 'De por vida' };
-
-function fmtMoney(n) {
-  return `$${Math.round(Number(n) || 0).toLocaleString('es-CL')}`;
-}
-
-function fmtDateOrDash(iso) {
-  return iso ? fmtDate(iso) : '—';
-}
-
-function renderAdminSalesSummary(summary) {
-  const el = $('admin-sales-summary');
-  if (!el) return;
-  if (!summary) {
-    el.innerHTML = '<p class="cuenta-empty">No se pudo cargar el resumen de ventas.</p>';
-    return;
   }
-  const channelRows = Object.entries(summary.by_channel || {})
-    .map(([k, v]) => `<li>${escapeHtml(ADMIN_CHANNEL_LABELS[k] || k)} — ${fmtMoney(v.revenue)} (${v.count})</li>`)
-    .join('');
-  const planRows = Object.entries(summary.by_plan || {})
-    .map(([k, v]) => `<li>${escapeHtml(ADMIN_PLAN_LABELS[k] || k)} — ${fmtMoney(v.revenue)} (${v.count})</li>`)
-    .join('');
-  el.innerHTML = `
-    <div class="admin-stat-row">
-      <div class="admin-stat"><strong>${fmtMoney(summary.total_revenue)}</strong><span>Total recaudado</span></div>
-      <div class="admin-stat"><strong>${summary.payment_count ?? 0}</strong><span>Pagos autorizados</span></div>
-    </div>
-    <div class="admin-stat-breakdown">
-      <h4>Por canal</h4>
-      <ul class="cuenta-list">${channelRows || '<li>Sin datos.</li>'}</ul>
-    </div>
-    <div class="admin-stat-breakdown">
-      <h4>Por plan</h4>
-      <ul class="cuenta-list">${planRows || '<li>Sin datos.</li>'}</ul>
-    </div>`;
-}
-
-async function loadAdminSalesSummary() {
-  const el = $('admin-sales-summary');
-  const from = $('admin-sales-from').value || undefined;
-  const to = $('admin-sales-to').value || undefined;
-  if (el) el.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
-  try {
-    const summary = await getSalesSummary(from, to);
-    renderAdminSalesSummary(summary);
-  } catch (_) {
-    renderAdminSalesSummary(null);
-  }
-}
-
-function wireAdminSalesForm() {
-  const form = $('admin-sales-form');
-  const csvBtn = $('admin-sales-csv');
-  const errorEl = $('admin-sales-error');
-  if (!form) return;
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    loadAdminSalesSummary();
-  });
-  if (csvBtn) {
-    // Descarga autenticada (ver admin.js::downloadSalesCsv) — el backend
-    // exige Authorization: Bearer, así que esto NO puede ser un <a href>
-    // plano (el navegador no le manda ese header a una descarga directa).
-    // Mismo patrón blob que main.js::downloadBackup.
-    csvBtn.addEventListener('click', async () => {
+  if (switchEl) {
+    switchEl.addEventListener('change', async () => {
+      switchEl.disabled = true;
       if (errorEl) errorEl.classList.add('hidden');
-      const from = $('admin-sales-from').value || undefined;
-      const to = $('admin-sales-to').value || undefined;
-      csvBtn.disabled = true;
       try {
-        const csvText = await downloadSalesCsv(from, to);
-        const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        const stamp = new Date().toISOString().slice(0, 10);
-        a.href = url;
-        a.download = `vyneural-ventas-${stamp}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        if (switchEl.checked) {
+          const code = couponLookupCode || (input && input.value.trim());
+          const result = await redeemCoupon(code);
+          if (result && result.ok) {
+            if (switchLabel) switchLabel.textContent = 'Activado';
+          } else {
+            switchEl.checked = false;
+            if (errorEl) {
+              errorEl.textContent = (result && result.reason) || 'No se pudo activar el código.';
+              errorEl.classList.remove('hidden');
+            }
+          }
+        } else {
+          await cancelCoupon();
+          resetCouponCard();
+        }
       } catch (err) {
+        // No sabemos si el cambio se aplicó de verdad del lado del servidor
+        // — revertir el switch visualmente a como estaba antes del click.
+        switchEl.checked = !switchEl.checked;
         if (errorEl) {
-          errorEl.textContent = (err && err.detail) || 'No se pudo descargar el CSV.';
+          errorEl.textContent = (err && err.detail) || 'No se pudo conectar — probá de nuevo.';
           errorEl.classList.remove('hidden');
         }
       } finally {
-        csvBtn.disabled = false;
+        switchEl.disabled = false;
       }
     });
-  }
-  loadAdminSalesSummary();
-}
-
-// ── Admin: Usuarios ──────────────────────────────────────────────────────
-
-let adminUsersPage = 1;
-let adminUsersSearchTerm = '';
-
-function renderAdminUserRow(u) {
-  const premiumLine = u.premium_lifetime
-    ? 'Premium de por vida'
-    : u.is_premium
-      ? `Premium ${escapeHtml(ADMIN_PLAN_LABELS[u.current_plan] || u.current_plan || '')} vía ${escapeHtml(u.active_channel || '?')} · vence ${fmtDateOrDash(u.premium_until)}`
-      : 'Sin premium';
-  return `<li class="cuenta-item admin-user-row" data-user-id="${escapeHtml(u.id)}">
-    <div class="cuenta-item-body">
-      <b>${escapeHtml(u.email)}</b>
-      <small>${escapeHtml(u.display_name || u.username || '')}</small>
-      <small>${premiumLine}</small>
-      <small>Alta ${fmtDateOrDash(u.created_at)} · último login ${fmtDateOrDash(u.last_login_at)}${u.last_seen_platform ? ` · ${escapeHtml(u.last_seen_platform)}` : ''}</small>
-    </div>
-    <details class="cuenta-create">
-      <summary>Ver pagos</summary>
-      <ul class="cuenta-list admin-user-payments-list"><li>Cargando…</li></ul>
-    </details>
-    <details class="cuenta-create">
-      <summary>Otorgar / revocar Premium</summary>
-      <div class="cuenta-form">
-        <div class="cuenta-form-row">
-          <label>Plan
-            <select class="admin-user-plan">
-              <option value="monthly">Mensual</option>
-              <option value="annual">Anual</option>
-              <option value="lifetime">De por vida</option>
-            </select>
-          </label>
-          <label>Días (opcional)<em> — vacío usa el default del plan</em>
-            <input type="number" min="1" class="admin-user-days" />
-          </label>
-        </div>
-        <div class="admin-inline-row">
-          <button type="button" class="cuenta-btn admin-user-grant">Otorgar</button>
-          <button type="button" class="cuenta-btn cuenta-btn-danger admin-user-revoke">Revocar</button>
-        </div>
-        <div class="auth-error hidden admin-user-premium-error" role="alert"></div>
-      </div>
-    </details>
-  </li>`;
-}
-
-function wireAdminUserRows(list) {
-  list.querySelectorAll('.admin-user-row').forEach((row) => {
-    const userId = row.dataset.userId;
-    const paymentsDetails = row.querySelector('details');
-    if (paymentsDetails) {
-      paymentsDetails.addEventListener('toggle', async () => {
-        if (!paymentsDetails.open || paymentsDetails.dataset.loaded === '1') return;
-        paymentsDetails.dataset.loaded = '1';
-        const ul = paymentsDetails.querySelector('.admin-user-payments-list');
-        try {
-          const payments = await getUserPayments(userId);
-          ul.innerHTML = payments.length
-            ? payments
-                .map((p) => `<li>${fmtDateOrDash(p.authorized_at || p.created_at)} · ${escapeHtml(ADMIN_PLAN_LABELS[p.plan] || p.plan)} · ${fmtMoney(p.amount)} ${escapeHtml(p.currency)} · ${escapeHtml(p.status)}</li>`)
-                .join('')
-            : '<li>Sin pagos registrados.</li>';
-        } catch (_) {
-          ul.innerHTML = '<li>No se pudo cargar el historial de pagos.</li>';
-          paymentsDetails.dataset.loaded = '0';
-        }
-      });
-    }
-    const grantBtn = row.querySelector('.admin-user-grant');
-    const revokeBtn = row.querySelector('.admin-user-revoke');
-    const planSel = row.querySelector('.admin-user-plan');
-    const daysInput = row.querySelector('.admin-user-days');
-    const errorEl = row.querySelector('.admin-user-premium-error');
-    if (grantBtn) {
-      grantBtn.addEventListener('click', async () => {
-        if (errorEl) errorEl.classList.add('hidden');
-        const plan = planSel.value;
-        const daysRaw = daysInput.value.trim();
-        const body = plan === 'lifetime'
-          ? { plan, lifetime: true }
-          : { plan, days: daysRaw ? parseInt(daysRaw, 10) : undefined };
-        grantBtn.disabled = true;
-        try {
-          await grantUserPremium(userId, body);
-          await loadAdminUsers();
-        } catch (err) {
-          if (errorEl) {
-            errorEl.textContent = (err && err.detail) || 'No se pudo otorgar Premium.';
-            errorEl.classList.remove('hidden');
-          }
-        } finally {
-          grantBtn.disabled = false;
-        }
-      });
-    }
-    if (revokeBtn) {
-      revokeBtn.addEventListener('click', async () => {
-        if (errorEl) errorEl.classList.add('hidden');
-        const plan = planSel.value;
-        revokeBtn.disabled = true;
-        try {
-          await revokeUserPremium(userId, { plan });
-          await loadAdminUsers();
-        } catch (err) {
-          if (errorEl) {
-            errorEl.textContent = (err && err.detail) || 'No se pudo revocar Premium.';
-            errorEl.classList.remove('hidden');
-          }
-        } finally {
-          revokeBtn.disabled = false;
-        }
-      });
-    }
-  });
-}
-
-function renderAdminUsersList(data) {
-  const list = $('admin-users-list');
-  const empty = $('admin-users-empty');
-  const prevBtn = $('admin-users-prev');
-  const nextBtn = $('admin-users-next');
-  const label = $('admin-users-page-label');
-  if (!list) return;
-  const items = (data && data.items) || [];
-  if (!items.length) {
-    list.innerHTML = '';
-    if (empty) empty.classList.remove('hidden');
-  } else {
-    if (empty) empty.classList.add('hidden');
-    list.innerHTML = items.map(renderAdminUserRow).join('');
-    wireAdminUserRows(list);
-  }
-  if (label) label.textContent = `Página ${adminUsersPage}`;
-  if (prevBtn) prevBtn.disabled = adminUsersPage <= 1;
-  if (nextBtn) nextBtn.disabled = !(data && data.has_more);
-}
-
-async function loadAdminUsers() {
-  const list = $('admin-users-list');
-  if (!list) return;
-  try {
-    const data = await listAdminUsers(adminUsersSearchTerm, adminUsersPage, 20);
-    renderAdminUsersList(data);
-  } catch (_) {
-    list.innerHTML = '<li>No se pudo cargar la lista de usuarios.</li>';
-  }
-}
-
-function wireAdminUsersForm() {
-  const form = $('admin-users-search-form');
-  const prevBtn = $('admin-users-prev');
-  const nextBtn = $('admin-users-next');
-  if (form) {
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      adminUsersSearchTerm = $('admin-users-search').value.trim();
-      adminUsersPage = 1;
-      loadAdminUsers();
-    });
-  }
-  if (prevBtn) {
-    prevBtn.addEventListener('click', () => {
-      if (adminUsersPage <= 1) return;
-      adminUsersPage -= 1;
-      loadAdminUsers();
-    });
-  }
-  if (nextBtn) {
-    nextBtn.addEventListener('click', () => {
-      adminUsersPage += 1;
-      loadAdminUsers();
-    });
-  }
-}
-
-// ── Admin: Soporte ───────────────────────────────────────────────────────
-// Polling manual (no WebSocket, no hay backend para eso) mientras UNA
-// conversación está expandida — se frena al colapsarla o abrir otra (ver
-// stopAdminSupportPolling), nunca corren dos intervals en simultáneo.
-
-let adminSupportOpenId = null;
-let adminSupportPollTimer = null;
-let adminSupportLastSeenAt = null;
-
-function stopAdminSupportPolling() {
-  if (adminSupportPollTimer) {
-    clearInterval(adminSupportPollTimer);
-    adminSupportPollTimer = null;
-  }
-}
-
-function renderAdminChatMessages(container, messages, { append = false } = {}) {
-  const html = messages
-    .map(
-      (m) => `<div class="admin-chat-msg${m.sender === 'admin' ? ' admin-chat-msg-admin' : ''}">
-        ${escapeHtml(m.content)}
-        <small>${m.sender === 'admin' ? 'Admin' : 'Usuario'} · ${fmtDate(m.created_at)}</small>
-      </div>`,
-    )
-    .join('');
-  if (append) container.insertAdjacentHTML('beforeend', html);
-  else container.innerHTML = html || '<p class="cuenta-empty">Sin mensajes todavía.</p>';
-  container.scrollTop = container.scrollHeight;
-}
-
-async function pollAdminSupportMessages(conversationId, container) {
-  // Si mientras tanto se cerró/cambió de conversación, este tick es de una
-  // conversación que ya no está abierta — no pisar el chat de otra.
-  if (adminSupportOpenId !== conversationId) return;
-  try {
-    const data = await getAdminSupportMessages(conversationId, adminSupportLastSeenAt || undefined);
-    const messages = (data && data.messages) || [];
-    if (messages.length && adminSupportOpenId === conversationId) {
-      renderAdminChatMessages(container, messages, { append: true });
-      adminSupportLastSeenAt = messages[messages.length - 1].created_at;
-    }
-  } catch (_) {
-    /* silencioso: reintenta en el próximo tick, no interrumpe la conversación abierta */
-  }
-}
-
-async function openAdminSupportConversation(conversationId, li) {
-  if (adminSupportOpenId && adminSupportOpenId !== conversationId) {
-    const prevLi = document.querySelector(`.admin-support-row[data-conversation-id="${adminSupportOpenId}"]`);
-    if (prevLi) prevLi.querySelector('.admin-panel').classList.add('hidden');
-  }
-  stopAdminSupportPolling();
-  adminSupportOpenId = conversationId;
-  adminSupportLastSeenAt = null;
-
-  const panel = li.querySelector('.admin-panel');
-  panel.classList.remove('hidden');
-  const chatEl = panel.querySelector('.admin-chat');
-  chatEl.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
-  try {
-    const data = await getAdminSupportMessages(conversationId);
-    const messages = (data && data.messages) || [];
-    renderAdminChatMessages(chatEl, messages);
-    if (messages.length) adminSupportLastSeenAt = messages[messages.length - 1].created_at;
-  } catch (_) {
-    chatEl.innerHTML = '<p class="cuenta-empty">No se pudieron cargar los mensajes.</p>';
-  }
-  // Solo arranca el polling si seguimos siendo la conversación abierta (un
-  // error/latencia en el fetch de arriba no debería revivir un polling de
-  // una conversación que el admin ya cerró mientras esperaba).
-  if (adminSupportOpenId === conversationId) {
-    adminSupportPollTimer = setInterval(() => pollAdminSupportMessages(conversationId, chatEl), 4000);
-  }
-}
-
-function closeAdminSupportConversation(li) {
-  const panel = li.querySelector('.admin-panel');
-  if (panel) panel.classList.add('hidden');
-  stopAdminSupportPolling();
-  adminSupportOpenId = null;
-}
-
-function renderAdminSupportRow(c) {
-  const preview = c.last_message_preview ? escapeHtml(c.last_message_preview) : '';
-  return `<li class="cuenta-item admin-support-row" data-conversation-id="${escapeHtml(c.id)}">
-    <button type="button" class="cuenta-item-body admin-support-summary">
-      <b>${escapeHtml(c.user_email || '')}</b>
-      <small>${c.message_count ?? 0} mensajes · último ${fmtDateOrDash(c.last_message_at)}</small>
-      ${preview ? `<small>"${preview}"</small>` : ''}
-    </button>
-    <div class="admin-panel hidden">
-      <div class="admin-chat"></div>
-      <form class="cuenta-form admin-support-reply-form">
-        <div class="admin-inline-row">
-          <input type="text" class="admin-support-reply-input" placeholder="Responder…" maxlength="2000" required />
-          <button type="submit" class="cuenta-btn">Enviar</button>
-        </div>
-        <div class="auth-error hidden admin-support-reply-error" role="alert"></div>
-      </form>
-    </div>
-  </li>`;
-}
-
-function wireAdminSupportRows(list) {
-  list.querySelectorAll('.admin-support-row').forEach((li) => {
-    const conversationId = li.dataset.conversationId;
-    const summaryBtn = li.querySelector('.admin-support-summary');
-    if (summaryBtn) {
-      summaryBtn.addEventListener('click', () => {
-        if (adminSupportOpenId === conversationId) closeAdminSupportConversation(li);
-        else openAdminSupportConversation(conversationId, li);
-      });
-    }
-    const replyForm = li.querySelector('.admin-support-reply-form');
-    if (replyForm) {
-      replyForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const input = replyForm.querySelector('.admin-support-reply-input');
-        const errorEl = replyForm.querySelector('.admin-support-reply-error');
-        const content = input.value.trim();
-        if (!content) return;
-        if (errorEl) errorEl.classList.add('hidden');
-        const submitBtn = replyForm.querySelector('button[type="submit"]');
-        submitBtn.disabled = true;
-        try {
-          const sent = await sendAdminSupportMessage(conversationId, content);
-          input.value = '';
-          const chatEl = li.querySelector('.admin-chat');
-          if (chatEl && sent) {
-            renderAdminChatMessages(chatEl, [sent], { append: true });
-            adminSupportLastSeenAt = sent.created_at;
-          }
-        } catch (err) {
-          if (errorEl) {
-            errorEl.textContent = (err && err.detail) || 'No se pudo enviar la respuesta.';
-            errorEl.classList.remove('hidden');
-          }
-        } finally {
-          submitBtn.disabled = false;
-        }
-      });
-    }
-  });
-}
-
-async function loadAdminSupportConversations() {
-  const list = $('admin-support-list');
-  const empty = $('admin-support-empty');
-  if (!list) return;
-  try {
-    const conversations = await listAdminSupportConversations();
-    const items = conversations && conversations.items ? conversations.items : conversations || [];
-    if (!items.length) {
-      list.innerHTML = '';
-      if (empty) empty.classList.remove('hidden');
-      return;
-    }
-    if (empty) empty.classList.add('hidden');
-    list.innerHTML = items.map(renderAdminSupportRow).join('');
-    wireAdminSupportRows(list);
-  } catch (_) {
-    list.innerHTML = '<li>No se pudo cargar la lista de conversaciones.</li>';
   }
 }
 
@@ -1349,7 +912,6 @@ async function loadAll() {
   renderPush();
   renderPremium(premium, oneclick);
   renderCoupon(premium);
-  renderAdminCard(profile);
 
   const failed = results.filter((r) => r.status === 'rejected').length;
   if (syncEl) {

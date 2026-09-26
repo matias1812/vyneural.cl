@@ -43,6 +43,7 @@
 
 import { getOrCreateConversation, sendMessage, getMessages, rateConversation } from './api/support.js';
 import { ApiError } from './api/client.js';
+import { openSupportSocket } from './api/support-ws-client.js';
 
 const LS_CONV_ID = 'vyneural_support_conversation_id';
 const LS_LAST_SEEN = 'vyneural_support_last_seen_at';
@@ -112,7 +113,7 @@ function build() {
   modal.innerHTML = `
     <div class="support-modal-card" role="dialog" aria-modal="true" aria-labelledby="support-modal-title">
       <div class="support-modal-head">
-        <h3 id="support-modal-title">💬 Chat de soporte</h3>
+        <h3 id="support-modal-title">💬 Chat de soporte<span class="support-conn-dot" id="support-conn-dot" title="Sincronizando…" aria-hidden="true"></span></h3>
         <button type="button" id="support-close" class="support-close" aria-label="Cerrar">✕</button>
       </div>
 
@@ -217,12 +218,50 @@ export function initSupportChat() {
   const rateErrorEl = modal.querySelector('#support-rate-error');
   const cannedListEl = modal.querySelector('#support-canned-list');
   const starInputEl = modal.querySelector('#support-star-input');
+  const connDotEl = modal.querySelector('#support-conn-dot');
 
   let conversationId = lsGet(LS_CONV_ID) || null;
   let lastSeenAt = lsGet(LS_LAST_SEEN) || null;
   let foregroundTimer = null;
   let backgroundTimer = null;
   let rating = 0;
+  // Dedup por id: WebSocket y polling pueden entregar el MISMO mensaje (el
+  // socket es instantáneo, un poll ya en vuelo con un `since` viejo puede
+  // devolver de nuevo lo que el socket ya entregó momentos antes) — sin
+  // esto, ese mensaje se pintaría dos veces en el chat.
+  let seenMessageIds = new Set();
+  let wsHandle = null;
+
+  function setConnStatus(status) {
+    if (!connDotEl) return;
+    connDotEl.classList.remove('is-open', 'is-connecting', 'is-down');
+    if (status === 'open') {
+      connDotEl.classList.add('is-open');
+      connDotEl.title = 'En vivo';
+    } else if (status === 'connecting') {
+      connDotEl.classList.add('is-connecting');
+      connDotEl.title = 'Conectando…';
+    } else {
+      connDotEl.classList.add('is-down');
+      connDotEl.title = 'Sincronizando (sin conexión en vivo)';
+    }
+  }
+
+  function stopSocket() {
+    if (wsHandle) {
+      wsHandle.close();
+      wsHandle = null;
+    }
+    setConnStatus('down');
+  }
+
+  function startSocket() {
+    if (!conversationId || wsHandle) return;
+    wsHandle = openSupportSocket(conversationId, {
+      onMessage: (m) => appendMessages([m]),
+      onStatusChange: setConnStatus,
+    });
+  }
 
   function showStatus(text, isError) {
     statusEl.textContent = text;
@@ -244,9 +283,11 @@ export function initSupportChat() {
   // la próxima apertura seguiría intentando pollear/mandar mensajes a un id
   // borrado, o el banner de fondo insistiría contra un 404 para siempre.
   function resetLocalState() {
+    stopSocket();
     conversationId = null;
     lastSeenAt = null;
     rating = 0;
+    seenMessageIds = new Set();
     lsSet(LS_CONV_ID, '');
     lsSet(LS_LAST_SEEN, '');
     messagesEl.innerHTML = '';
@@ -254,21 +295,31 @@ export function initSupportChat() {
   }
 
   function appendMessages(list) {
+    let appended = false;
     (list || []).forEach((m) => {
+      if (m.id) {
+        if (seenMessageIds.has(m.id)) return;
+        seenMessageIds.add(m.id);
+      }
+      appended = true;
       const div = document.createElement('div');
       div.className = `support-msg support-msg-${m.sender === 'admin' ? 'admin' : 'user'}`;
+      const sender = document.createElement('span');
+      sender.className = 'support-msg-sender';
+      sender.textContent = m.sender === 'admin' ? 'Soporte' : 'Tú';
       const p = document.createElement('p');
       p.className = 'support-msg-text';
       p.textContent = m.content;
       const time = document.createElement('span');
       time.className = 'support-msg-time';
       time.textContent = fmtTime(m.created_at);
+      div.appendChild(sender);
       div.appendChild(p);
       div.appendChild(time);
       messagesEl.appendChild(div);
       if (m.created_at && (!lastSeenAt || m.created_at > lastSeenAt)) lastSeenAt = m.created_at;
     });
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (appended) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   async function ensureConversation() {
@@ -284,6 +335,7 @@ export function initSupportChat() {
       conversationId = conv.id;
       messagesEl.innerHTML = '';
       lastSeenAt = null;
+      seenMessageIds = new Set();
       appendMessages(conv.messages);
       persist();
       hideBanner();
@@ -366,13 +418,17 @@ export function initSupportChat() {
     stopBackgroundPoll();
     window.setTimeout(() => input && input.focus(), 30);
     ensureConversation().then((ok) => {
-      if (ok) startForegroundPoll();
+      if (ok) {
+        startForegroundPoll();
+        startSocket();
+      }
     });
   }
   function close() {
     modal.hidden = true;
     document.body.classList.remove('support-modal-open');
     stopForegroundPoll();
+    stopSocket();
     persist();
     // Solo con una conversación real y sin calificar todavía tiene sentido
     // seguir mirando de fondo si el admin contesta.

@@ -36,6 +36,21 @@ export async function redeemCoupon(code) {
   return post('/api/v1/payments/coupon/redeem', { code });
 }
 
+/** Consulta si un código es válido SIN activarlo (ver /cuenta → "Código de
+ * referido", flujo de buscar antes de activar el switch) — nunca lanza por
+ * un código inválido/agotado, devuelve { valid, reason?, code?, label?,
+ * trial_days? }. Sin efecto secundario: no marca nada como pendiente. */
+export async function lookupCoupon(code) {
+  return get(`/api/v1/payments/coupon/lookup?code=${encodeURIComponent(code)}`);
+}
+
+/** Cancela el cupón pendiente (redimido pero todavía sin plan elegido) —
+ * contraparte de redeemCoupon() para cuando el switch de /cuenta pasa a
+ * OFF. Idempotente del lado del backend. */
+export async function cancelCoupon() {
+  return post('/api/v1/payments/coupon/cancel');
+}
+
 // ── Panel de admin (SOLO la cuenta de settings.admin_email — el backend
 // vuelve a chequear esto en cada request, ver deps.py::require_admin_user) ──
 

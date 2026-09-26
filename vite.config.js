@@ -32,6 +32,10 @@ export default defineConfig({
       '/api': {
         target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8000',
         changeOrigin: true,
+        // El chat de soporte abre un WebSocket a /api/v1/support/ws/... —
+        // sin esto el proxy de Vite solo reenvía HTTP normal y el upgrade
+        // de WS nunca llega al backend local (ver src/api/support-ws-client.js).
+        ws: true,
       },
     },
   },
@@ -57,6 +61,7 @@ export default defineConfig({
         'hoja-de-ruta': resolve(__dirname, 'hoja-de-ruta.html'),
         rutina: resolve(__dirname, 'rutina.html'),
         cuenta: resolve(__dirname, 'cuenta.html'),
+        admin: resolve(__dirname, 'admin.html'),
         verificar: resolve(__dirname, 'verificar.html'),
         restablecer: resolve(__dirname, 'restablecer.html'),
         'preguntas-frecuentes': resolve(__dirname, 'preguntas-frecuentes.html'),

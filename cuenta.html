@@ -151,97 +151,23 @@
 
           <div class="page-card" id="cuenta-coupon-card">
             <div class="rutina-head">
-              <h3>🎟️ Cupones</h3>
+              <h3>🎟️ Código de referido</h3>
             </div>
-            <p class="rutina-hint" id="cuenta-coupon-hint">¿Tenés un código de cupón? Activalo antes de elegir un plan Mensual o Anual para sumar tu mes de Premium gratis (con método de pago validado, cobro automático al terminar el mes de prueba).</p>
+            <p class="rutina-hint" id="cuenta-coupon-hint">¿Tenés un código de referido? Buscalo antes de elegir un plan Mensual o Anual para sumar tu mes de Premium gratis (con método de pago validado, cobro automático al terminar el mes de prueba).</p>
             <div class="cuenta-coupon-row">
-              <input type="text" id="cuenta-coupon-input" placeholder="Código de cupón" maxlength="32" autocapitalize="characters">
-              <button type="button" class="cuenta-btn" id="cuenta-coupon-redeem">Activar</button>
+              <input type="text" id="cuenta-coupon-input" placeholder="Código de referido" aria-label="Código de referido" maxlength="32" autocapitalize="characters">
+              <button type="button" class="cuenta-btn" id="cuenta-coupon-lookup">Buscar</button>
+            </div>
+            <p class="auth-error hidden" id="cuenta-coupon-error" role="alert"></p>
+            <div class="cuenta-coupon-result hidden" id="cuenta-coupon-result">
+              <p id="cuenta-coupon-result-text"></p>
+              <label class="cuenta-switch">
+                <input type="checkbox" id="cuenta-coupon-switch" />
+                <span class="cuenta-switch-track" aria-hidden="true"></span>
+                <span id="cuenta-coupon-switch-label">Activar</span>
+              </label>
             </div>
             <p class="cuenta-empty hidden" id="cuenta-coupon-status"></p>
-          </div>
-
-          <!-- Panel de admin: oculto por CSS por defecto, se muestra solo si
-               profile.email === admin (ver renderAdminCard en cuenta.js) —
-               solo UX, la seguridad real es require_admin_user en el backend.
-               Cada subsección (Cupones, Ventas, Usuarios, Soporte) es su
-               propia .page-card — este contenedor solo agrupa y oculta. -->
-          <div class="hidden" id="cuenta-admin-card">
-            <div class="page-card" id="cuenta-admin-coupon-card">
-              <div class="rutina-head">
-                <h3>🛠️ Admin — Cupones</h3>
-              </div>
-              <form id="admin-coupon-form" class="cuenta-form">
-                <div class="cuenta-form-row">
-                  <label>Código
-                    <input id="admin-coupon-code" type="text" maxlength="32" autocapitalize="characters" required />
-                  </label>
-                  <label>Etiqueta (opcional)
-                    <input id="admin-coupon-label" type="text" maxlength="120" placeholder="Influencer X" />
-                  </label>
-                </div>
-                <div class="cuenta-form-row">
-                  <label>Días de trial
-                    <input id="admin-coupon-days" type="number" min="1" max="365" value="30" required />
-                  </label>
-                  <label>Límite de usos (opcional)
-                    <input id="admin-coupon-max" type="number" min="1" />
-                  </label>
-                </div>
-                <div class="auth-error hidden" id="admin-coupon-error" role="alert"></div>
-                <button type="submit" class="cuenta-btn" id="admin-coupon-create">Crear cupón</button>
-              </form>
-              <ul class="cuenta-list" id="admin-coupon-list"></ul>
-            </div>
-
-            <div class="page-card" id="cuenta-admin-sales-card">
-              <div class="rutina-head">
-                <h3>📊 Ventas</h3>
-              </div>
-              <form id="admin-sales-form" class="cuenta-form">
-                <div class="cuenta-form-row">
-                  <label>Desde
-                    <input id="admin-sales-from" type="date" />
-                  </label>
-                  <label>Hasta
-                    <input id="admin-sales-to" type="date" />
-                  </label>
-                </div>
-                <div class="admin-inline-row">
-                  <button type="submit" class="cuenta-btn" id="admin-sales-query">Consultar</button>
-                  <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-sales-csv">Descargar CSV</button>
-                </div>
-                <div class="auth-error hidden" id="admin-sales-error" role="alert"></div>
-              </form>
-              <div id="admin-sales-summary"></div>
-            </div>
-
-            <div class="page-card" id="cuenta-admin-users-card">
-              <div class="rutina-head">
-                <h3>👥 Usuarios</h3>
-              </div>
-              <form id="admin-users-search-form" class="cuenta-form">
-                <div class="admin-inline-row">
-                  <input id="admin-users-search" type="text" placeholder="Buscar por email…" />
-                  <button type="submit" class="cuenta-btn" id="admin-users-search-btn">Buscar</button>
-                </div>
-              </form>
-              <ul class="cuenta-list" id="admin-users-list"></ul>
-              <p class="cuenta-empty hidden" id="admin-users-empty">Sin resultados.</p>
-              <div class="admin-inline-row">
-                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-prev" disabled>← Anterior</button>
-                <span id="admin-users-page-label"></span>
-                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-next" disabled>Siguiente →</button>
-              </div>
-            </div>
-
-            <div class="page-card" id="cuenta-admin-support-card">
-              <div class="rutina-head">
-                <h3>💬 Soporte</h3>
-              </div>
-              <ul class="cuenta-list" id="admin-support-list"></ul>
-              <p class="cuenta-empty hidden" id="admin-support-empty">No hay conversaciones abiertas.</p>
-            </div>
           </div>
 
           <div class="card-grid">

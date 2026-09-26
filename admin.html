@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin · Vyneural</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#0b0d1a" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  </head>
+  <body>
+    <header class="admin-topbar">
+      <a class="site-brand" href="/cuenta">
+        <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
+        Vyneural admin
+      </a>
+      <a class="admin-back-link" href="/cuenta">← Volver a mi cuenta</a>
+    </header>
+
+    <main class="admin-shell">
+      <!-- Sin sesión o sesión no-admin: nunca se monta el contenido real,
+           ver src/admin.js::init() — la seguridad real es require_admin_user
+           en cada endpoint del backend, esto es solo para no mostrar un
+           flash de contenido a quien no corresponde. -->
+      <div class="page-card admin-unauthorized hidden" id="admin-unauthorized">
+        <p class="rm-emoji" aria-hidden="true">🔒</p>
+        <h2>No autorizado</h2>
+        <p>Esta página es solo para la cuenta de administración de Vyneural.</p>
+        <a class="hero-cta" href="/cuenta">Volver a mi cuenta</a>
+      </div>
+
+      <div class="admin-grid hidden" id="admin-content">
+        <div class="page-card" id="cuenta-admin-coupon-card">
+          <div class="rutina-head">
+            <h3>🛠️ Admin — Cupones</h3>
+          </div>
+          <form id="admin-coupon-form" class="cuenta-form">
+            <div class="cuenta-form-row">
+              <label>Código
+                <input id="admin-coupon-code" type="text" maxlength="32" autocapitalize="characters" required />
+              </label>
+              <label>Etiqueta (opcional)
+                <input id="admin-coupon-label" type="text" maxlength="120" placeholder="Influencer X" />
+              </label>
+            </div>
+            <div class="cuenta-form-row">
+              <label>Días de trial
+                <input id="admin-coupon-days" type="number" min="1" max="365" value="30" required />
+              </label>
+              <label>Límite de usos (opcional)
+                <input id="admin-coupon-max" type="number" min="1" />
+              </label>
+            </div>
+            <div class="auth-error hidden" id="admin-coupon-error" role="alert"></div>
+            <button type="submit" class="cuenta-btn" id="admin-coupon-create">Crear cupón</button>
+          </form>
+          <ul class="cuenta-list" id="admin-coupon-list"></ul>
+        </div>
+
+        <div class="page-card" id="cuenta-admin-sales-card">
+          <div class="rutina-head">
+            <h3>📊 Ventas</h3>
+          </div>
+          <form id="admin-sales-form" class="cuenta-form">
+            <div class="cuenta-form-row">
+              <label>Desde
+                <input id="admin-sales-from" type="date" />
+              </label>
+              <label>Hasta
+                <input id="admin-sales-to" type="date" />
+              </label>
+            </div>
+            <div class="admin-inline-row">
+              <button type="submit" class="cuenta-btn" id="admin-sales-query">Consultar</button>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-sales-csv">Descargar CSV</button>
+            </div>
+            <div class="auth-error hidden" id="admin-sales-error" role="alert"></div>
+          </form>
+          <div id="admin-sales-summary"></div>
+        </div>
+
+        <div class="page-card" id="cuenta-admin-users-card">
+          <div class="rutina-head">
+            <h3>👥 Usuarios</h3>
+          </div>
+          <form id="admin-users-search-form" class="cuenta-form">
+            <div class="admin-inline-row">
+              <input id="admin-users-search" type="text" placeholder="Buscar por email…" />
+              <button type="submit" class="cuenta-btn" id="admin-users-search-btn">Buscar</button>
+            </div>
+          </form>
+          <ul class="cuenta-list" id="admin-users-list"></ul>
+          <p class="cuenta-empty hidden" id="admin-users-empty">Sin resultados.</p>
+          <div class="admin-inline-row">
+            <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-prev" disabled>← Anterior</button>
+            <span id="admin-users-page-label"></span>
+            <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-next" disabled>Siguiente →</button>
+          </div>
+        </div>
+
+        <div class="page-card" id="cuenta-admin-support-card">
+          <div class="rutina-head">
+            <h3>💬 Soporte</h3>
+          </div>
+          <ul class="cuenta-list" id="admin-support-list"></ul>
+          <p class="cuenta-empty hidden" id="admin-support-empty">No hay conversaciones abiertas.</p>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/src/admin.js"></script>
+  </body>
+</html>

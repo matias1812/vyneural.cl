@@ -154,6 +154,24 @@ function renderNav() {
   });
   menu.appendChild(cuenta);
 
+  // Acceso a /admin: SOLO visible client-side para la cuenta de admin — esto
+  // es únicamente para no mostrarle el link a cualquier otra cuenta, NO es
+  // la seguridad real (require_admin_user en el backend vuelve a chequear
+  // el email en cada request de /admin/*, ver deps.py). Nadie más ve este
+  // botón porque nadie más puede tener esa cuenta (email único en la DB).
+  if (profile && profile.email === 'matias.torres1812@gmail.com') {
+    const admin = document.createElement('button');
+    admin.type = 'button';
+    admin.className = 'auth-menu-item';
+    admin.setAttribute('role', 'menuitem');
+    admin.innerHTML = `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg><span>Panel de admin</span>`;
+    admin.addEventListener('click', () => {
+      closeMenu();
+      window.location.href = '/admin';
+    });
+    menu.appendChild(admin);
+  }
+
   // "Tu rutina" vivía duplicada en el header (y footer) de cada página HTML
   // estática — con ~20 páginas copiando esa lista a mano, quedaba
   // desincronizada entre sí (algunas con otro orden, otras sin el link) y
@@ -299,7 +317,7 @@ function modalHTML() {
           </div>
 
           <div class="auth-field" id="auth-coupon-field" hidden>
-            <label for="auth-coupon">Código de cupón <em>(opcional)</em></label>
+            <label for="auth-coupon">Código de referido <em>(opcional)</em></label>
             <input id="auth-coupon" name="coupon_code" type="text" maxlength="32" autocapitalize="characters" placeholder="ej: 29" />
             <small class="auth-hint">Si tenés uno, activá 1 mes de Premium gratis al elegir un plan Mensual o Anual — también podés activarlo después desde tu cuenta.</small>
           </div>
