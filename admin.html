@@ -30,6 +30,25 @@
       </div>
 
       <div class="admin-grid hidden" id="admin-content">
+        <div class="page-card" id="cuenta-admin-users-card">
+          <div class="rutina-head">
+            <h3>👥 Usuarios</h3>
+          </div>
+          <form id="admin-users-search-form" class="cuenta-form">
+            <div class="admin-inline-row">
+              <input id="admin-users-search" type="text" placeholder="Buscar por email…" />
+              <button type="submit" class="cuenta-btn" id="admin-users-search-btn">Buscar</button>
+            </div>
+          </form>
+          <ul class="cuenta-list admin-users-scroll" id="admin-users-list"></ul>
+          <p class="cuenta-empty hidden" id="admin-users-empty">Sin resultados.</p>
+          <div class="admin-inline-row">
+            <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-prev" disabled>← Anterior</button>
+            <span id="admin-users-page-label"></span>
+            <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-next" disabled>Siguiente →</button>
+          </div>
+        </div>
+
         <div class="page-card" id="cuenta-admin-coupon-card">
           <div class="rutina-head">
             <h3>🛠️ Admin — Cupones</h3>
@@ -79,25 +98,6 @@
             <div class="auth-error hidden" id="admin-sales-error" role="alert"></div>
           </form>
           <div id="admin-sales-summary"></div>
-        </div>
-
-        <div class="page-card" id="cuenta-admin-users-card">
-          <div class="rutina-head">
-            <h3>👥 Usuarios</h3>
-          </div>
-          <form id="admin-users-search-form" class="cuenta-form">
-            <div class="admin-inline-row">
-              <input id="admin-users-search" type="text" placeholder="Buscar por email…" />
-              <button type="submit" class="cuenta-btn" id="admin-users-search-btn">Buscar</button>
-            </div>
-          </form>
-          <ul class="cuenta-list" id="admin-users-list"></ul>
-          <p class="cuenta-empty hidden" id="admin-users-empty">Sin resultados.</p>
-          <div class="admin-inline-row">
-            <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-prev" disabled>← Anterior</button>
-            <span id="admin-users-page-label"></span>
-            <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-next" disabled>Siguiente →</button>
-          </div>
         </div>
 
         <div class="page-card" id="cuenta-admin-support-card">

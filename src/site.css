@@ -3999,27 +3999,49 @@ html:not(.in-app) .in-app-only {
   margin-top: 8px;
 }
 
-/* Chips de stats arriba de las columnas Pendientes/Resueltos — reusa
-   .admin-stat-row/.admin-stat (ya definidos arriba para Ventas) tal cual,
-   más una línea chica con el desglose 1★-5★ que no encaja en ese patrón de
-   "número grande + label". */
+/* Grilla de stats arriba de las columnas Pendientes/Resueltos — antes
+   reusaba .admin-stat-row (flex que envuelve) tal cual de Ventas; con 4
+   chips (pendientes/resueltas/promedio/distribución) dentro de una card ya
+   angosta (la mitad de .admin-grid) quedaba amontonado. Grilla explícita de
+   2 columnas (1 en mobile) para que cada chip tenga su propia celda prolija. */
+.admin-support-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+
+.admin-support-stats .admin-stat {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .admin-support-stats-dist {
   font-size: 12px;
   color: var(--text-dim);
   margin-top: 4px;
 }
 
-/* Dos columnas (Pendientes / Resueltos) lado a lado en pantallas anchas,
-   apiladas debajo de ese ancho — mismo breakpoint que .admin-grid más abajo
-   para que las dos reglas responsivas de esta página cambien juntas. */
+@media (max-width: 480px) {
+  .admin-support-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Pendientes/Resueltos APILADAS, no lado a lado: esta card ya vive a media
+   página dentro de .admin-grid (2 columnas) — intentar dos sub-columnas
+   ahí adentro (como se hizo al principio) las dejaba amontonadas contra el
+   borde de la card, con paneles de chat expandibles adentro de una franja
+   angosta. Cada lista se lee mejor con el ancho completo de la card. */
 .admin-support-columns {
   display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .admin-support-col {
-  flex: 1 1 260px;
   min-width: 0;
 }
 
@@ -4027,19 +4049,48 @@ html:not(.in-app) .in-app-only {
   font-size: 13px;
   color: var(--text-dim);
   margin: 0 0 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
 }
 
 /* Scroll acotado independiente del cupo "Mostrar más": una vez que se
    desoculta todo, la lista sigue pudiendo ser larga y necesita su propio
-   límite de alto. */
+   límite de alto. Más bajo que antes (eran 360px pensados para dos
+   columnas lado a lado que ahora están apiladas, sumarían demasiado alto). */
 .admin-support-scroll {
-  max-height: 360px;
+  max-height: 260px;
   overflow-y: auto;
 }
 
-@media (max-width: 900px) {
-  .admin-support-columns {
-    flex-direction: column;
+/* La lista de Usuarios (20 por página, cada fila con 2 <details>
+   expandibles de pagos/premium) sin tope se sentía como una pared de texto
+   apenas se abrían un par de filas. Mismo criterio de scroll acotado que
+   .admin-support-scroll — la paginación server-side sigue siendo la que
+   limita CUÁNTOS se piden, esto solo evita que la card crezca sin límite. */
+.admin-users-scroll {
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+/* Fila de usuario como grilla prolija (email | estado premium | fechas) en
+   vez de 3 líneas de <small> apiladas — con muchas filas visibles a la vez
+   (paginado a 20) leerse como una tabla ayuda mucho más que un stack de
+   texto suelto repetido fila tras fila. */
+.admin-user-row .cuenta-item-body {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) minmax(160px, 1.4fr) minmax(140px, 1fr);
+  column-gap: 14px;
+  align-items: start;
+  width: 100%;
+}
+
+.admin-user-row .cuenta-item-body b {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .admin-user-row .cuenta-item-body {
+    grid-template-columns: 1fr;
   }
 }
 
