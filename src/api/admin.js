@@ -70,10 +70,22 @@ export async function revokeUserPremium(userId, body) {
   return post(`/api/v1/admin/users/${encodeURIComponent(userId)}/premium/revoke`, body);
 }
 
+export async function refundUserPayment(userId, paymentId) {
+  return post(`/api/v1/admin/users/${encodeURIComponent(userId)}/payments/${encodeURIComponent(paymentId)}/refund`, {});
+}
+
 // ── Soporte (backend/app/routers/support.py::admin_router) ─────────────────
 
-export async function listAdminSupportConversations() {
-  return get('/api/v1/admin/support/conversations');
+export async function listAdminSupportConversations(status = 'open') {
+  return get(`/api/v1/admin/support/conversations?status=${encodeURIComponent(status)}`);
+}
+
+export async function getAdminSupportStats(fromDate, toDate) {
+  const params = new URLSearchParams();
+  if (fromDate) params.set('from_date', fromDate);
+  if (toDate) params.set('to_date', toDate);
+  const qs = params.toString();
+  return get(`/api/v1/admin/support/stats${qs ? `?${qs}` : ''}`);
 }
 
 export async function getAdminSupportMessages(conversationId, since) {

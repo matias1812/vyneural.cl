@@ -1077,6 +1077,42 @@ a:hover {
   animation-delay: 0.05s;
 }
 
+/* ---------------------------------------------------------------- Celebración ligera */
+/* Usada por src/ui/celebrate.js::celebrateBurst — refuerzo positivo puntual
+   (cupón activado, primera alarma/itinerario) en páginas sin el canvas
+   #starfield (ver starfield.js). Overlay fijo en <body>, no recortable por
+   ancestros con overflow:hidden. */
+.celebrate-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.celebrate-particle {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: 20px;
+  line-height: 1;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: celebrateBurst 0.9s ease-out forwards;
+}
+
+@keyframes celebrateBurst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(0, 0) rotate(0deg) scale(0.5);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(var(--cx), var(--cy)) rotate(var(--rot)) scale(1);
+  }
+}
+
 /* ---------------------------------------------------------------- Redes sociales */
 .social-link,
 .footer-social {
@@ -1181,7 +1217,8 @@ a:hover {
 .in-app a[href="/descargar"].apk-cta-btn,
 .in-app .apk-cta,
 .in-app .install-steps,
-.in-app #install-title {
+.in-app #install-title,
+.in-app .nav-android-link {
   display: none !important;
 }
 
@@ -1629,6 +1666,34 @@ body.immersive .support-fab {
 }
 
 .support-form input:focus {
+  outline: none;
+  border-color: rgba(167, 139, 250, 0.6);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Formulario de reporte simple (no-Premium): textarea + botón apilados en
+   vez de la fila horizontal de .support-form (pensada para el input de una
+   sola línea del chat en vivo). */
+.support-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.support-form-stack textarea {
+  width: 100%;
+  resize: vertical;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14.5px;
+  line-height: 1.5;
+  padding: 10px 14px;
+}
+
+.support-form-stack textarea:focus {
   outline: none;
   border-color: rgba(167, 139, 250, 0.6);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -3888,6 +3953,15 @@ html:not(.in-app) .in-app-only {
   flex: 1 1 200px;
 }
 
+/* Fila de un pago dentro de "Ver pagos" — el botón Reembolsar (solo presente
+   en pagos "authorized") no debe quedar apilado bajo el texto del pago. */
+.admin-payment-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
 .admin-stat-row {
   display: flex;
   gap: 24px;
@@ -3923,6 +3997,50 @@ html:not(.in-app) .in-app-only {
 .cuenta-item > .cuenta-create {
   flex-basis: 100%;
   margin-top: 8px;
+}
+
+/* Chips de stats arriba de las columnas Pendientes/Resueltos — reusa
+   .admin-stat-row/.admin-stat (ya definidos arriba para Ventas) tal cual,
+   más una línea chica con el desglose 1★-5★ que no encaja en ese patrón de
+   "número grande + label". */
+.admin-support-stats-dist {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* Dos columnas (Pendientes / Resueltos) lado a lado en pantallas anchas,
+   apiladas debajo de ese ancho — mismo breakpoint que .admin-grid más abajo
+   para que las dos reglas responsivas de esta página cambien juntas. */
+.admin-support-columns {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.admin-support-col {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.admin-support-col h4 {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0 0 6px;
+}
+
+/* Scroll acotado independiente del cupo "Mostrar más": una vez que se
+   desoculta todo, la lista sigue pudiendo ser larga y necesita su propio
+   límite de alto. */
+.admin-support-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .admin-support-columns {
+    flex-direction: column;
+  }
 }
 
 /* Botón sin chrome que hace de encabezado clickeable de una fila de
@@ -4970,29 +5088,42 @@ label.it-step-notify-sub {
 }
 
 /* Card de resultado del lookup (o del cupón ya pendiente al recargar la
-   página) — info del cupón + el switch para activarlo/cancelarlo. */
+   página) — info del cupón + el switch para activarlo/cancelarlo.
+   Diseñado para parecer un cupón/ticket de verdad: borde punteado, fondo
+   cálido (accent-soft), y un efecto de línea perforada que divide el cupón
+   del "stub" de activación (similar a un talón de entrada). */
 .cuenta-coupon-result {
   margin-top: 14px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
+  padding: 16px 18px;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 20px;
   flex-wrap: wrap;
 }
 
 .cuenta-coupon-result p {
   margin: 0;
   flex: 1 1 200px;
+  font-weight: 700;
+  font-size: 1.05em;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+#cuenta-coupon-result-text {
+  /* Opcional: enfatizar el texto del cupón aún más con un tracking/letter-spacing sutil */
+  letter-spacing: 0.3px;
 }
 
 /* Switch on/off genérico (hoy solo lo usa el cupón, pero sin nombre atado a
    "coupon" por si algo más lo necesita después) — <label class="cuenta-switch">
    envolviendo el <input type="checkbox"> real (accesible, togglea con
-   teclado/lector de pantalla) + el track dibujado con ::before. */
+   teclado/lector de pantalla) + el track dibujado con ::before.
+   Dentro de .cuenta-coupon-result, se ve como el "stub" perforado de un ticket. */
 .cuenta-switch {
   display: inline-flex;
   align-items: center;
@@ -5001,6 +5132,9 @@ label.it-step-notify-sub {
   user-select: none;
   font-size: 14px;
   font-weight: 600;
+  padding-left: 16px;
+  border-left: 2px dashed var(--accent);
+  flex: none;
 }
 
 .cuenta-switch input[type='checkbox'] {

@@ -55,6 +55,7 @@
             <button type="submit" class="cuenta-btn" id="admin-coupon-create">Crear cupón</button>
           </form>
           <ul class="cuenta-list" id="admin-coupon-list"></ul>
+          <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-coupon-show-all">Ver todos</button>
         </div>
 
         <div class="page-card" id="cuenta-admin-sales-card">
@@ -73,6 +74,7 @@
             <div class="admin-inline-row">
               <button type="submit" class="cuenta-btn" id="admin-sales-query">Consultar</button>
               <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-sales-csv">Descargar CSV</button>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-sales-pdf">Descargar informe contable (PDF)</button>
             </div>
             <div class="auth-error hidden" id="admin-sales-error" role="alert"></div>
           </form>
@@ -102,8 +104,21 @@
           <div class="rutina-head">
             <h3>💬 Soporte</h3>
           </div>
-          <ul class="cuenta-list" id="admin-support-list"></ul>
-          <p class="cuenta-empty hidden" id="admin-support-empty">No hay conversaciones abiertas.</p>
+          <div class="admin-support-stats" id="admin-support-stats"></div>
+          <div class="admin-support-columns">
+            <div class="admin-support-col">
+              <h4>Pendientes <span id="admin-support-pending-count"></span></h4>
+              <ul class="cuenta-list admin-support-scroll" id="admin-support-pending-list"></ul>
+              <p class="cuenta-empty hidden" id="admin-support-pending-empty">No hay conversaciones abiertas.</p>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-support-pending-show-all">Mostrar más</button>
+            </div>
+            <div class="admin-support-col">
+              <h4>Resueltos <span id="admin-support-resolved-count"></span></h4>
+              <ul class="cuenta-list admin-support-scroll" id="admin-support-resolved-list"></ul>
+              <p class="cuenta-empty hidden" id="admin-support-resolved-empty">Todavía no hay conversaciones resueltas.</p>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-support-resolved-show-all">Mostrar más</button>
+            </div>
+          </div>
         </div>
       </div>
     </main>

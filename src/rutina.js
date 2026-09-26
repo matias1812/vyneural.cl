@@ -28,6 +28,25 @@ import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js
 // a nivel de página, así que acá solo hace falta el chequeo de plan (ver
 // src/ui/premium-gate.js, mismo criterio que el generador y /cuenta).
 import { isPremiumUser, openPremiumRequired } from './ui/premium-gate.js';
+import { celebrateBurst } from './ui/celebrate.js';
+
+// Refuerzo positivo puntual, UNA sola vez por navegador/dispositivo: la
+// primera alarma o el primer itinerario que el usuario crea. No hay canvas
+// #starfield en /rutina (ver celebrate.js), así que este es el efecto
+// liviano dedicado. La bandera es compartida entre ambos caminos (alarma
+// suelta vía wireReminderForm y paso-con-horario vía wireItineraryForm):
+// dispara la primera vez que ocurra CUALQUIERA de los dos, no una vez por
+// camino.
+const FIRST_SCHEDULE_CELEBRATED_KEY = 'vyneural_celebrated_first_schedule';
+function celebrateFirstScheduleOnce(anchorEl) {
+  try {
+    if (localStorage.getItem(FIRST_SCHEDULE_CELEBRATED_KEY)) return;
+    localStorage.setItem(FIRST_SCHEDULE_CELEBRATED_KEY, '1');
+  } catch (_) {
+    return; // localStorage no disponible (modo privado, etc.) — sin bandera, mejor no celebrar.
+  }
+  celebrateBurst(anchorEl);
+}
 
 // Sanitización: los nombres de frecuencias/itinerarios vienen del usuario
 // (backend), nunca se inyectan sin escapar.
@@ -1122,6 +1141,7 @@ function wireItineraryForm() {
       const submitBtn = document.getElementById('itinerary-submit');
       if (submitBtn) submitBtn.disabled = true;
       try {
+        const wasCreating = !editingItineraryId;
         if (editingItineraryId) {
           await updateItinerary(editingItineraryId, { name: name.slice(0, 120), description: desc, day_of_week, items });
         } else {
@@ -1130,6 +1150,12 @@ function wireItineraryForm() {
         cancelEditItinerary();
         closeItineraryModal();
         loadItineraries();
+        // Primer itinerario del usuario (nunca en una edición) — ver
+        // celebrateFirstScheduleOnce arriba. Ancla al botón "＋ Crear
+        // itinerario", que sigue visible en la página tras cerrarse el modal.
+        if (wasCreating) {
+          celebrateFirstScheduleOnce(document.getElementById('itinerary-open-btn'));
+        }
         // En la APK, sin esto el recordatorio recién guardado esperaba el
         // próximo ciclo de sync nativo (~5 min) para programarse en el
         // reloj del sistema — si el horario elegido caía antes, nunca
@@ -1374,6 +1400,9 @@ function wireReminderForm() {
           ? 'Recordatorio guardado — activá las notificaciones para que te avise.'
           : 'Recordatorio guardado ✓',
       );
+      // Primera alarma del usuario (ver celebrateFirstScheduleOnce arriba) —
+      // ancla al botón submit, todavía visible acá antes de cerrar el <details>.
+      celebrateFirstScheduleOnce(submitBtn);
       form.reset();
       if (customRow) customRow.classList.add('hidden');
       document.querySelectorAll('#reminder-days .day-chip').forEach((b) => {

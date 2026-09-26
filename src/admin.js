@@ -9,16 +9,19 @@
 // deje de hacer este archivo.
 
 import './site.css';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 import { me } from './api/auth.js';
 import {
   listCoupons, createCoupon, updateCoupon,
 } from './api/billing.js';
 import {
   getSalesSummary, downloadSalesCsv,
-  listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium,
-  listAdminSupportConversations, getAdminSupportMessages, sendAdminSupportMessage,
+  listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium, refundUserPayment,
+  listAdminSupportConversations, getAdminSupportMessages, sendAdminSupportMessage, getAdminSupportStats,
 } from './api/admin.js';
 import { openSupportSocket } from './api/support-ws-client.js';
+import { confirmModal, notifyModal } from './ui/confirm-modal.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -43,6 +46,12 @@ function fmtDate(iso) {
   }
 }
 
+// Mismo patrón que comments.js/cuenta.js: se ven de entrada
+// ADMIN_COUPON_VISIBLE_BY_DEFAULT, el resto queda en el DOM oculto por CSS
+// hasta tocar "Ver todos" — nunca se vuelve a pedir la lista al backend.
+const ADMIN_COUPON_VISIBLE_BY_DEFAULT = 8;
+let couponsExpanded = false;
+
 async function loadAdminCoupons() {
   const list = $('admin-coupon-list');
   if (!list) return;
@@ -59,13 +68,15 @@ function renderAdminCouponList(coupons) {
   if (!list) return;
   if (!coupons || !coupons.length) {
     list.innerHTML = '<li>Todavía no hay cupones creados.</li>';
+    renderAdminCouponShowAllButton([]);
     return;
   }
   list.innerHTML = coupons
-    .map((c) => {
+    .map((c, i) => {
       const limit = c.max_redemptions != null ? `${c.times_redeemed}/${c.max_redemptions}` : `${c.times_redeemed}`;
       const label = c.label ? ` — ${escapeHtml(c.label)}` : '';
-      return `<li>
+      const hiddenCls = !couponsExpanded && i >= ADMIN_COUPON_VISIBLE_BY_DEFAULT ? ' hidden' : '';
+      return `<li class="${hiddenCls.trim()}">
         <code>${escapeHtml(c.code)}</code>${label} · ${c.trial_days}d · usado ${limit}
         <button type="button" class="cuenta-btn admin-coupon-toggle" data-code="${escapeHtml(c.code)}" data-active="${c.active}">
           ${c.active ? 'Desactivar' : 'Activar'}
@@ -86,9 +97,33 @@ function renderAdminCouponList(coupons) {
       }
     });
   });
+  renderAdminCouponShowAllButton(coupons);
+}
+
+function renderAdminCouponShowAllButton(coupons) {
+  const btn = $('admin-coupon-show-all');
+  if (!btn) return;
+  const hiddenCount = coupons.length - ADMIN_COUPON_VISIBLE_BY_DEFAULT;
+  if (couponsExpanded || hiddenCount <= 0) {
+    btn.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('hidden');
+  btn.textContent = `Ver todos (${coupons.length})`;
+}
+
+function wireAdminCouponShowAllButton() {
+  const btn = $('admin-coupon-show-all');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    couponsExpanded = true;
+    document.querySelectorAll('#admin-coupon-list .hidden').forEach((li) => li.classList.remove('hidden'));
+    btn.classList.add('hidden');
+  });
 }
 
 function wireAdminCouponForm() {
+  wireAdminCouponShowAllButton();
   const form = $('admin-coupon-form');
   const errorEl = $('admin-coupon-error');
   if (!form) return;
@@ -175,9 +210,139 @@ async function loadAdminSalesSummary() {
   }
 }
 
+// Rasteriza public/icon.svg a un PNG en un <canvas> offscreen para poder
+// pasarlo a doc.addImage() (jsPDF no soporta SVG nativo sin un plugin
+// aparte). Si algo falla en el camino, devuelve null y el PDF se genera
+// igual, solo que sin el logo — nunca debe bloquear el informe completo.
+async function rasterizeLogoToPngDataUrl() {
+  try {
+    const res = await fetch('/icon.svg');
+    if (!res.ok) return null;
+    const svgText = await res.text();
+    const svgUrl = `data:image/svg+xml;base64,${btoa(svgText)}`;
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = svgUrl;
+    });
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, size, size);
+    return canvas.toDataURL('image/png');
+  } catch (_) {
+    return null;
+  }
+}
+
+// Informe contable en PDF, 100% client-side (sin pasar por el backend).
+// Reutiliza el mismo getSalesSummary() que ya alimenta el resumen en
+// pantalla — el PDF es simplemente otra vista de los mismos datos.
+async function downloadSalesPdf(from, to) {
+  const summary = await getSalesSummary(from, to);
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const headTop = 15;
+
+  const logoDataUrl = await rasterizeLogoToPngDataUrl();
+  let textX = 14;
+  if (logoDataUrl) {
+    try {
+      doc.addImage(logoDataUrl, 'PNG', 14, headTop - 4, 16, 16);
+      textX = 34;
+    } catch (_) {
+      // Si addImage falla igual seguimos con el header solo texto.
+      textX = 14;
+    }
+  }
+
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(16);
+  doc.text('Vyneural SpA', textX, headTop + 4);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10);
+  doc.text('RUT 78.505.157-2', textX, headTop + 10);
+
+  const periodText = (from || to)
+    ? `Período: ${from || '…'} a ${to || '…'}`
+    : 'Todo el historial';
+  const generatedText = `Generado: ${new Date().toLocaleString('es-CL')}`;
+  doc.setFontSize(10);
+  doc.text(periodText, pageWidth - 14, headTop + 4, { align: 'right' });
+  doc.text(generatedText, pageWidth - 14, headTop + 10, { align: 'right' });
+
+  let cursorY = headTop + 20;
+  doc.setDrawColor(200);
+  doc.line(14, cursorY, pageWidth - 14, cursorY);
+  cursorY += 10;
+
+  doc.setFontSize(12);
+  doc.setFont(undefined, 'bold');
+  doc.text(`Total recaudado: ${fmtMoney(summary.total_revenue)}`, 14, cursorY);
+  cursorY += 7;
+  doc.text(`Cantidad de pagos: ${summary.payment_count ?? 0}`, 14, cursorY);
+  doc.setFont(undefined, 'normal');
+  cursorY += 10;
+
+  const channelBody = Object.entries(summary.by_channel || {})
+    .map(([k, v]) => [ADMIN_CHANNEL_LABELS[k] || k, fmtMoney(v.revenue), String(v.count ?? 0)]);
+  doc.autoTable({
+    startY: cursorY,
+    head: [['Canal', 'Ingresos', 'Pagos']],
+    body: channelBody.length ? channelBody : [['Sin datos.', '-', '-']],
+    theme: 'grid',
+    styles: { fontSize: 10 },
+    headStyles: { fillColor: [60, 60, 60] },
+  });
+  cursorY = doc.lastAutoTable.finalY + 10;
+
+  const planBody = Object.entries(summary.by_plan || {})
+    .map(([k, v]) => [ADMIN_PLAN_LABELS[k] || k, fmtMoney(v.revenue), String(v.count ?? 0)]);
+  doc.autoTable({
+    startY: cursorY,
+    head: [['Plan', 'Ingresos', 'Pagos']],
+    body: planBody.length ? planBody : [['Sin datos.', '-', '-']],
+    theme: 'grid',
+    styles: { fontSize: 10 },
+    headStyles: { fillColor: [60, 60, 60] },
+  });
+  cursorY = doc.lastAutoTable.finalY + 10;
+
+  doc.setFontSize(11);
+  doc.setFont(undefined, 'normal');
+  doc.text(
+    `Reembolsos: ${summary.refunded_count ?? 0} pagos por un total de ${fmtMoney(summary.refunded_amount)}`,
+    14,
+    cursorY,
+  );
+
+  // Pie de página (número de página + leyenda) en todas las páginas ya
+  // generadas — se hace en un segundo paso recorriendo doc.setPage() en vez
+  // de depender del hook didDrawPage de autotable, que difiere entre
+  // versiones del plugin.
+  const totalPages = doc.internal.getNumberOfPages();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  for (let i = 1; i <= totalPages; i += 1) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text('Documento generado automáticamente — Vyneural SpA', 14, pageHeight - 10);
+    doc.text(`Página ${i} de ${totalPages}`, pageWidth - 14, pageHeight - 10, { align: 'right' });
+    doc.setTextColor(0);
+  }
+
+  const stampFrom = from || 'inicio';
+  const stampTo = to || 'hoy';
+  doc.save(`vyneural-informe-contable-${stampFrom}_${stampTo}.pdf`);
+}
+
 function wireAdminSalesForm() {
   const form = $('admin-sales-form');
   const csvBtn = $('admin-sales-csv');
+  const pdfBtn = $('admin-sales-pdf');
   const errorEl = $('admin-sales-error');
   if (!form) return;
   form.addEventListener('submit', (e) => {
@@ -213,6 +378,27 @@ function wireAdminSalesForm() {
         }
       } finally {
         csvBtn.disabled = false;
+      }
+    });
+  }
+  if (pdfBtn) {
+    // Mismo patrón defensivo que el botón CSV justo arriba, pero el PDF se
+    // arma 100% client-side (ver downloadSalesPdf) — no hay descarga
+    // autenticada acá, solo otra llamada a getSalesSummary().
+    pdfBtn.addEventListener('click', async () => {
+      if (errorEl) errorEl.classList.add('hidden');
+      const from = $('admin-sales-from').value || undefined;
+      const to = $('admin-sales-to').value || undefined;
+      pdfBtn.disabled = true;
+      try {
+        await downloadSalesPdf(from, to);
+      } catch (err) {
+        if (errorEl) {
+          errorEl.textContent = (err && err.detail) || 'No se pudo generar el PDF.';
+          errorEl.classList.remove('hidden');
+        }
+      } finally {
+        pdfBtn.disabled = false;
       }
     });
   }
@@ -279,9 +465,39 @@ function wireAdminUserRows(list) {
           const payments = await getUserPayments(userId);
           ul.innerHTML = payments.length
             ? payments
-                .map((p) => `<li>${fmtDateOrDash(p.authorized_at || p.created_at)} · ${escapeHtml(ADMIN_PLAN_LABELS[p.plan] || p.plan)} · ${fmtMoney(p.amount)} ${escapeHtml(p.currency)} · ${escapeHtml(p.status)}</li>`)
+                .map((p) => `<li class="admin-payment-row" data-payment-id="${escapeHtml(p.id)}">
+                  <span>${fmtDateOrDash(p.authorized_at || p.created_at)} · ${escapeHtml(ADMIN_PLAN_LABELS[p.plan] || p.plan)} · ${fmtMoney(p.amount)} ${escapeHtml(p.currency)} · ${escapeHtml(p.status)}</span>
+                  ${p.status === 'authorized' ? `<button type="button" class="cuenta-btn cuenta-btn-danger admin-payment-refund" data-payment-id="${escapeHtml(p.id)}">Reembolsar</button>` : ''}
+                </li>`)
                 .join('')
             : '<li>Sin pagos registrados.</li>';
+          ul.querySelectorAll('.admin-payment-refund').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+              const paymentId = btn.dataset.paymentId;
+              const userEmail = row.querySelector('.cuenta-item-body b')?.textContent || '';
+              const ok = await confirmModal({
+                title: 'Reembolsar pago',
+                text: `¿Reembolsar este pago a ${userEmail}? Esto revierte su Premium si estaba activo por este pago.`,
+                confirmLabel: 'Reembolsar',
+                danger: true,
+              });
+              if (!ok) return;
+              btn.disabled = true;
+              try {
+                await refundUserPayment(userId, paymentId);
+                paymentsDetails.dataset.loaded = '0'; // fuerza recarga de la lista de pagos al re-expandir
+                paymentsDetails.open = false;
+                paymentsDetails.open = true; // re-dispara el 'toggle' → recarga con el estado actualizado
+                await loadAdminUsers(); // refresca también la línea de estado Premium del usuario en la fila
+              } catch (err) {
+                btn.disabled = false;
+                await notifyModal({
+                  title: 'No se pudo reembolsar',
+                  text: (err && err.detail) || 'reintentá en unos segundos',
+                });
+              }
+            });
+          });
         } catch (_) {
           ul.innerHTML = '<li>No se pudo cargar el historial de pagos.</li>';
           paymentsDetails.dataset.loaded = '0';
@@ -410,6 +626,14 @@ let adminSupportLastSeenAt = null;
 // se pintaría dos veces en el chat del admin.
 let adminSeenMessageIds = new Set();
 let adminSocketHandle = null;
+
+// "Mostrar más" — mismo patrón que comments.js::VISIBLE_BY_DEFAULT/expanded:
+// los items de más allá del cupo quedan en el DOM pero ocultos por CSS, y el
+// botón solo los desoculta (nunca vuelve a pedir nada al backend). Pendientes
+// y Resueltos son listas independientes, cada una con su propio flag.
+const ADMIN_SUPPORT_VISIBLE_BY_DEFAULT = 5;
+let adminSupportPendingExpanded = false;
+let adminSupportResolvedExpanded = false;
 
 function stopAdminSupportPolling() {
   if (adminSupportPollTimer) {
@@ -560,6 +784,19 @@ function renderAdminSupportRow(c) {
   </li>`;
 }
 
+/** Fila de solo lectura para una conversación YA cerrada — el backend purga
+ * el texto de los mensajes al cerrar (data-minimization), así que acá no hay
+ * panel de chat ni wiring, solo email + rating (★) + fecha de cierre. */
+function renderAdminSupportResolvedRow(c) {
+  const rating = c.rating || 0;
+  return `<li class="cuenta-item">
+    <div class="cuenta-item-body">
+      <b>${escapeHtml(c.user_email || '')}</b>
+      <small>${'★'.repeat(rating)}${'☆'.repeat(5 - rating)} · cerrado ${fmtDateOrDash(c.closed_at)}</small>
+    </div>
+  </li>`;
+}
+
 function wireAdminSupportRows(list) {
   list.querySelectorAll('.admin-support-row').forEach((li) => {
     const conversationId = li.dataset.conversationId;
@@ -602,24 +839,147 @@ function wireAdminSupportRows(list) {
   });
 }
 
-async function loadAdminSupportConversations() {
-  const list = $('admin-support-list');
-  const empty = $('admin-support-empty');
+/** Aplica el cupo "Mostrar más" (oculta por CSS más allá de
+ * ADMIN_SUPPORT_VISIBLE_BY_DEFAULT, sin sacarlos del DOM) y deja el botón
+ * correspondiente listo — mismo mecanismo que comments.js::renderShowAllButton,
+ * pero parametrizado porque acá hay dos listas independientes. */
+function applyAdminSupportShowMore(list, items, expanded, showAllBtn) {
+  if (list) {
+    list.querySelectorAll('li').forEach((li, i) => {
+      if (!expanded && i >= ADMIN_SUPPORT_VISIBLE_BY_DEFAULT) li.classList.add('hidden');
+    });
+  }
+  if (!showAllBtn) return;
+  const hiddenCount = items.length - ADMIN_SUPPORT_VISIBLE_BY_DEFAULT;
+  if (expanded || hiddenCount <= 0) {
+    showAllBtn.classList.add('hidden');
+    return;
+  }
+  showAllBtn.classList.remove('hidden');
+  showAllBtn.textContent = `Mostrar más (${hiddenCount})`;
+}
+
+function wireAdminSupportShowMoreButtons() {
+  const pendingBtn = $('admin-support-pending-show-all');
+  const resolvedBtn = $('admin-support-resolved-show-all');
+  if (pendingBtn) {
+    pendingBtn.addEventListener('click', () => {
+      adminSupportPendingExpanded = true;
+      const list = $('admin-support-pending-list');
+      if (list) list.querySelectorAll('li.hidden').forEach((li) => li.classList.remove('hidden'));
+      pendingBtn.classList.add('hidden');
+    });
+  }
+  if (resolvedBtn) {
+    resolvedBtn.addEventListener('click', () => {
+      adminSupportResolvedExpanded = true;
+      const list = $('admin-support-resolved-list');
+      if (list) list.querySelectorAll('li.hidden').forEach((li) => li.classList.remove('hidden'));
+      resolvedBtn.classList.add('hidden');
+    });
+  }
+}
+
+/** Orden "más antiguo primero" por actividad — usa last_message_at si está
+ * (conversaciones abiertas casi siempre lo tienen), si no created_at. No hay
+ * campo en la respuesta que diga quién mandó el último mensaje, así que esto
+ * es una aproximación deliberada de "necesita atención antes" (a más tiempo
+ * quieto, más urgente) en vez de distinguir "esperando al admin" con certeza. */
+function sortAdminSupportPendingByActivity(items) {
+  return [...items].sort((a, b) => {
+    const ta = new Date(a.last_message_at || a.created_at || 0).getTime();
+    const tb = new Date(b.last_message_at || b.created_at || 0).getTime();
+    return ta - tb;
+  });
+}
+
+async function loadAdminSupportPending() {
+  const list = $('admin-support-pending-list');
+  const empty = $('admin-support-pending-empty');
+  const countEl = $('admin-support-pending-count');
+  const showAllBtn = $('admin-support-pending-show-all');
   if (!list) return;
   try {
-    const conversations = await listAdminSupportConversations();
-    const items = conversations && conversations.items ? conversations.items : conversations || [];
+    const conversations = await listAdminSupportConversations('open');
+    const raw = conversations && conversations.items ? conversations.items : conversations || [];
+    const items = sortAdminSupportPendingByActivity(raw);
+    if (countEl) countEl.textContent = items.length ? `(${items.length})` : '';
     if (!items.length) {
       list.innerHTML = '';
       if (empty) empty.classList.remove('hidden');
+      if (showAllBtn) showAllBtn.classList.add('hidden');
       return;
     }
     if (empty) empty.classList.add('hidden');
     list.innerHTML = items.map(renderAdminSupportRow).join('');
     wireAdminSupportRows(list);
+    applyAdminSupportShowMore(list, items, adminSupportPendingExpanded, showAllBtn);
   } catch (_) {
     list.innerHTML = '<li>No se pudo cargar la lista de conversaciones.</li>';
   }
+}
+
+async function loadAdminSupportResolved() {
+  const list = $('admin-support-resolved-list');
+  const empty = $('admin-support-resolved-empty');
+  const countEl = $('admin-support-resolved-count');
+  const showAllBtn = $('admin-support-resolved-show-all');
+  if (!list) return;
+  try {
+    const conversations = await listAdminSupportConversations('closed');
+    const items = conversations && conversations.items ? conversations.items : conversations || [];
+    if (countEl) countEl.textContent = items.length ? `(${items.length})` : '';
+    if (!items.length) {
+      list.innerHTML = '';
+      if (empty) empty.classList.remove('hidden');
+      if (showAllBtn) showAllBtn.classList.add('hidden');
+      return;
+    }
+    if (empty) empty.classList.add('hidden');
+    list.innerHTML = items.map(renderAdminSupportResolvedRow).join('');
+    applyAdminSupportShowMore(list, items, adminSupportResolvedExpanded, showAllBtn);
+  } catch (_) {
+    list.innerHTML = '<li>No se pudo cargar la lista de conversaciones resueltas.</li>';
+  }
+}
+
+function renderAdminSupportStats(stats) {
+  const el = $('admin-support-stats');
+  if (!el) return;
+  if (!stats) {
+    el.innerHTML = '';
+    return;
+  }
+  const avg = stats.average_rating == null ? '—' : stats.average_rating.toFixed(1);
+  const dist = stats.rating_distribution || {};
+  const distLine = [1, 2, 3, 4, 5].map((r) => `★${r}: ${dist[String(r)] ?? 0}`).join(' · ');
+  el.innerHTML = `
+    <div class="admin-stat-row">
+      <div class="admin-stat"><strong>${stats.pending_count ?? 0}</strong><span>Pendientes</span></div>
+      <div class="admin-stat"><strong>${stats.resolved_count ?? 0}</strong><span>Resueltos</span></div>
+      <div class="admin-stat"><strong>${avg}/5</strong><span>Calificación promedio</span></div>
+    </div>
+    <div class="admin-support-stats-dist">${distLine}</div>`;
+}
+
+async function loadAdminSupportStats() {
+  try {
+    const stats = await getAdminSupportStats();
+    renderAdminSupportStats(stats);
+  } catch (_) {
+    renderAdminSupportStats(null);
+  }
+}
+
+// Las 3 llamadas son independientes — una falla no debe tapar a las otras
+// (mismo criterio defensivo que loadAdminUsers/loadAdminSalesSummary: cada
+// loadAdminSupport* ya atrapa su propio error).
+async function loadAdminSupport() {
+  await Promise.all([
+    loadAdminSupportPending(),
+    loadAdminSupportResolved(),
+    loadAdminSupportStats(),
+  ]);
 }
 
 // ── Arranque de la página ────────────────────────────────────────────────
@@ -652,7 +1012,8 @@ async function init() {
   wireAdminSalesForm();
   loadAdminUsers();
   wireAdminUsersForm();
-  loadAdminSupportConversations();
+  wireAdminSupportShowMoreButtons();
+  loadAdminSupport();
 }
 
 init();

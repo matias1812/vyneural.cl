@@ -27,6 +27,7 @@ import { freqCoverSVG } from './ui/freq-cover.js';
 import { requestPermission } from './notifications.js';
 import { listDevices, forgetDevice, reportDevice } from './api/devices.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
+import { celebrateBurst } from './ui/celebrate.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -134,6 +135,13 @@ async function wireVerify() {
 
 // ── Listas ──────────────────────────────────────────────────────────────────
 
+// Mismo patrón que comments.js (VISIBLE_BY_DEFAULT + "Ver todos"), pero
+// compartido por las 4 listas de esta página vía renderList() — se ven
+// primero, "expandida" se guarda por id de lista (no un solo booleano) para
+// no pisar el estado de una lista al expandir otra.
+const LIST_VISIBLE_BY_DEFAULT = 6;
+const expandedLists = new Set();
+
 function renderList(id, emptyId, items, renderItem, emptyText) {
   const ul = $(id);
   const empty = $(emptyId);
@@ -145,11 +153,41 @@ function renderList(id, emptyId, items, renderItem, emptyText) {
     empty.classList.toggle('hidden', has);
     if (!has && emptyText) empty.textContent = emptyText;
   }
-  (items || []).forEach((item) => {
+  const isExpanded = expandedLists.has(id);
+  (items || []).forEach((item, i) => {
     const li = document.createElement('li');
     li.className = 'cuenta-item';
+    // Oculto por CSS, no ausente del DOM — "Ver todos" solo desoculta, nunca
+    // vuelve a pedir nada al backend (mismo criterio que comments.js).
+    if (!isExpanded && i >= LIST_VISIBLE_BY_DEFAULT) li.classList.add('hidden');
     li.innerHTML = renderItem(item);
     ul.appendChild(li);
+  });
+  renderListShowAllButton(id, items || [], isExpanded);
+}
+
+function renderListShowAllButton(id, items, isExpanded) {
+  const btn = $(`${id}-show-all`);
+  if (!btn) return;
+  const hiddenCount = items.length - LIST_VISIBLE_BY_DEFAULT;
+  if (isExpanded || hiddenCount <= 0) {
+    btn.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('hidden');
+  btn.textContent = `Ver todos (${items.length})`;
+}
+
+function wireListShowAllButtons() {
+  ['cuenta-favs', 'cuenta-freqs', 'cuenta-alarms', 'cuenta-devices'].forEach((id) => {
+    const btn = $(`${id}-show-all`);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      expandedLists.add(id);
+      const ul = $(id);
+      if (ul) ul.querySelectorAll('.hidden').forEach((li) => li.classList.remove('hidden'));
+      btn.classList.add('hidden');
+    });
   });
 }
 
@@ -663,6 +701,10 @@ function wireCouponButton() {
           const result = await redeemCoupon(code);
           if (result && result.ok) {
             if (switchLabel) switchLabel.textContent = 'Activado';
+            // Refuerzo positivo puntual: cupón activado con éxito. No hay
+            // canvas #starfield en /cuenta (ver celebrate.js), así que este
+            // es el efecto liviano dedicado, no spawnFireworks.
+            celebrateBurst(switchEl.closest('.cuenta-switch') || switchEl);
           } else {
             switchEl.checked = false;
             if (errorEl) {
@@ -1191,6 +1233,7 @@ function init() {
   wirePushButtons();
   wireOneclickButtons();
   wireCouponButton();
+  wireListShowAllButtons();
 
   // Tras el diálogo nativo de permisos (o volver de Ajustes) el WebView
   // reaparece: re-leer el estado real del permiso y repintar la tarjeta.

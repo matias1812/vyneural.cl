@@ -41,9 +41,10 @@
 // la única señal disponible para el banner mientras el chat está cerrado.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { getOrCreateConversation, sendMessage, getMessages, rateConversation } from './api/support.js';
+import { getOrCreateConversation, sendMessage, getMessages, rateConversation, reportBug } from './api/support.js';
 import { ApiError } from './api/client.js';
 import { openSupportSocket } from './api/support-ws-client.js';
+import { isPremiumUser } from './ui/premium-gate.js';
 
 const LS_CONV_ID = 'vyneural_support_conversation_id';
 const LS_LAST_SEEN = 'vyneural_support_last_seen_at';
@@ -154,6 +155,25 @@ function build() {
         <button type="button" id="support-rate-skip" class="support-rate-link">Finalizar sin comentario</button>
         <button type="button" id="support-rate-back" class="support-rate-link">Volver al chat</button>
       </div>
+
+      <div id="support-report-view" hidden>
+        <p class="support-sub">
+          El chat en vivo es para cuentas Premium. Contanos qué pasó y te
+          respondemos por correo apenas podamos.
+        </p>
+        <form id="support-report-form" class="support-form-stack" novalidate>
+          <textarea
+            id="support-report-input"
+            name="mensaje"
+            maxlength="2000"
+            rows="4"
+            placeholder="Contanos qué problema encontraste…"
+            required
+          ></textarea>
+          <button type="submit" id="support-report-send" class="support-send">Enviar reporte</button>
+        </form>
+        <p id="support-report-status" class="support-status hidden"></p>
+      </div>
     </div>
   `;
 
@@ -206,6 +226,7 @@ export function initSupportChat() {
   const { fab, modal } = build();
   const chatView = modal.querySelector('#support-chat-view');
   const rateView = modal.querySelector('#support-rate-view');
+  const reportView = modal.querySelector('#support-report-view');
   const messagesEl = modal.querySelector('#support-messages');
   const statusEl = modal.querySelector('#support-status');
   const form = modal.querySelector('#support-form');
@@ -219,6 +240,10 @@ export function initSupportChat() {
   const cannedListEl = modal.querySelector('#support-canned-list');
   const starInputEl = modal.querySelector('#support-star-input');
   const connDotEl = modal.querySelector('#support-conn-dot');
+  const reportForm = modal.querySelector('#support-report-form');
+  const reportInput = modal.querySelector('#support-report-input');
+  const reportSendBtn = modal.querySelector('#support-report-send');
+  const reportStatusEl = modal.querySelector('#support-report-status');
 
   let conversationId = lsGet(LS_CONV_ID) || null;
   let lastSeenAt = lsGet(LS_LAST_SEEN) || null;
@@ -263,14 +288,16 @@ export function initSupportChat() {
     });
   }
 
-  function showStatus(text, isError) {
-    statusEl.textContent = text;
-    statusEl.classList.toggle('support-status-error', !!isError);
-    statusEl.classList.remove('hidden');
+  // `el` es opcional (default: el status del chat en vivo) — el formulario
+  // de reporte reusa exactamente el mismo patrón contra su propio <p>.
+  function showStatus(text, isError, el = statusEl) {
+    el.textContent = text;
+    el.classList.toggle('support-status-error', !!isError);
+    el.classList.remove('hidden');
   }
-  function clearStatus() {
-    statusEl.classList.add('hidden');
-    statusEl.textContent = '';
+  function clearStatus(el = statusEl) {
+    el.classList.add('hidden');
+    el.textContent = '';
   }
 
   function persist() {
@@ -409,20 +436,47 @@ export function initSupportChat() {
     backgroundTimer = setInterval(backgroundCheck, BACKGROUND_POLL_MS);
   }
 
-  function open() {
+  // Premium gatea el chat en vivo (ver cabecera del módulo): un usuario
+  // logueado pero no-Premium ve el formulario de reporte simple en vez del
+  // chat, y nunca llega a abrir una conversación ni a pollear/conectar el
+  // socket. isPremiumUser() se llama recién ACÁ (al hacer click en el FAB),
+  // nunca de entrada al cargar el módulo — así ningún visitante paga el
+  // round-trip de red solo por tener la burbuja montada en la página.
+  async function open() {
     modal.hidden = false;
     document.body.classList.add('support-modal-open');
-    chatView.hidden = false;
-    rateView.hidden = true;
     hideBanner();
     stopBackgroundPoll();
-    window.setTimeout(() => input && input.focus(), 30);
-    ensureConversation().then((ok) => {
-      if (ok) {
-        startForegroundPoll();
-        startSocket();
-      }
-    });
+
+    if (!isLoggedIn()) {
+      // Sin sesión: comportamiento intacto — se deja que ensureConversation()
+      // (que ya chequea isLoggedIn() primero) muestre el gate de "iniciá
+      // sesión" de siempre sobre la vista de chat. Nunca se llega a chequear
+      // premium ni se muestra el formulario de reporte a un anónimo.
+      chatView.hidden = false;
+      reportView.hidden = true;
+      rateView.hidden = true;
+      window.setTimeout(() => input && input.focus(), 30);
+      ensureConversation();
+      return;
+    }
+
+    const premium = await isPremiumUser();
+    chatView.hidden = !premium;
+    reportView.hidden = premium;
+    rateView.hidden = true;
+
+    if (premium) {
+      window.setTimeout(() => input && input.focus(), 30);
+      ensureConversation().then((ok) => {
+        if (ok) {
+          startForegroundPoll();
+          startSocket();
+        }
+      });
+    } else {
+      window.setTimeout(() => reportInput && reportInput.focus(), 30);
+    }
   }
   function close() {
     modal.hidden = true;
@@ -480,6 +534,32 @@ export function initSupportChat() {
       sendBtn.disabled = false;
       input.disabled = false;
       input.focus();
+    }
+  });
+
+  // Reporte simple (no-Premium): un solo POST, sin conversación ni id — nada
+  // que persistir en localStorage ni que pollear después de esto.
+  reportForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const message = (reportInput.value || '').trim();
+    if (!message) return;
+    reportSendBtn.disabled = true;
+    reportInput.disabled = true;
+    try {
+      await reportBug(message, window.location.pathname);
+      reportInput.value = '';
+      showStatus('Listo, recibimos tu reporte — te respondemos por correo apenas podamos.', false, reportStatusEl);
+    } catch (err) {
+      // Mismo criterio que el envío del chat: mensaje legible, sin reintento
+      // automático.
+      if (err instanceof ApiError && err.status === 429) {
+        showStatus('Estás enviando demasiadas solicitudes — esperá un momento.', true, reportStatusEl);
+      } else {
+        showStatus((err && err.detail) || 'No se pudo enviar el reporte.', true, reportStatusEl);
+      }
+    } finally {
+      reportSendBtn.disabled = false;
+      reportInput.disabled = false;
     }
   });
 

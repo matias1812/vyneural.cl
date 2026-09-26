@@ -97,6 +97,13 @@ if (navToggle && navLinks) {
   });
 }
 
+// ---------------------------------------------------------------- Link de descarga (Android)
+// Inyecta el enlace de descarga en la nav, visible solo en la web (no dentro de la APK).
+const navLinksEl = document.getElementById('site-links');
+if (navLinksEl && !navLinksEl.querySelector('.nav-android-link')) {
+  navLinksEl.insertAdjacentHTML('beforeend', '<a href="/descargar" class="nav-android-link">📱 Android</a>');
+}
+
 // ---------------------------------------------------------------- Año del footer
 document.querySelectorAll('[data-year]').forEach((el) => {
   el.textContent = String(new Date().getFullYear());
