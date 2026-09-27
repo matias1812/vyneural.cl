@@ -1,0 +1,1 @@
+import{z as t,h as l,f as r,p as e}from"./support-ws-client-3JxHKOQu.js";const p=()=>t("/api/v1/alarms"),c=a=>e("/api/v1/alarms",a),o=(a,s)=>r(`/api/v1/alarms/${a}`,s),i=a=>l(`/api/v1/alarms/${a}`);export{c,i as d,p as l,o as u};

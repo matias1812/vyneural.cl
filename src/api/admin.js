@@ -7,7 +7,7 @@
 // frontend. Mismo patrón que billing.js: funciones finas sobre
 // get/post de client.js, sin lógica de UI acá.
 
-import { get, post, getText, API_BASE } from './client.js';
+import { get, post, patch, getText, API_BASE } from './client.js';
 
 // ── Ventas (backend/app/routers/admin_sales.py) ─────────────────────────────
 
@@ -48,6 +48,25 @@ export async function downloadSalesCsv(fromDate, toDate) {
   return getText(getSalesExportPath(fromDate, toDate));
 }
 
+// ── Contabilidad mensual / F29 (backend/app/routers/admin_accounting.py) ───
+
+export async function getMonthlyAccounting(year, month) {
+  return get(`/api/v1/admin/accounting/monthly?year=${year}&month=${month}`);
+}
+
+/** Path relativo del CSV — mismo motivo que getSalesExportPath: el backend
+ * exige Authorization: Bearer, así que un <a href> plano no sirve para
+ * descargar directo (ver downloadMonthlyAccountingCsv más abajo). */
+export function getMonthlyAccountingCsvPath(year, month) {
+  return `/api/v1/admin/accounting/monthly/export.csv?year=${year}&month=${month}`;
+}
+
+/** Descarga autenticada del CSV (texto crudo) — mismo patrón que
+ * downloadSalesCsv: admin.js lo vuelca a un Blob para disparar la descarga. */
+export async function downloadMonthlyAccountingCsv(year, month) {
+  return getText(getMonthlyAccountingCsvPath(year, month));
+}
+
 // ── Usuarios (backend/app/routers/admin_users.py) ───────────────────────────
 
 export async function listAdminUsers(search, page = 1, perPage = 10) {
@@ -60,6 +79,13 @@ export async function listAdminUsers(search, page = 1, perPage = 10) {
 
 export async function getUserPayments(userId) {
   return get(`/api/v1/admin/users/${encodeURIComponent(userId)}/payments`);
+}
+
+/** Edita correo y/o nombre visible de un usuario (ver admin.js →
+ * "Editar correo / nombre" en la fila de Usuarios). Body solo con lo que
+ * cambió — ambos campos opcionales, ver backend/app/routers/admin_users.py. */
+export async function updateAdminUser(userId, body) {
+  return patch(`/api/v1/admin/users/${encodeURIComponent(userId)}`, body);
 }
 
 export async function grantUserPremium(userId, body) {
@@ -95,4 +121,13 @@ export async function getAdminSupportMessages(conversationId, since) {
 
 export async function sendAdminSupportMessage(conversationId, content) {
   return post(`/api/v1/admin/support/conversations/${encodeURIComponent(conversationId)}/messages`, { content });
+}
+
+// Marca una conversación PENDIENTE como resuelta sin cerrarla — el cierre
+// real (status="closed", purga de mensajes) sigue siendo exclusivo del
+// usuario al calificar (rateConversation, ver api/support.js). Esto solo
+// deja una marca para que el widget del usuario lo mande directo a
+// calificar la próxima vez que abra el chat (ver support-chat.js).
+export async function resolveSupportConversation(conversationId) {
+  return post(`/api/v1/admin/support/conversations/${encodeURIComponent(conversationId)}/resolve`, {});
 }

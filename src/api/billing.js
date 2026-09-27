@@ -66,6 +66,10 @@ export async function updateCoupon(code, body) {
   return patch(`/api/v1/admin/coupons/${encodeURIComponent(code)}`, body);
 }
 
+export async function deleteCoupon(code) {
+  return del(`/api/v1/admin/coupons/${encodeURIComponent(code)}`);
+}
+
 /** Resumen de ventas/comisión por cupón (referidos) — ver admin.html →
  * "📈 Ventas por cupón". Un item por cupón, incluidos los sin actividad;
  * from/to opcionales, omitir ambos trae todo el historial. */

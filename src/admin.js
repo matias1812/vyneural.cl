@@ -13,16 +13,20 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { me } from './api/auth.js';
 import {
-  listCoupons, createCoupon, updateCoupon, getAdminCouponSales,
+  listCoupons, createCoupon, updateCoupon, deleteCoupon, getAdminCouponSales,
 } from './api/billing.js';
 import {
   getSalesSummary, downloadSalesCsv,
-  listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium, refundUserPayment,
+  getMonthlyAccounting, downloadMonthlyAccountingCsv,
+  listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium, refundUserPayment, updateAdminUser,
   listAdminSupportConversations, getAdminSupportMessages, sendAdminSupportMessage, getAdminSupportStats,
+  resolveSupportConversation,
 } from './api/admin.js';
 import { openSupportSocket } from './api/support-ws-client.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
-import { CONTRACT_TEMPLATES, fillContractTemplate } from './ui/contract-templates.js';
+import {
+  CONTRACT_TEMPLATES, fillClauses, defaultClausesFor,
+} from './ui/contract-templates.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -78,14 +82,40 @@ function renderAdminCouponList(coupons) {
       const label = c.label ? ` — ${escapeHtml(c.label)}` : '';
       const hiddenCls = !couponsExpanded && i >= ADMIN_COUPON_VISIBLE_BY_DEFAULT ? ' hidden' : '';
       const inactiveCls = c.active ? '' : ' admin-coupon-row-inactive';
-      return `<li class="admin-coupon-row${inactiveCls}${hiddenCls}">
-        <div class="admin-coupon-row-main">
-          <code class="admin-coupon-code">${escapeHtml(c.code)}</code>
-          <small class="admin-coupon-meta">${label} · ${c.trial_days}d · usado ${limit} · ${c.commission_rate}% comisión</small>
+      return `<li class="admin-coupon-row${inactiveCls}${hiddenCls}" data-code="${escapeHtml(c.code)}">
+        <div class="admin-coupon-row-top">
+          <div class="admin-coupon-row-main">
+            <code class="admin-coupon-code">${escapeHtml(c.code)}</code>
+            <small class="admin-coupon-meta">${label} · ${c.trial_days}d · usado ${limit} · ${c.commission_rate}% comisión</small>
+          </div>
+          <div class="admin-coupon-row-actions">
+            <button type="button" class="cuenta-btn cuenta-btn-ghost admin-coupon-edit-toggle">✏️ Editar</button>
+            <button type="button" class="cuenta-btn admin-coupon-toggle" data-code="${escapeHtml(c.code)}" data-active="${c.active}">
+              ${c.active ? 'Desactivar' : 'Activar'}
+            </button>
+            <button type="button" class="cuenta-btn cuenta-btn-danger admin-coupon-delete">🗑 Eliminar</button>
+          </div>
         </div>
-        <button type="button" class="cuenta-btn admin-coupon-toggle" data-code="${escapeHtml(c.code)}" data-active="${c.active}">
-          ${c.active ? 'Desactivar' : 'Activar'}
-        </button>
+        <div class="admin-coupon-edit-form hidden">
+          <div class="cuenta-form-row">
+            <label>Etiqueta
+              <input type="text" class="admin-coupon-edit-label" maxlength="120" value="${escapeHtml(c.label || '')}" />
+            </label>
+            <label>Días de trial
+              <input type="number" min="1" class="admin-coupon-edit-days" value="${c.trial_days}" />
+            </label>
+          </div>
+          <div class="cuenta-form-row">
+            <label>Límite de usos
+              <input type="number" min="1" class="admin-coupon-edit-max" value="${c.max_redemptions ?? ''}" />
+            </label>
+            <label>Comisión (%)
+              <input type="number" min="0" max="100" step="0.5" class="admin-coupon-edit-commission" value="${c.commission_rate}" />
+            </label>
+          </div>
+          <button type="button" class="cuenta-btn admin-coupon-edit-save">Guardar cambios</button>
+          <div class="auth-error hidden admin-coupon-edit-error" role="alert"></div>
+        </div>
       </li>`;
     })
     .join('');
@@ -101,6 +131,67 @@ function renderAdminCouponList(coupons) {
         btn.disabled = false;
       }
     });
+  });
+  list.querySelectorAll('.admin-coupon-row').forEach((li) => {
+    const code = li.dataset.code;
+    const editToggleBtn = li.querySelector('.admin-coupon-edit-toggle');
+    const editForm = li.querySelector('.admin-coupon-edit-form');
+    if (editToggleBtn && editForm) {
+      editToggleBtn.addEventListener('click', () => {
+        editForm.classList.toggle('hidden');
+      });
+    }
+    const saveBtn = li.querySelector('.admin-coupon-edit-save');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        const errorEl = li.querySelector('.admin-coupon-edit-error');
+        if (errorEl) errorEl.classList.add('hidden');
+        const label = li.querySelector('.admin-coupon-edit-label').value.trim();
+        const days = parseInt(li.querySelector('.admin-coupon-edit-days').value, 10);
+        const maxRaw = li.querySelector('.admin-coupon-edit-max').value.trim();
+        const commission = parseFloat(li.querySelector('.admin-coupon-edit-commission').value);
+        const body = {
+          label: label || null,
+          trial_days: days,
+          max_redemptions: maxRaw ? parseInt(maxRaw, 10) : null,
+          commission_rate: commission,
+        };
+        saveBtn.disabled = true;
+        try {
+          await updateCoupon(code, body);
+          await loadAdminCoupons();
+        } catch (err) {
+          saveBtn.disabled = false;
+          if (errorEl) {
+            errorEl.textContent = (err && err.detail) || 'No se pudo guardar los cambios.';
+            errorEl.classList.remove('hidden');
+          }
+        }
+      });
+    }
+    const deleteBtn = li.querySelector('.admin-coupon-delete');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        const ok = await confirmModal({
+          title: 'Eliminar cupón',
+          text: `¿Eliminar el cupón ${code}? Esto no se puede deshacer.`,
+          confirmLabel: 'Eliminar',
+          danger: true,
+        });
+        if (!ok) return;
+        deleteBtn.disabled = true;
+        try {
+          await deleteCoupon(code);
+          await loadAdminCoupons();
+        } catch (err) {
+          deleteBtn.disabled = false;
+          await notifyModal({
+            title: 'No se pudo eliminar',
+            text: (err && err.detail) || 'Reintentá en unos segundos.',
+          });
+        }
+      });
+    }
   });
   renderAdminCouponShowAllButton(coupons);
 }
@@ -489,6 +580,23 @@ function renderAdminUserRow(u) {
       <small>Alta ${fmtDateOrDash(u.created_at)} · último login ${fmtDateOrDash(u.last_login_at)}${u.last_seen_platform ? ` · ${escapeHtml(u.last_seen_platform)}` : ''}</small>
     </div>
     <details class="cuenta-create">
+      <summary>Editar correo / nombre</summary>
+      <div class="cuenta-form">
+        <div class="cuenta-form-row">
+          <label>Correo
+            <input type="email" class="admin-user-edit-email" value="${escapeHtml(u.email)}" />
+          </label>
+          <label>Nombre
+            <input type="text" class="admin-user-edit-name" value="${escapeHtml(u.display_name || '')}" />
+          </label>
+        </div>
+        <div class="admin-inline-row">
+          <button type="button" class="cuenta-btn admin-user-edit-save">Guardar</button>
+        </div>
+        <div class="auth-error hidden admin-user-edit-error" role="alert"></div>
+      </div>
+    </details>
+    <details class="cuenta-create admin-user-payments-details">
       <summary>Ver pagos</summary>
       <ul class="cuenta-list admin-user-payments-list"><li>Cargando…</li></ul>
     </details>
@@ -520,7 +628,11 @@ function renderAdminUserRow(u) {
 function wireAdminUserRows(list) {
   list.querySelectorAll('.admin-user-row').forEach((row) => {
     const userId = row.dataset.userId;
-    const paymentsDetails = row.querySelector('details');
+    // Selector específico (no el primer <details> de la fila): el nuevo
+    // bloque "Editar correo / nombre" se agregó ANTES de "Ver pagos" en el
+    // template de renderAdminUserRow, así que `row.querySelector('details')`
+    // a secas ahora apuntaría al bloque equivocado.
+    const paymentsDetails = row.querySelector('.admin-user-payments-details');
     if (paymentsDetails) {
       paymentsDetails.addEventListener('toggle', async () => {
         if (!paymentsDetails.open || paymentsDetails.dataset.loaded === '1') return;
@@ -626,6 +738,32 @@ function wireAdminUserRows(list) {
           }
         } finally {
           revokeBtn.disabled = false;
+        }
+      });
+    }
+    const editEmailInput = row.querySelector('.admin-user-edit-email');
+    const editNameInput = row.querySelector('.admin-user-edit-name');
+    const editSaveBtn = row.querySelector('.admin-user-edit-save');
+    const editErrorEl = row.querySelector('.admin-user-edit-error');
+    if (editSaveBtn) {
+      editSaveBtn.addEventListener('click', async () => {
+        if (editErrorEl) editErrorEl.classList.add('hidden');
+        const newEmail = editEmailInput.value.trim();
+        const newName = editNameInput.value.trim();
+        const body = {};
+        if (newEmail) body.email = newEmail;
+        if (newName) body.display_name = newName;
+        if (!Object.keys(body).length) return;
+        editSaveBtn.disabled = true;
+        try {
+          await updateAdminUser(userId, body);
+          await loadAdminUsers();
+        } catch (err) {
+          editSaveBtn.disabled = false;
+          if (editErrorEl) {
+            editErrorEl.textContent = (err && err.detail) || 'No se pudo guardar los cambios.';
+            editErrorEl.classList.remove('hidden');
+          }
         }
       });
     }
@@ -849,6 +987,8 @@ function showResolvedConversation(conversationId) {
   $('admin-support-chat-header-email').textContent = (item && item.user_email) || '';
   $('admin-support-chat-messages').classList.add('hidden');
   $('admin-support-reply-form').classList.add('hidden');
+  const resolveBtnClosed = $('admin-support-resolve-btn');
+  if (resolveBtnClosed) resolveBtnClosed.classList.add('hidden');
   const info = $('admin-support-chat-resolved-info');
   info.classList.remove('hidden');
   const rating = (item && item.rating) || 0;
@@ -866,6 +1006,8 @@ async function openAdminSupportConversation(conversationId) {
   $('admin-support-chat-resolved-info').classList.add('hidden');
   $('admin-support-chat-messages').classList.remove('hidden');
   $('admin-support-reply-form').classList.remove('hidden');
+  const resolveBtnOpen = $('admin-support-resolve-btn');
+  if (resolveBtnOpen) resolveBtnOpen.classList.remove('hidden');
   renderAdminSupportList(); // refresca el resaltado is-active
 
   adminSupportLastSeenAt = null;
@@ -1053,6 +1195,38 @@ function wireAdminSupportReplyForm() {
   }
 }
 
+/** Botón "Marcar resuelta" del header del chat, wireado UNA sola vez (igual
+ * criterio que wireAdminSupportReplyForm) — manda al conversationId
+ * actualmente abierto (adminSupportOpenId). El backend rechaza con 404 si
+ * la conversación ya no está "open" (ver admin_mark_resolved), pero el
+ * botón solo es visible/clickeable mientras se está viendo una conversación
+ * PENDIENTE en vivo (ver openAdminSupportConversation/showResolvedConversation,
+ * que lo muestran/ocultan igual que admin-support-reply-form). */
+function wireAdminSupportResolveButton() {
+  const btn = $('admin-support-resolve-btn');
+  if (!btn) return;
+  const defaultLabel = btn.textContent;
+  btn.addEventListener('click', async () => {
+    if (!adminSupportOpenId) return;
+    btn.disabled = true;
+    try {
+      await resolveSupportConversation(adminSupportOpenId);
+      btn.textContent = 'Resuelta ✓';
+      loadAdminSupportPending();
+      window.setTimeout(() => {
+        btn.textContent = defaultLabel;
+        btn.disabled = false;
+      }, 2000);
+    } catch (err) {
+      btn.disabled = false;
+      await notifyModal({
+        title: 'No se pudo marcar como resuelta',
+        text: (err && err.detail) || 'Reintentá en unos segundos.',
+      });
+    }
+  });
+}
+
 /** Aplica el cupo "Mostrar más" (oculta por CSS más allá de
  * ADMIN_SUPPORT_VISIBLE_BY_DEFAULT, sin sacarlos del DOM) y deja el botón
  * correspondiente listo — mismo mecanismo que comments.js::renderShowAllButton,
@@ -1161,6 +1335,276 @@ async function loadAdminSupport() {
   ]);
 }
 
+// ── Admin: Contabilidad Mensual / F29 ────────────────────────────────────
+// Vista mensual de ventas con el desglose neto/IVA/comisión que exige el
+// SII para el Formulario 29 de Vyneural SpA (RUT 78.505.157-2, Afecto a
+// IVA) — ver backend/app/routers/admin_accounting.py, que ya hace todo el
+// cálculo (neto = bruto/1.19, iva = bruto-neto, comisión sobre el neto).
+// Este archivo solo pinta lo que el backend devuelve, redondeado a pesos.
+
+// Vocabulario nuevo (no existe en ADMIN_* de arriba): estado real del
+// Payment (ver backend/app/models/payment.py::STATUS_VALUES), traducido
+// para la columna "Estado" de la tabla.
+const ADMIN_ACCOUNTING_STATUS_LABELS = {
+  authorized: 'Pagado',
+  refunded: 'Reembolsado',
+  created: 'Creado',
+  failed: 'Fallido',
+  rejected: 'Rechazado',
+};
+
+function renderMonthlyAccounting(data) {
+  const summaryEl = $('admin-accounting-summary');
+  const f29El = $('admin-accounting-f29-body');
+  const table = $('admin-accounting-table');
+  const tbody = $('admin-accounting-table-body');
+  const emptyEl = $('admin-accounting-empty');
+  if (!summaryEl || !tbody) return;
+
+  if (!data) {
+    summaryEl.innerHTML = '<p class="cuenta-empty">No se pudo cargar la contabilidad del mes.</p>';
+    if (f29El) f29El.innerHTML = '';
+    tbody.innerHTML = '';
+    if (table) table.classList.add('hidden');
+    if (emptyEl) emptyEl.classList.add('hidden');
+    return;
+  }
+
+  const { summary, f29, sales } = data;
+  summaryEl.innerHTML = `
+    <div class="admin-stat-row">
+      <div class="admin-stat"><strong>${fmtMoney(summary.total_gross)}</strong><span>Bruto</span></div>
+      <div class="admin-stat"><strong>${fmtMoney(summary.total_net)}</strong><span>Neto</span></div>
+      <div class="admin-stat"><strong>${fmtMoney(summary.total_iva)}</strong><span>IVA débito</span></div>
+      <div class="admin-stat"><strong>${fmtMoney(summary.total_commission)}</strong><span>Comisiones</span></div>
+      <div class="admin-stat"><strong>${fmtMoney(summary.total_company_net)}</strong><span>Margen neto</span></div>
+    </div>`;
+
+  if (f29El) {
+    f29El.innerHTML = `
+      <p>Código [538] Ventas Afectas a IVA (Neto): <strong>${fmtMoney(f29.code_538_net_sales)}</strong></p>
+      <p>Código [504] Débito Fiscal (IVA 19%): <strong>${fmtMoney(f29.code_504_iva_debit)}</strong></p>
+      <p>Total Comisiones a Terceros: <strong>${fmtMoney(f29.total_referral_commissions)}</strong></p>`;
+  }
+
+  // Empty state explícito pedido por el dueño del producto — ver
+  // renderAdminCouponSales para el mismo criterio en otra sección.
+  if (!sales || !sales.length) {
+    if (table) table.classList.add('hidden');
+    if (emptyEl) emptyEl.classList.remove('hidden');
+    tbody.innerHTML = '';
+    return;
+  }
+  if (table) table.classList.remove('hidden');
+  if (emptyEl) emptyEl.classList.add('hidden');
+  tbody.innerHTML = sales
+    .map(
+      (r) => `<tr>
+        <td>${fmtDateOrDash(r.date)}</td>
+        <td>${escapeHtml(r.client_email)}</td>
+        <td>${escapeHtml(ADMIN_PLAN_LABELS[r.plan] || r.plan)}</td>
+        <td>${escapeHtml(r.referral_code || '—')}</td>
+        <td>${fmtMoney(r.gross)}</td>
+        <td>${fmtMoney(r.net)}</td>
+        <td>${fmtMoney(r.iva)}</td>
+        <td>${fmtMoney(r.commission)}</td>
+        <td>${fmtMoney(r.company_net)}</td>
+        <td>${escapeHtml(ADMIN_ACCOUNTING_STATUS_LABELS[r.status] || r.status)}</td>
+      </tr>`,
+    )
+    .join('');
+}
+
+async function loadMonthlyAccounting() {
+  const summaryEl = $('admin-accounting-summary');
+  const monthSel = $('admin-accounting-month');
+  const yearInput = $('admin-accounting-year');
+  if (!monthSel || !yearInput) return;
+  const month = parseInt(monthSel.value, 10);
+  const year = parseInt(yearInput.value, 10);
+  if (summaryEl) summaryEl.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
+  try {
+    const data = await getMonthlyAccounting(year, month);
+    renderMonthlyAccounting(data);
+  } catch (_) {
+    renderMonthlyAccounting(null);
+  }
+}
+
+// Informe F29 en PDF, 100% client-side — mismo header (logo + razón social
+// + fecha) y misma cañería jsPDF/autoTable que downloadSalesPdf más arriba,
+// solo con las columnas propias de esta sección.
+async function downloadMonthlyAccountingPdf() {
+  const monthSel = $('admin-accounting-month');
+  const yearInput = $('admin-accounting-year');
+  const month = parseInt(monthSel.value, 10);
+  const year = parseInt(yearInput.value, 10);
+  const monthLabel = monthSel.options[monthSel.selectedIndex]?.text || String(month);
+  const data = await getMonthlyAccounting(year, month);
+  const { summary, f29, sales } = data;
+
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const headTop = 15;
+
+  const logoDataUrl = await rasterizeLogoToPngDataUrl();
+  let textX = 14;
+  if (logoDataUrl) {
+    try {
+      doc.addImage(logoDataUrl, 'PNG', 14, headTop - 4, 16, 16);
+      textX = 34;
+    } catch (_) {
+      textX = 14;
+    }
+  }
+
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(16);
+  doc.text('Vyneural SpA', textX, headTop + 4);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10);
+  doc.text('RUT 78.505.157-2', textX, headTop + 10);
+
+  doc.text(`Período: ${monthLabel} ${year}`, pageWidth - 14, headTop + 4, { align: 'right' });
+  doc.text(`Generado: ${new Date().toLocaleString('es-CL')}`, pageWidth - 14, headTop + 10, { align: 'right' });
+
+  let cursorY = headTop + 20;
+  doc.setDrawColor(200);
+  doc.line(14, cursorY, pageWidth - 14, cursorY);
+  cursorY += 10;
+
+  doc.setFontSize(11);
+  doc.setFont(undefined, 'normal');
+  doc.text(`Bruto: ${fmtMoney(summary.total_gross)}`, 14, cursorY);
+  cursorY += 6;
+  doc.text(`Neto: ${fmtMoney(summary.total_net)}`, 14, cursorY);
+  cursorY += 6;
+  doc.text(`IVA débito: ${fmtMoney(summary.total_iva)}`, 14, cursorY);
+  cursorY += 6;
+  doc.text(`Comisiones: ${fmtMoney(summary.total_commission)}`, 14, cursorY);
+  cursorY += 6;
+  doc.text(`Margen neto: ${fmtMoney(summary.total_company_net)}`, 14, cursorY);
+  cursorY += 10;
+
+  const body = (sales || []).map((r) => [
+    fmtDateOrDash(r.date),
+    r.client_email,
+    ADMIN_PLAN_LABELS[r.plan] || r.plan,
+    r.referral_code || '—',
+    fmtMoney(r.gross),
+    fmtMoney(r.net),
+    fmtMoney(r.iva),
+    fmtMoney(r.commission),
+    fmtMoney(r.company_net),
+  ]);
+  doc.autoTable({
+    startY: cursorY,
+    head: [['Fecha', 'Cliente', 'Plan', 'Referido', 'Bruto', 'Neto', 'IVA', 'Comisión', 'Ingreso Neto']],
+    body: body.length ? body : [['Sin ventas.', '-', '-', '-', '-', '-', '-', '-', '-']],
+    theme: 'grid',
+    styles: { fontSize: 8 },
+    headStyles: { fillColor: [60, 60, 60] },
+  });
+  cursorY = doc.lastAutoTable.finalY + 10;
+
+  doc.setFontSize(11);
+  doc.setFont(undefined, 'bold');
+  doc.text('Resumen para Formulario 29 (SII)', 14, cursorY);
+  cursorY += 7;
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10);
+  doc.text(`Código [538] Ventas Afectas a IVA (Neto): ${fmtMoney(f29.code_538_net_sales)}`, 14, cursorY);
+  cursorY += 6;
+  doc.text(`Código [504] Débito Fiscal (IVA 19%): ${fmtMoney(f29.code_504_iva_debit)}`, 14, cursorY);
+  cursorY += 6;
+  doc.text(`Total Comisiones a Terceros: ${fmtMoney(f29.total_referral_commissions)}`, 14, cursorY);
+
+  // Pie de página en todas las páginas — mismo patrón que downloadSalesPdf.
+  const totalPages = doc.internal.getNumberOfPages();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  for (let i = 1; i <= totalPages; i += 1) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text('Documento generado automáticamente — Vyneural SpA', 14, pageHeight - 10);
+    doc.text(`Página ${i} de ${totalPages}`, pageWidth - 14, pageHeight - 10, { align: 'right' });
+    doc.setTextColor(0);
+  }
+
+  doc.save(`contabilidad-${year}-${String(month).padStart(2, '0')}.pdf`);
+}
+
+function wireMonthlyAccounting() {
+  const form = $('admin-accounting-form');
+  const csvBtn = $('admin-accounting-csv');
+  const pdfBtn = $('admin-accounting-pdf');
+  const errorEl = $('admin-accounting-error');
+  const monthSel = $('admin-accounting-month');
+  const yearInput = $('admin-accounting-year');
+  if (!form || !monthSel || !yearInput) return;
+
+  // Mes actual por default — así la card no aparece vacía la primera vez
+  // que se abre (pedido explícito, no un rango arbitrario).
+  const now = new Date();
+  monthSel.value = String(now.getMonth() + 1);
+  yearInput.value = String(now.getFullYear());
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    loadMonthlyAccounting();
+  });
+
+  if (csvBtn) {
+    // Descarga autenticada — mismo patrón blob que wireAdminSalesForm/csvBtn
+    // más arriba (el backend exige Authorization: Bearer, un <a href> plano
+    // no sirve).
+    csvBtn.addEventListener('click', async () => {
+      if (errorEl) errorEl.classList.add('hidden');
+      const month = parseInt(monthSel.value, 10);
+      const year = parseInt(yearInput.value, 10);
+      csvBtn.disabled = true;
+      try {
+        const csvText = await downloadMonthlyAccountingCsv(year, month);
+        const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `contabilidad-${year}-${String(month).padStart(2, '0')}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      } catch (err) {
+        if (errorEl) {
+          errorEl.textContent = (err && err.detail) || 'No se pudo descargar el CSV.';
+          errorEl.classList.remove('hidden');
+        }
+      } finally {
+        csvBtn.disabled = false;
+      }
+    });
+  }
+
+  if (pdfBtn) {
+    pdfBtn.addEventListener('click', async () => {
+      if (errorEl) errorEl.classList.add('hidden');
+      pdfBtn.disabled = true;
+      try {
+        await downloadMonthlyAccountingPdf();
+      } catch (err) {
+        if (errorEl) {
+          errorEl.textContent = (err && err.detail) || 'No se pudo generar el PDF.';
+          errorEl.classList.remove('hidden');
+        }
+      } finally {
+        pdfBtn.disabled = false;
+      }
+    });
+  }
+
+  loadMonthlyAccounting();
+}
+
 // ── Admin: Generador de contratos ────────────────────────────────────────
 // Sección 100% client-side (mismo patrón que downloadSalesPdf más arriba):
 // el admin elige un tipo de contrato, llena un formulario generado desde
@@ -1174,25 +1618,101 @@ async function loadAdminSupport() {
 // imagen o caer a una línea en blanco.
 const adminContractSigHasContent = { a: false, b: false };
 
-function renderContractFields(templateId) {
+// Cláusulas del contrato actualmente en edición — parte de las cláusulas
+// por defecto del template elegido (defaultClausesFor) pero el admin puede
+// agregar, editar o borrar libremente en memoria antes de exportar. Se
+// resetea cada vez que cambia el TIPO de contrato (ver renderContractFields).
+let adminContractClauses = [];
+
+function renderContractClauses() {
+  const container = $('admin-contract-clauses');
+  if (!container) return;
+  container.innerHTML = adminContractClauses
+    .map(
+      (c, i) => `<div class="admin-contract-clause" data-index="${i}">
+        <input type="text" class="admin-contract-clause-title" placeholder="Título de la cláusula (opcional)" value="${escapeHtml(c.title)}" />
+        <textarea class="admin-contract-clause-body" placeholder="Texto de la cláusula">${escapeHtml(c.body)}</textarea>
+        <button type="button" class="cuenta-btn cuenta-btn-ghost admin-contract-clause-remove">🗑 Eliminar</button>
+      </div>`,
+    )
+    .join('');
+  container.querySelectorAll('.admin-contract-clause').forEach((el) => {
+    const index = Number(el.dataset.index);
+    const titleInput = el.querySelector('.admin-contract-clause-title');
+    const bodyInput = el.querySelector('.admin-contract-clause-body');
+    const removeBtn = el.querySelector('.admin-contract-clause-remove');
+    titleInput.addEventListener('input', () => {
+      adminContractClauses[index].title = titleInput.value;
+      updateContractPreview();
+    });
+    bodyInput.addEventListener('input', () => {
+      adminContractClauses[index].body = bodyInput.value;
+      updateContractPreview();
+    });
+    removeBtn.addEventListener('click', () => {
+      adminContractClauses.splice(index, 1);
+      renderContractClauses();
+      updateContractPreview();
+    });
+  });
+}
+
+function addContractClause() {
+  adminContractClauses.push({ title: '', body: '' });
+  renderContractClauses();
+  updateContractPreview();
+}
+
+// `options.foreignChecked` sólo aplica al template 'affiliate': cuando es
+// true se agregan los `foreignFields` del template al listado y se relabela
+// AFILIADO_RUT con `foreignRutLabel` (ver checkbox AFILIADO_EXTRANJERO más
+// abajo). `options.resetClauses` (default true) controla si se reinician
+// `adminContractClauses` a las por defecto del template — se pone en false
+// cuando esta función se re-invoca a sí misma sólo para refrescar el panel
+// de campos tras tildar/destildar ese checkbox, para no descartar ediciones
+// en curso sobre las OTRAS cláusulas (la cláusula TERCERA se reemplaza aparte,
+// puntualmente, por el listener del checkbox).
+function renderContractFields(templateId, options = {}) {
+  const { foreignChecked = false, resetClauses = true } = options;
   const container = $('admin-contract-fields');
   const template = CONTRACT_TEMPLATES[templateId];
   if (!container || !template) return;
-  container.innerHTML = template.fields
+  const isForeign = templateId === 'affiliate' && !!foreignChecked;
+  const fields = (isForeign && template.foreignFields)
+    ? [...template.fields, ...template.foreignFields]
+    : template.fields;
+  container.innerHTML = fields
     .map((f) => {
       const id = `admin-contract-field-${f.key}`;
       const defaultVal = f.default !== undefined ? f.default : '';
       const placeholder = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : '';
       const required = f.required ? ' required' : '';
+      const label = (isForeign && f.key === 'AFILIADO_RUT' && template.foreignRutLabel)
+        ? template.foreignRutLabel
+        : f.label;
+      if (f.type === 'checkbox') {
+        const checked = f.key === 'AFILIADO_EXTRANJERO' && isForeign ? ' checked' : '';
+        return `<label class="admin-contract-checkbox-field">
+          <input id="${id}" type="checkbox" data-key="${f.key}"${checked} /> ${escapeHtml(label)}
+        </label>`;
+      }
+      if (f.type === 'select') {
+        const optionsHtml = (f.options || [])
+          .map((opt) => `<option value="${escapeHtml(opt)}"${opt === f.default ? ' selected' : ''}>${escapeHtml(opt)}</option>`)
+          .join('');
+        return `<label>${escapeHtml(label)}
+          <select id="${id}" data-key="${f.key}">${optionsHtml}</select>
+        </label>`;
+      }
       if (f.type === 'textarea') {
-        return `<label>${escapeHtml(f.label)}
+        return `<label>${escapeHtml(label)}
           <textarea id="${id}" data-key="${f.key}"${placeholder}${required}>${escapeHtml(defaultVal)}</textarea>
         </label>`;
       }
       const extra = f.type === 'number'
         ? `${f.min !== undefined ? ` min="${f.min}"` : ''}${f.max !== undefined ? ` max="${f.max}"` : ''}`
         : '';
-      return `<label>${escapeHtml(f.label)}
+      return `<label>${escapeHtml(label)}
         <input id="${id}" type="${f.type}" data-key="${f.key}" value="${escapeHtml(defaultVal)}"${placeholder}${required}${extra} />
       </label>`;
     })
@@ -1202,11 +1722,39 @@ function renderContractFields(templateId) {
     el.addEventListener('change', updateContractPreview);
   });
 
+  // Checkbox "¿Afiliado Extranjero?" (sólo existe en el template 'affiliate'):
+  // además del listener genérico de arriba (que ya refresca la vista previa),
+  // necesita re-renderizar el panel de campos completo (para mostrar/ocultar
+  // foreignFields y relabelar AFILIADO_RUT) y reemplazar la cláusula TERCERA
+  // por su versión extranjera/doméstica en el editor de cláusulas.
+  const foreignCheckbox = container.querySelector('[data-key="AFILIADO_EXTRANJERO"]');
+  if (foreignCheckbox) {
+    foreignCheckbox.addEventListener('change', () => {
+      const checked = foreignCheckbox.checked;
+      renderContractFields(templateId, { foreignChecked: checked, resetClauses: false });
+      if (template.foreignClause && template.domesticClauseIndex !== undefined) {
+        adminContractClauses[template.domesticClauseIndex] = checked
+          ? { ...template.foreignClause }
+          : { ...template.clauses[template.domesticClauseIndex] };
+      }
+      renderContractClauses();
+      updateContractPreview();
+    });
+  }
+
   const [sigA, sigB] = template.signatures;
   const labelA = $('admin-contract-sig-label-a');
   const labelB = $('admin-contract-sig-label-b');
   if (labelA && sigA) labelA.textContent = `${sigA.partyLabel} — ${sigA.name || ''}`;
   if (labelB && sigB) labelB.textContent = sigB.partyLabel;
+
+  // Cambiar el TIPO de contrato resetea las cláusulas a las por defecto de
+  // ese template, descartando cualquier edición en curso sobre el tipo
+  // anterior — comportamiento simple y aceptado, no se intenta preservar.
+  if (resetClauses) {
+    adminContractClauses = defaultClausesFor(templateId);
+    renderContractClauses();
+  }
 }
 
 function readContractFormValues(templateId) {
@@ -1214,7 +1762,11 @@ function readContractFormValues(templateId) {
   const values = {};
   if (!container) return values;
   container.querySelectorAll('[data-key]').forEach((el) => {
-    values[el.dataset.key] = el.value;
+    // Checkboxes (p.ej. AFILIADO_EXTRANJERO) son un toggle de UI, no un
+    // token del documento — se lee `.checked` en vez de `.value` por si
+    // algún día se necesita, aunque hoy no se sustituye en ninguna cláusula.
+    // <select> ya expone `.value` igual que un input de texto, sin cambios.
+    values[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value;
   });
   return values;
 }
@@ -1223,12 +1775,14 @@ function updateContractPreview() {
   const templateId = $('admin-contract-type')?.value;
   if (!templateId) return;
   const values = readContractFormValues(templateId);
-  const body = fillContractTemplate(templateId, values);
   const preview = $('admin-contract-preview');
   if (!preview) return;
-  preview.innerHTML = body
-    .split('\n\n')
-    .map((para) => `<p>${escapeHtml(para)}</p>`)
+  const filled = fillClauses(adminContractClauses, values);
+  preview.innerHTML = filled
+    .map((c) => {
+      const titleHtml = c.title ? `<p class="admin-contracts-preview-clause-title">${escapeHtml(c.title)}</p>` : '';
+      return `${titleHtml}<p>${escapeHtml(c.body)}</p>`;
+    })
     .join('');
 
   // La etiqueta de la firma B es dinámica (depende del cliente/afiliado
@@ -1293,7 +1847,6 @@ function wireSignaturePad(canvasId, clearBtnId, sigKey) {
 async function downloadContractPdf() {
   const templateId = $('admin-contract-type').value;
   const values = readContractFormValues(templateId);
-  const body = fillContractTemplate(templateId, values);
   const template = CONTRACT_TEMPLATES[templateId];
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -1331,17 +1884,26 @@ async function downloadContractPdf() {
   doc.text(titleLines, pageWidth / 2, y, { align: 'center' });
   y += titleLines.length * 6 + 8;
 
-  doc.setFont(undefined, 'normal');
   doc.setFontSize(10.5);
-  const paragraphs = body.split('\n\n');
-  for (const para of paragraphs) {
-    const lines = doc.splitTextToSize(para, maxWidth);
-    for (const line of lines) {
+  const filledClauses = fillClauses(adminContractClauses, values);
+  for (const clause of filledClauses) {
+    if (clause.title) {
+      doc.setFont(undefined, 'bold');
+      const titleLines = doc.splitTextToSize(clause.title, maxWidth);
+      for (const line of titleLines) {
+        if (y > pageHeight - 40) { doc.addPage(); y = 20; }
+        doc.text(line, marginX, y);
+        y += 5.5;
+      }
+    }
+    doc.setFont(undefined, 'normal');
+    const bodyLines = doc.splitTextToSize(clause.body, maxWidth);
+    for (const line of bodyLines) {
       if (y > pageHeight - 40) { doc.addPage(); y = 20; }
       doc.text(line, marginX, y);
       y += 5.5;
     }
-    y += 4; // espacio entre párrafos
+    y += 4; // espacio entre cláusulas
   }
 
   // Bloque de firmas — fuerza una página nueva si no queda espacio decente.
@@ -1403,6 +1965,8 @@ function wireAdminContracts() {
   updateContractPreview();
   wireSignaturePad('admin-contract-sig-canvas-a', 'admin-contract-sig-clear-a', 'a');
   wireSignaturePad('admin-contract-sig-canvas-b', 'admin-contract-sig-clear-b', 'b');
+  const addClauseBtn = $('admin-contract-add-clause');
+  if (addClauseBtn) addClauseBtn.addEventListener('click', addContractClause);
   if (downloadBtn) {
     downloadBtn.addEventListener('click', async () => {
       downloadBtn.disabled = true;
@@ -1449,12 +2013,14 @@ async function init() {
   wireAdminCouponForm();
   wireAdminCouponSalesForm();
   wireAdminSalesForm();
+  wireMonthlyAccounting();
   loadAdminUsers();
   wireAdminUsersForm();
   wireAdminContracts();
   wireAdminSupportShowMoreButtons();
   wireAdminSupportTabs();
   wireAdminSupportReplyForm();
+  wireAdminSupportResolveButton();
   loadAdminSupport();
 }
 

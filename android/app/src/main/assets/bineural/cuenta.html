@@ -49,14 +49,14 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/cuenta-CNafduTy.js"></script>
-    <link rel="modulepreload" href="./assets/site-DkS22X6-.js">
+    <script type="module" src="./assets/cuenta-_2y7a--K.js"></script>
+    <link rel="modulepreload" href="./assets/support-ws-client-3JxHKOQu.js">
+    <link rel="modulepreload" href="./assets/site-5wKVRNhS.js">
     <link rel="modulepreload" href="./assets/preload-helper-Dp1pzeXC.js">
-    <link rel="modulepreload" href="./assets/alarms-B6-PgCch.js">
-    <link rel="modulepreload" href="./assets/freq-cover-B3NfDsPR.js">
-    <link rel="modulepreload" href="./assets/billing-Dqu0X67n.js">
+    <link rel="modulepreload" href="./assets/alarms-C2AvNtku.js">
+    <link rel="modulepreload" href="./assets/celebrate-JcoIqu6j.js">
     <link rel="modulepreload" href="./assets/confirm-modal-eBx4xGlb.js">
-    <link rel="stylesheet" href="./assets/site-DPwPq7Gs.css">
+    <link rel="stylesheet" href="./assets/support-ws-client-6myo_Pq3.css">
   </head>
   <body>
     <header class="site-nav">
@@ -159,44 +159,26 @@
 
           <div class="page-card" id="cuenta-coupon-card">
             <div class="rutina-head">
-              <h3>🎟️ Cupones</h3>
+              <h3>🎟️ Código de referido</h3>
             </div>
-            <p class="rutina-hint" id="cuenta-coupon-hint">¿Tenés un código de cupón? Activalo antes de elegir un plan Mensual o Anual para sumar tu mes de Premium gratis (con método de pago validado, cobro automático al terminar el mes de prueba).</p>
+            <p class="rutina-hint" id="cuenta-coupon-hint">¿Tenés un código de referido? Buscalo antes de elegir un plan Mensual o Anual para sumar tu mes de Premium gratis (con método de pago validado, cobro automático al terminar el mes de prueba).</p>
             <div class="cuenta-coupon-row">
-              <input type="text" id="cuenta-coupon-input" placeholder="Código de cupón" maxlength="32" autocapitalize="characters">
-              <button type="button" class="cuenta-btn" id="cuenta-coupon-redeem">Activar</button>
+              <input type="text" id="cuenta-coupon-input" placeholder="Código de referido" aria-label="Código de referido" maxlength="32" autocapitalize="characters">
+              <button type="button" class="cuenta-btn" id="cuenta-coupon-lookup">Buscar</button>
+            </div>
+            <p class="auth-error hidden" id="cuenta-coupon-error" role="alert"></p>
+            <div class="cuenta-coupon-result hidden" id="cuenta-coupon-result">
+              <div class="cuenta-coupon-result-copy">
+                <p class="cuenta-coupon-headline" id="cuenta-coupon-headline"></p>
+                <p class="cuenta-coupon-referrer" id="cuenta-coupon-referrer"></p>
+              </div>
+              <label class="cuenta-switch">
+                <input type="checkbox" id="cuenta-coupon-switch" />
+                <span class="cuenta-switch-track" aria-hidden="true"></span>
+                <span id="cuenta-coupon-switch-label">Activar</span>
+              </label>
             </div>
             <p class="cuenta-empty hidden" id="cuenta-coupon-status"></p>
-          </div>
-
-          <!-- Panel de admin: oculto por CSS por defecto, se muestra solo si
-               profile.email === admin (ver renderAdminCard en cuenta.js) —
-               solo UX, la seguridad real es require_admin_user en el backend. -->
-          <div class="page-card hidden" id="cuenta-admin-card">
-            <div class="rutina-head">
-              <h3>🛠️ Admin — Cupones</h3>
-            </div>
-            <form id="admin-coupon-form" class="cuenta-form">
-              <div class="cuenta-form-row">
-                <label>Código
-                  <input id="admin-coupon-code" type="text" maxlength="32" autocapitalize="characters" required />
-                </label>
-                <label>Etiqueta (opcional)
-                  <input id="admin-coupon-label" type="text" maxlength="120" placeholder="Influencer X" />
-                </label>
-              </div>
-              <div class="cuenta-form-row">
-                <label>Días de trial
-                  <input id="admin-coupon-days" type="number" min="1" max="365" value="30" required />
-                </label>
-                <label>Límite de usos (opcional)
-                  <input id="admin-coupon-max" type="number" min="1" />
-                </label>
-              </div>
-              <div class="auth-error hidden" id="admin-coupon-error" role="alert"></div>
-              <button type="submit" class="cuenta-btn" id="admin-coupon-create">Crear cupón</button>
-            </form>
-            <ul class="cuenta-list" id="admin-coupon-list"></ul>
           </div>
 
           <div class="card-grid">
@@ -207,6 +189,7 @@
                 Todavía no sincronizaste favoritos. Tocá la estrella de un estado en el
                 generador con la sesión iniciada y aparecerá acá.
               </p>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="cuenta-favs-show-all">Ver todos</button>
             </div>
 
             <div class="page-card">
@@ -216,6 +199,7 @@
                 Sin frecuencias guardadas. Se crean desde el modo "Personalizado" del
                 <a href="/">generador</a> o al armar un paso de tu <a href="/rutina">itinerario</a>.
               </p>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="cuenta-freqs-show-all">Ver todos</button>
             </div>
           </div>
 
@@ -226,6 +210,7 @@
               Sin alarmas sincronizadas. Las alarmas de la web/PWA son datos: la
               ejecución siempre depende del cliente.
             </p>
+            <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="cuenta-alarms-show-all">Ver todos</button>
           </div>
 
           <!-- La gestión de itinerarios (crear/pausar/eliminar/personalizar
@@ -261,6 +246,7 @@
             </p>
             <ul class="rutina-list" id="cuenta-devices"></ul>
             <p class="cuenta-empty" id="cuenta-devices-empty"></p>
+            <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="cuenta-devices-show-all">Ver todos</button>
           </div>
 
           <div class="page-card">

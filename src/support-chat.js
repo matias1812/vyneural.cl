@@ -392,6 +392,19 @@ export function initSupportChat() {
     if (appended) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  // Mismos 3-4 pasos que el click de "Cerrar y calificar" (rateOpenBtn más
+  // abajo) — factorizado para poder llamarlo también desde ensureConversation
+  // cuando el admin ya marcó la conversación como resuelta (ver
+  // admin_marked_resolved más abajo), sin duplicar la lógica de reseteo de
+  // estrellas/errores.
+  function showRateView() {
+    chatView.hidden = true;
+    rateView.hidden = false;
+    rating = 0;
+    paintStars();
+    rateErrorEl.classList.add('hidden');
+  }
+
   async function ensureConversation() {
     if (!isLoggedIn()) {
       showStatus('Necesitás iniciar sesión para usar el chat de soporte.', true);
@@ -412,6 +425,14 @@ export function initSupportChat() {
       persist();
       hideBanner();
       clearStatus();
+      // El admin ya marcó esta conversación como resuelta (ver
+      // routers/support.py::admin_mark_resolved) — en vez de la vista normal
+      // de chat, mandar directo a calificar: es la señal para que el usuario
+      // la cierre (rate_conversation sigue siendo lo único que la cierra
+      // realmente del lado servidor).
+      if (conv.admin_marked_resolved) {
+        showRateView();
+      }
       return true;
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
@@ -625,13 +646,7 @@ export function initSupportChat() {
     rateErrorEl.classList.add('hidden');
   });
 
-  rateOpenBtn.addEventListener('click', () => {
-    chatView.hidden = true;
-    rateView.hidden = false;
-    rating = 0;
-    paintStars();
-    rateErrorEl.classList.add('hidden');
-  });
+  rateOpenBtn.addEventListener('click', showRateView);
   rateBackBtn.addEventListener('click', () => {
     rateView.hidden = true;
     chatView.hidden = false;
