@@ -1168,11 +1168,27 @@ function wireAdminSupportResolveButton() {
   const defaultLabel = btn.textContent;
   btn.addEventListener('click', async () => {
     if (!adminSupportOpenId) return;
+    const resolvedId = adminSupportOpenId;
     btn.disabled = true;
     try {
-      await resolveSupportConversation(adminSupportOpenId);
+      await resolveSupportConversation(resolvedId);
+      await loadAdminSupportPending();
+      // Sin mensajes: el backend la cierra directo en vez de solo flagearla
+      // (ver admin_mark_resolved) -- ya no aparece en Pendientes. Refrescar
+      // Resueltos y volver el panel a la vista vacía, mismo criterio que el
+      // botón "volver" (closeAdminSupportConversation + chat-empty).
+      const stillPending = adminSupportPendingItems.some((c) => c.id === resolvedId);
+      if (!stillPending) {
+        loadAdminSupportResolved();
+        closeAdminSupportConversation();
+        $('admin-support-chat-empty').classList.remove('hidden');
+        $('admin-support-chat-active').classList.add('hidden');
+        renderAdminSupportList();
+        btn.textContent = defaultLabel;
+        btn.disabled = false;
+        return;
+      }
       btn.textContent = 'Resuelta ✓';
-      loadAdminSupportPending();
       window.setTimeout(() => {
         btn.textContent = defaultLabel;
         btn.disabled = false;
