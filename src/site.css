@@ -5930,7 +5930,17 @@ label.it-step-notify-sub {
 .admin-contract-clause-label {
   font-weight: 600;
   color: var(--text);
-  flex-shrink: 0;
+  /* Antes flex-shrink:0 + sin manejo de overflow — un título largo (p.ej.
+     "PRIMERO (OBJETO Y CÓDIGO DE REFERIDO)") no encogía ni truncaba y se
+     salía del header del acordeón cerrado en un celular angosto. Ahora
+     encoge junto con .admin-contract-clause-preview y trunca con ellipsis
+     en vez de desbordar. */
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .admin-contract-clause-preview {
