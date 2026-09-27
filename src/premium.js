@@ -13,6 +13,7 @@ import {
   premiumStatus,
   oneclickStatus,
   verifyGooglePlayPurchase,
+  getGooglePlayCouponCode,
   GOOGLE_PLAY_PRODUCT_IDS,
   ANDROID_PACKAGE_ID,
 } from './api/billing.js';
@@ -251,8 +252,33 @@ function openAuth(mode) {
 function showError(msg) {
   const el = $('premium-error');
   if (!el) return;
+  // Mismo patrón que cuenta.js::wireEditProfile (showOk/showErr sobre el
+  // mismo elemento, alternando .auth-error/.auth-ok) — por si el elemento
+  // quedó en modo "éxito" de una llamada anterior a showGooglePlayCode().
+  el.classList.remove('auth-ok');
+  el.classList.add('auth-error');
   el.textContent = msg;
   el.classList.toggle('hidden', !msg);
+}
+
+// Cupón pendiente canjeado por un código promocional de Play Store (ver
+// buyPlan() → getGooglePlayCouponCode). Reusa #premium-error como banner de
+// éxito en vez de agregar un elemento nuevo a premium.html — mismo patrón
+// que cuenta.js::wireEditProfile/wirePasswordForm (.auth-ok + innerHTML,
+// porque acá hace falta un <a> real de canje, no solo texto). El link abre
+// en el navegador del sistema (Android: shouldOverrideUrlLoading en
+// MainActivity.kt ya intercepta cualquier http(s):// clickeado dentro de la
+// WebView y lo manda a startActivity(ACTION_VIEW) — mismo mecanismo que el
+// link de "gestionar en Google Play" de renderPlans, nada nuevo que armar).
+function showGooglePlayCode(code, redeemUrl) {
+  const el = $('premium-error');
+  if (!el) return;
+  el.classList.remove('auth-error');
+  el.classList.add('auth-ok');
+  el.innerHTML = `${ICONS.gem} Tu código de Google Play: <strong>${code}</strong> — canjealo para sumar tu mes de Premium gratis:
+    <a href="${redeemUrl}" target="_blank" rel="noopener">Canjear en Google Play</a>.
+    Una vez canjeado, tu Premium se activa solo (puede tardar unos minutos).`;
+  el.classList.remove('hidden');
 }
 
 function renderActiveBanner(status) {
@@ -464,6 +490,27 @@ async function buyPlan(plan, btn, activePlanKey) {
     // platform/native-bridge.js::startPlayPurchase y billing/google_play.py
     // del lado backend. Reemplaza TODO el flujo de abajo, nunca lo mezcla.
     if (detectNativeBridge()?.platform === 'android') {
+      // Play ya no ofrece "Ofertas" programáticas para dar trial (ver
+      // getGooglePlayCouponCode en api/billing.js) — si hay un cupón
+      // pendiente activado, el trial se resuelve canjeando un código
+      // promocional de Play Store en vez de cobrar de entrada con Play
+      // Billing (eso sería cobrarle a alguien que activó un cupón esperando
+      // su mes gratis). Vitalicio no tiene trial — pago único, el backend ni
+      // acepta ese plan acá (ver schemas/payment.py::GooglePlayCodeRequest)
+      // — así que sigue directo al camino normal de compra de abajo.
+      if (plan !== 'lifetime' && lastPremiumStatus && lastPremiumStatus.has_pending_coupon) {
+        clearTimeout(timer);
+        btn.textContent = 'Generando tu código…';
+        const codeResult = await getGooglePlayCouponCode(plan);
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+        if (codeResult && codeResult.ok) {
+          showGooglePlayCode(codeResult.code, codeResult.redeem_url);
+        } else {
+          showError((codeResult && codeResult.reason) || 'No pudimos generar tu código de Google Play. Reintentá en unos segundos.');
+        }
+        return;
+      }
       const productId = GOOGLE_PLAY_PRODUCT_IDS[plan];
       const purchase = await startPlayPurchase(productId, plan !== 'lifetime');
       if (purchase.cancelled) {

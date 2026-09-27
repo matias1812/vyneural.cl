@@ -117,6 +117,21 @@ export async function verifyGooglePlayPurchase(purchaseToken, productId) {
   return post('/api/v1/payments/google-play/verify', { purchase_token: purchaseToken, product_id: productId });
 }
 
+/** Cupón pendiente + canal Google Play: Play ya no ofrece "Ofertas"
+ * programáticas para dar trial, así que acá el trial se resuelve canjeando
+ * un código promocional de Play Store en vez de comprar directo con Play
+ * Billing (ver premium.js::buyPlan, que la usa SOLO cuando hay un cupón
+ * pendiente activado). Solo `plan` monthly/annual — vitalicio no tiene
+ * trial y el backend rechaza ese valor acá (ver schemas/payment.py::
+ * GooglePlayCodeRequest). Nunca lanza por un motivo de negocio esperado
+ * (sin cupón activado, cupón agotado, sin códigos disponibles, etc.):
+ * siempre 200, devuelve { ok, reason, code, plan, redeem_url } — `reason`
+ * ya viene en español, listo para mostrar. Nunca limpia el cupón pendiente
+ * (eso lo hace /google-play/verify cuando Google confirma la compra). */
+export async function getGooglePlayCouponCode(plan) {
+  return post('/api/v1/payments/coupon/google-play-code', { plan });
+}
+
 // IDs de producto/suscripción tal como se crean en Play Console — mismo
 // mapeo que el backend (app/billing/plans.py::GOOGLE_PLAY_PRODUCT_IDS) y
 // que android/app/build.gradle::applicationId. Actualizar los tres juntos

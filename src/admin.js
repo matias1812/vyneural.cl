@@ -51,6 +51,13 @@ function fmtDate(iso) {
   }
 }
 
+/** Comprueba si un valor está vacío después de eliminar caracteres Unicode
+ * invisibles (Format Cf y Control Cc) — más robusto que solo `.trim()` que
+ * no elimina U+200B, U+200C, U+200D, U+FEFF, U+2060, etc. */
+function isBlank(value) {
+  return value.replace(/[\p{Cf}\p{Cc}]/gu, '').length === 0;
+}
+
 // Mismo patrón que comments.js/cuenta.js: se ven de entrada
 // ADMIN_COUPON_VISIBLE_BY_DEFAULT, el resto queda en el DOM oculto por CSS
 // hasta tocar "Ver todos" — nunca se vuelve a pedir la lista al backend.
@@ -1114,7 +1121,7 @@ function wireAdminSupportReplyForm() {
     const input = $('admin-support-reply-input');
     const errorEl = $('admin-support-reply-error');
     const content = input.value.trim();
-    if (!content) return;
+    if (isBlank(content)) return;
     if (errorEl) errorEl.classList.add('hidden');
     const submitBtn = form.querySelector('button[type="submit"]');
     submitBtn.disabled = true;

@@ -93,6 +93,13 @@ function fmtTime(iso) {
   }
 }
 
+/** Comprueba si un valor está vacío después de eliminar caracteres Unicode
+ * invisibles (Format Cf y Control Cc) — más robusto que solo `.trim()` que
+ * no elimina U+200B, U+200C, U+200D, U+FEFF, U+2060, etc. */
+function isBlank(value) {
+  return value.replace(/[\p{Cf}\p{Cc}]/gu, '').length === 0;
+}
+
 /** Clave de "día calendario" local (no UTC) para agrupar mensajes por fecha
  * — mismo criterio que admin.js::chatDayKey, duplicado acá porque este
  * archivo no comparte módulo con el panel de admin. */
@@ -575,7 +582,7 @@ export function initSupportChat() {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const content = (input.value || '').trim();
-    if (!content) return;
+    if (isBlank(content)) return;
     if (!conversationId) {
       showStatus('Todavía no se pudo abrir el chat — probá de nuevo en un momento.', true);
       return;
@@ -608,7 +615,7 @@ export function initSupportChat() {
   reportForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const message = (reportInput.value || '').trim();
-    if (!message) return;
+    if (isBlank(message)) return;
     reportSendBtn.disabled = true;
     reportInput.disabled = true;
     try {
