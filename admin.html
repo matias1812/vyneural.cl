@@ -100,23 +100,40 @@
           <div id="admin-sales-summary"></div>
         </div>
 
-        <div class="page-card" id="cuenta-admin-support-card">
+        <div class="page-card admin-support-card-full" id="cuenta-admin-support-card">
           <div class="rutina-head">
             <h3>💬 Soporte</h3>
+            <p class="admin-support-summary-line" id="admin-support-summary-line"></p>
           </div>
-          <div class="admin-support-stats" id="admin-support-stats"></div>
-          <div class="admin-support-columns">
-            <div class="admin-support-col">
-              <h4>Pendientes <span id="admin-support-pending-count"></span></h4>
-              <ul class="cuenta-list admin-support-scroll" id="admin-support-pending-list"></ul>
-              <p class="cuenta-empty hidden" id="admin-support-pending-empty">No hay conversaciones abiertas.</p>
-              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-support-pending-show-all">Mostrar más</button>
+          <div class="admin-support-layout">
+            <div class="admin-support-list-pane">
+              <div class="admin-support-tabs" role="tablist">
+                <button type="button" class="admin-support-tab is-active" data-tab="open" role="tab" aria-selected="true">Pendientes <span id="admin-support-tab-open-count"></span></button>
+                <button type="button" class="admin-support-tab" data-tab="closed" role="tab" aria-selected="false">Resueltos <span id="admin-support-tab-closed-count"></span></button>
+              </div>
+              <ul class="cuenta-list admin-support-list" id="admin-support-list"></ul>
+              <p class="cuenta-empty hidden" id="admin-support-list-empty"></p>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-support-show-all">Mostrar más</button>
             </div>
-            <div class="admin-support-col">
-              <h4>Resueltos <span id="admin-support-resolved-count"></span></h4>
-              <ul class="cuenta-list admin-support-scroll" id="admin-support-resolved-list"></ul>
-              <p class="cuenta-empty hidden" id="admin-support-resolved-empty">Todavía no hay conversaciones resueltas.</p>
-              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-support-resolved-show-all">Mostrar más</button>
+            <div class="admin-support-chat-pane">
+              <div class="admin-support-chat-empty" id="admin-support-chat-empty">
+                <p class="cuenta-empty">Elegí una conversación de la izquierda para verla acá.</p>
+              </div>
+              <div class="admin-support-chat-active hidden" id="admin-support-chat-active">
+                <div class="admin-support-chat-header">
+                  <span id="admin-support-chat-header-email"></span>
+                  <span class="admin-conn-dot is-down" id="admin-support-chat-conn-dot" title="Sincronizando (sin conexión en vivo)" aria-hidden="true"></span>
+                </div>
+                <div class="admin-chat" id="admin-support-chat-messages"></div>
+                <form class="cuenta-form admin-support-reply-form" id="admin-support-reply-form">
+                  <div class="admin-inline-row">
+                    <input type="text" class="admin-support-reply-input" id="admin-support-reply-input" placeholder="Responder…" maxlength="2000" required />
+                    <button type="submit" class="cuenta-btn">Enviar</button>
+                  </div>
+                  <div class="auth-error hidden" id="admin-support-reply-error" role="alert"></div>
+                </form>
+                <div class="admin-support-chat-resolved-info hidden" id="admin-support-chat-resolved-info"></div>
+              </div>
             </div>
           </div>
         </div>

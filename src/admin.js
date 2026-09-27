@@ -657,11 +657,18 @@ let adminChatLastRenderedDay = null;
 
 // "Mostrar más" — mismo patrón que comments.js::VISIBLE_BY_DEFAULT/expanded:
 // los items de más allá del cupo quedan en el DOM pero ocultos por CSS, y el
-// botón solo los desoculta (nunca vuelve a pedir nada al backend). Pendientes
-// y Resueltos son listas independientes, cada una con su propio flag.
+// botón solo los desoculta (nunca vuelve a pedir nada al backend).
 const ADMIN_SUPPORT_VISIBLE_BY_DEFAULT = 5;
-let adminSupportPendingExpanded = false;
-let adminSupportResolvedExpanded = false;
+let adminSupportExpanded = false;
+
+// Layout WhatsApp-style: una sola lista de conversaciones a la izquierda,
+// switcheable por tab (Pendientes/Resueltos), con el chat de la conversación
+// abierta fijo a la derecha. Cada tab cachea sus propios items (llenados por
+// loadAdminSupportPending/Resolved) para no tener que re-pedirlos al backend
+// solo por cambiar de tab.
+let adminSupportActiveTab = 'open'; // 'open' | 'closed'
+let adminSupportPendingItems = [];
+let adminSupportResolvedItems = [];
 
 function stopAdminSupportPolling() {
   if (adminSupportPollTimer) {
@@ -677,8 +684,8 @@ function stopAdminSupportSocket() {
   }
 }
 
-function setAdminConnStatus(li, status) {
-  const dot = li && li.querySelector('.admin-conn-dot');
+function setAdminConnStatus(status) {
+  const dot = $('admin-support-chat-conn-dot');
   if (!dot) return;
   dot.classList.remove('is-open', 'is-connecting', 'is-down');
   if (status === 'open') {
@@ -769,20 +776,40 @@ async function pollAdminSupportMessages(conversationId, container) {
   }
 }
 
-async function openAdminSupportConversation(conversationId, li) {
-  if (adminSupportOpenId && adminSupportOpenId !== conversationId) {
-    const prevLi = document.querySelector(`.admin-support-row[data-conversation-id="${adminSupportOpenId}"]`);
-    if (prevLi) prevLi.querySelector('.admin-panel').classList.add('hidden');
-  }
-  stopAdminSupportPolling();
-  stopAdminSupportSocket();
+/** Muestra en el panel derecho (fijo) una conversación YA cerrada: sin chat
+ * ni formulario de respuesta (el backend purga el texto de los mensajes al
+ * cerrar, data-minimization), solo email + rating (★) + fecha de cierre. */
+function showResolvedConversation(conversationId) {
+  closeAdminSupportConversation();
   adminSupportOpenId = conversationId;
+  const item = adminSupportResolvedItems.find((c) => c.id === conversationId);
+  $('admin-support-chat-empty').classList.add('hidden');
+  $('admin-support-chat-active').classList.remove('hidden');
+  $('admin-support-chat-header-email').textContent = (item && item.user_email) || '';
+  $('admin-support-chat-messages').classList.add('hidden');
+  $('admin-support-reply-form').classList.add('hidden');
+  const info = $('admin-support-chat-resolved-info');
+  info.classList.remove('hidden');
+  const rating = (item && item.rating) || 0;
+  info.innerHTML = `<p class="cuenta-empty">${'★'.repeat(rating)}${'☆'.repeat(5 - rating)} · cerrado ${fmtDateOrDash(item && item.closed_at)}</p>`;
+  renderAdminSupportList(); // refresca el resaltado is-active
+}
+
+async function openAdminSupportConversation(conversationId) {
+  closeAdminSupportConversation();
+  adminSupportOpenId = conversationId;
+  const item = adminSupportPendingItems.find((c) => c.id === conversationId);
+  $('admin-support-chat-empty').classList.add('hidden');
+  $('admin-support-chat-active').classList.remove('hidden');
+  $('admin-support-chat-header-email').textContent = (item && item.user_email) || '';
+  $('admin-support-chat-resolved-info').classList.add('hidden');
+  $('admin-support-chat-messages').classList.remove('hidden');
+  $('admin-support-reply-form').classList.remove('hidden');
+  renderAdminSupportList(); // refresca el resaltado is-active
+
   adminSupportLastSeenAt = null;
   adminSeenMessageIds = new Set();
-
-  const panel = li.querySelector('.admin-panel');
-  panel.classList.remove('hidden');
-  const chatEl = panel.querySelector('.admin-chat');
+  const chatEl = $('admin-support-chat-messages');
   chatEl.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
   adminChatLastRenderedSender = null;
   adminChatLastRenderedDay = null;
@@ -807,14 +834,12 @@ async function openAdminSupportConversation(conversationId, li) {
           adminSupportLastSeenAt = fresh[0].created_at;
         }
       },
-      onStatusChange: (status) => setAdminConnStatus(li, status),
+      onStatusChange: (status) => setAdminConnStatus(status),
     });
   }
 }
 
-function closeAdminSupportConversation(li) {
-  const panel = li.querySelector('.admin-panel');
-  if (panel) panel.classList.add('hidden');
+function closeAdminSupportConversation() {
   stopAdminSupportPolling();
   stopAdminSupportSocket();
   adminSupportOpenId = null;
@@ -825,7 +850,8 @@ function renderAdminSupportRow(c) {
   const email = c.user_email || '';
   const initial = (email[0] || '?').toUpperCase();
   const awaitingReply = c.last_message_sender === 'user';
-  return `<li class="cuenta-item admin-support-row" data-conversation-id="${escapeHtml(c.id)}">
+  const activeCls = c.id === adminSupportOpenId ? ' is-active' : '';
+  return `<li class="cuenta-item admin-support-row${activeCls}" data-conversation-id="${escapeHtml(c.id)}">
     <button type="button" class="cuenta-item-body admin-support-summary">
       <span class="admin-support-avatar" aria-hidden="true">${escapeHtml(initial)}</span>
       <span class="admin-support-summary-text">
@@ -837,33 +863,22 @@ function renderAdminSupportRow(c) {
       </span>
       <span class="admin-support-summary-time">${fmtDateOrDash(c.last_message_at)}</span>
     </button>
-    <div class="admin-panel hidden">
-      <div class="admin-panel-head">
-        <span>Conversación</span>
-        <span class="admin-conn-dot is-down" title="Sincronizando (sin conexión en vivo)" aria-hidden="true"></span>
-      </div>
-      <div class="admin-chat"></div>
-      <form class="cuenta-form admin-support-reply-form">
-        <div class="admin-inline-row">
-          <input type="text" class="admin-support-reply-input" placeholder="Responder…" maxlength="2000" required />
-          <button type="submit" class="cuenta-btn">Enviar</button>
-        </div>
-        <div class="auth-error hidden admin-support-reply-error" role="alert"></div>
-      </form>
-    </div>
   </li>`;
 }
 
-/** Fila de solo lectura para una conversación YA cerrada — el backend purga
- * el texto de los mensajes al cerrar (data-minimization), así que acá no hay
- * panel de chat ni wiring, solo email + rating (★) + fecha de cierre. */
+/** Fila de una conversación YA cerrada — el backend purga el texto de los
+ * mensajes al cerrar (data-minimization), así que al abrirla solo se muestra
+ * email + rating (★) + fecha de cierre (ver showResolvedConversation). */
 function renderAdminSupportResolvedRow(c) {
   const rating = c.rating || 0;
-  return `<li class="cuenta-item">
-    <div class="cuenta-item-body">
-      <b>${escapeHtml(c.user_email || '')}</b>
-      <small>${'★'.repeat(rating)}${'☆'.repeat(5 - rating)} · cerrado ${fmtDateOrDash(c.closed_at)}</small>
-    </div>
+  const activeCls = c.id === adminSupportOpenId ? ' is-active' : '';
+  return `<li class="cuenta-item admin-support-resolved-row${activeCls}" data-conversation-id="${escapeHtml(c.id)}">
+    <button type="button" class="cuenta-item-body admin-support-summary">
+      <span class="admin-support-summary-text">
+        <b>${escapeHtml(c.user_email || '')}</b>
+        <small>${'★'.repeat(rating)}${'☆'.repeat(5 - rating)} · cerrado ${fmtDateOrDash(c.closed_at)}</small>
+      </span>
+    </button>
   </li>`;
 }
 
@@ -873,38 +888,95 @@ function wireAdminSupportRows(list) {
     const summaryBtn = li.querySelector('.admin-support-summary');
     if (summaryBtn) {
       summaryBtn.addEventListener('click', () => {
-        if (adminSupportOpenId === conversationId) closeAdminSupportConversation(li);
-        else openAdminSupportConversation(conversationId, li);
+        if (adminSupportOpenId !== conversationId) openAdminSupportConversation(conversationId);
       });
     }
-    const replyForm = li.querySelector('.admin-support-reply-form');
-    if (replyForm) {
-      replyForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const input = replyForm.querySelector('.admin-support-reply-input');
-        const errorEl = replyForm.querySelector('.admin-support-reply-error');
-        const content = input.value.trim();
-        if (!content) return;
-        if (errorEl) errorEl.classList.add('hidden');
-        const submitBtn = replyForm.querySelector('button[type="submit"]');
-        submitBtn.disabled = true;
-        try {
-          const sent = await sendAdminSupportMessage(conversationId, content);
-          input.value = '';
-          const chatEl = li.querySelector('.admin-chat');
-          if (chatEl && sent) {
-            renderAdminChatMessages(chatEl, [sent], { append: true });
-            adminSupportLastSeenAt = sent.created_at;
-          }
-        } catch (err) {
-          if (errorEl) {
-            errorEl.textContent = (err && err.detail) || 'No se pudo enviar la respuesta.';
-            errorEl.classList.remove('hidden');
-          }
-        } finally {
-          submitBtn.disabled = false;
-        }
+  });
+  list.querySelectorAll('.admin-support-resolved-row').forEach((li) => {
+    const conversationId = li.dataset.conversationId;
+    const summaryBtn = li.querySelector('.admin-support-summary');
+    if (summaryBtn) {
+      summaryBtn.addEventListener('click', () => {
+        if (adminSupportOpenId !== conversationId) showResolvedConversation(conversationId);
       });
+    }
+  });
+}
+
+/** Renderiza la lista compartida de la izquierda con lo que corresponda al
+ * tab activo (Pendientes/Resueltos) — llamada tras cada fetch y cada cambio
+ * de tab, nunca vuelve a pedir nada al backend por sí sola. */
+function renderAdminSupportList() {
+  const list = $('admin-support-list');
+  const empty = $('admin-support-list-empty');
+  const showAllBtn = $('admin-support-show-all');
+  if (!list) return;
+  const items = adminSupportActiveTab === 'open' ? adminSupportPendingItems : adminSupportResolvedItems;
+  if (!items.length) {
+    list.innerHTML = '';
+    if (empty) {
+      empty.textContent = adminSupportActiveTab === 'open' ? 'No hay conversaciones abiertas.' : 'Todavía no hay conversaciones resueltas.';
+      empty.classList.remove('hidden');
+    }
+    if (showAllBtn) showAllBtn.classList.add('hidden');
+    return;
+  }
+  if (empty) empty.classList.add('hidden');
+  list.innerHTML = items.map(adminSupportActiveTab === 'open' ? renderAdminSupportRow : renderAdminSupportResolvedRow).join('');
+  wireAdminSupportRows(list);
+  applyAdminSupportShowMore(list, items, adminSupportExpanded, showAllBtn);
+}
+
+/** Tabs Pendientes/Resueltos — cambia qué cache se pinta en la lista
+ * compartida, sin volver a pedir nada al backend (loadAdminSupportPending/
+ * Resolved ya cachean sus items al cargar). */
+function wireAdminSupportTabs() {
+  document.querySelectorAll('.admin-support-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      if (tab === adminSupportActiveTab) return;
+      adminSupportActiveTab = tab;
+      adminSupportExpanded = false;
+      document.querySelectorAll('.admin-support-tab').forEach((b) => {
+        const active = b.dataset.tab === tab;
+        b.classList.toggle('is-active', active);
+        b.setAttribute('aria-selected', String(active));
+      });
+      renderAdminSupportList();
+    });
+  });
+}
+
+/** Formulario de respuesta fijo abajo del chat, wireado UNA sola vez (ya no
+ * hay un formulario por fila) — manda al conversationId actualmente abierto. */
+function wireAdminSupportReplyForm() {
+  const form = $('admin-support-reply-form');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!adminSupportOpenId) return;
+    const input = $('admin-support-reply-input');
+    const errorEl = $('admin-support-reply-error');
+    const content = input.value.trim();
+    if (!content) return;
+    if (errorEl) errorEl.classList.add('hidden');
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    try {
+      const sent = await sendAdminSupportMessage(adminSupportOpenId, content);
+      input.value = '';
+      const chatEl = $('admin-support-chat-messages');
+      if (chatEl && sent) {
+        renderAdminChatMessages(chatEl, [sent], { append: true });
+        adminSupportLastSeenAt = sent.created_at;
+      }
+    } catch (err) {
+      if (errorEl) {
+        errorEl.textContent = (err && err.detail) || 'No se pudo enviar la respuesta.';
+        errorEl.classList.remove('hidden');
+      }
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 }
@@ -930,24 +1002,14 @@ function applyAdminSupportShowMore(list, items, expanded, showAllBtn) {
 }
 
 function wireAdminSupportShowMoreButtons() {
-  const pendingBtn = $('admin-support-pending-show-all');
-  const resolvedBtn = $('admin-support-resolved-show-all');
-  if (pendingBtn) {
-    pendingBtn.addEventListener('click', () => {
-      adminSupportPendingExpanded = true;
-      const list = $('admin-support-pending-list');
-      if (list) list.querySelectorAll('li.hidden').forEach((li) => li.classList.remove('hidden'));
-      pendingBtn.classList.add('hidden');
-    });
-  }
-  if (resolvedBtn) {
-    resolvedBtn.addEventListener('click', () => {
-      adminSupportResolvedExpanded = true;
-      const list = $('admin-support-resolved-list');
-      if (list) list.querySelectorAll('li.hidden').forEach((li) => li.classList.remove('hidden'));
-      resolvedBtn.classList.add('hidden');
-    });
-  }
+  const btn = $('admin-support-show-all');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    adminSupportExpanded = true;
+    const list = $('admin-support-list');
+    if (list) list.querySelectorAll('li.hidden').forEach((li) => li.classList.remove('hidden'));
+    btn.classList.add('hidden');
+  });
 }
 
 /** Orden "más antiguo primero" por actividad — usa last_message_at si está
@@ -964,72 +1026,47 @@ function sortAdminSupportPendingByActivity(items) {
 }
 
 async function loadAdminSupportPending() {
-  const list = $('admin-support-pending-list');
-  const empty = $('admin-support-pending-empty');
-  const countEl = $('admin-support-pending-count');
-  const showAllBtn = $('admin-support-pending-show-all');
-  if (!list) return;
   try {
     const conversations = await listAdminSupportConversations('open');
     const raw = conversations && conversations.items ? conversations.items : conversations || [];
-    const items = sortAdminSupportPendingByActivity(raw);
-    if (countEl) countEl.textContent = items.length ? `(${items.length})` : '';
-    if (!items.length) {
-      list.innerHTML = '';
-      if (empty) empty.classList.remove('hidden');
-      if (showAllBtn) showAllBtn.classList.add('hidden');
-      return;
-    }
-    if (empty) empty.classList.add('hidden');
-    list.innerHTML = items.map(renderAdminSupportRow).join('');
-    wireAdminSupportRows(list);
-    applyAdminSupportShowMore(list, items, adminSupportPendingExpanded, showAllBtn);
+    adminSupportPendingItems = sortAdminSupportPendingByActivity(raw);
+    const countEl = $('admin-support-tab-open-count');
+    if (countEl) countEl.textContent = adminSupportPendingItems.length ? `(${adminSupportPendingItems.length})` : '';
+    if (adminSupportActiveTab === 'open') renderAdminSupportList();
   } catch (_) {
-    list.innerHTML = '<li>No se pudo cargar la lista de conversaciones.</li>';
+    adminSupportPendingItems = [];
+    if (adminSupportActiveTab === 'open') {
+      const list = $('admin-support-list');
+      if (list) list.innerHTML = '<li>No se pudo cargar la lista de conversaciones.</li>';
+    }
   }
 }
 
 async function loadAdminSupportResolved() {
-  const list = $('admin-support-resolved-list');
-  const empty = $('admin-support-resolved-empty');
-  const countEl = $('admin-support-resolved-count');
-  const showAllBtn = $('admin-support-resolved-show-all');
-  if (!list) return;
   try {
     const conversations = await listAdminSupportConversations('closed');
-    const items = conversations && conversations.items ? conversations.items : conversations || [];
-    if (countEl) countEl.textContent = items.length ? `(${items.length})` : '';
-    if (!items.length) {
-      list.innerHTML = '';
-      if (empty) empty.classList.remove('hidden');
-      if (showAllBtn) showAllBtn.classList.add('hidden');
-      return;
-    }
-    if (empty) empty.classList.add('hidden');
-    list.innerHTML = items.map(renderAdminSupportResolvedRow).join('');
-    applyAdminSupportShowMore(list, items, adminSupportResolvedExpanded, showAllBtn);
+    adminSupportResolvedItems = conversations && conversations.items ? conversations.items : conversations || [];
+    const countEl = $('admin-support-tab-closed-count');
+    if (countEl) countEl.textContent = adminSupportResolvedItems.length ? `(${adminSupportResolvedItems.length})` : '';
+    if (adminSupportActiveTab === 'closed') renderAdminSupportList();
   } catch (_) {
-    list.innerHTML = '<li>No se pudo cargar la lista de conversaciones resueltas.</li>';
+    adminSupportResolvedItems = [];
+    if (adminSupportActiveTab === 'closed') {
+      const list = $('admin-support-list');
+      if (list) list.innerHTML = '<li>No se pudo cargar la lista de conversaciones resueltas.</li>';
+    }
   }
 }
 
 function renderAdminSupportStats(stats) {
-  const el = $('admin-support-stats');
+  const el = $('admin-support-summary-line');
   if (!el) return;
   if (!stats) {
-    el.innerHTML = '';
+    el.textContent = '';
     return;
   }
   const avg = stats.average_rating == null ? '—' : stats.average_rating.toFixed(1);
-  const dist = stats.rating_distribution || {};
-  const distLine = [1, 2, 3, 4, 5].map((r) => `★${r}: ${dist[String(r)] ?? 0}`).join(' · ');
-  el.innerHTML = `
-    <div class="admin-stat-row">
-      <div class="admin-stat"><strong>${stats.pending_count ?? 0}</strong><span>Pendientes</span></div>
-      <div class="admin-stat"><strong>${stats.resolved_count ?? 0}</strong><span>Resueltos</span></div>
-      <div class="admin-stat"><strong>${avg}/5</strong><span>Calificación promedio</span></div>
-    </div>
-    <div class="admin-support-stats-dist">${distLine}</div>`;
+  el.textContent = `${stats.pending_count ?? 0} pendientes · ${stats.resolved_count ?? 0} resueltas · ★${avg} promedio`;
 }
 
 async function loadAdminSupportStats() {
@@ -1083,6 +1120,8 @@ async function init() {
   loadAdminUsers();
   wireAdminUsersForm();
   wireAdminSupportShowMoreButtons();
+  wireAdminSupportTabs();
+  wireAdminSupportReplyForm();
   loadAdminSupport();
 }
 

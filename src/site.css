@@ -4044,74 +4044,17 @@ html:not(.in-app) .in-app-only {
   margin-top: 8px;
 }
 
-/* Grilla de stats arriba de las columnas Pendientes/Resueltos — antes
-   reusaba .admin-stat-row (flex que envuelve) tal cual de Ventas; con 4
-   chips (pendientes/resueltas/promedio/distribución) dentro de una card ya
-   angosta (la mitad de .admin-grid) quedaba amontonado. Grilla explícita de
-   2 columnas (1 en mobile) para que cada chip tenga su propia celda prolija. */
-.admin-support-stats {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px 16px;
-  margin-bottom: 14px;
-}
-
-.admin-support-stats .admin-stat {
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.admin-support-stats-dist {
+.admin-support-summary-line {
   font-size: 12px;
   color: var(--text-dim);
-  margin-top: 4px;
-}
-
-@media (max-width: 480px) {
-  .admin-support-stats {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Pendientes/Resueltos APILADAS, no lado a lado: esta card ya vive a media
-   página dentro de .admin-grid (2 columnas) — intentar dos sub-columnas
-   ahí adentro (como se hizo al principio) las dejaba amontonadas contra el
-   borde de la card, con paneles de chat expandibles adentro de una franja
-   angosta. Cada lista se lee mejor con el ancho completo de la card. */
-.admin-support-columns {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.admin-support-col {
-  min-width: 0;
-}
-
-.admin-support-col h4 {
-  font-size: 13px;
-  color: var(--text-dim);
-  margin: 0 0 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-}
-
-/* Scroll acotado independiente del cupo "Mostrar más": una vez que se
-   desoculta todo, la lista sigue pudiendo ser larga y necesita su propio
-   límite de alto. Más bajo que antes (eran 360px pensados para dos
-   columnas lado a lado que ahora están apiladas, sumarían demasiado alto). */
-.admin-support-scroll {
-  max-height: 260px;
-  overflow-y: auto;
+  margin-top: 2px;
 }
 
 /* La lista de Usuarios (20 por página, cada fila con 2 <details>
    expandibles de pagos/premium) sin tope se sentía como una pared de texto
    apenas se abrían un par de filas. Mismo criterio de scroll acotado que
-   .admin-support-scroll — la paginación server-side sigue siendo la que
-   limita CUÁNTOS se piden, esto solo evita que la card crezca sin límite. */
+   .admin-support-list (soporte) — la paginación server-side sigue siendo la
+   que limita CUÁNTOS se piden, esto solo evita que la card crezca sin límite. */
 .admin-users-scroll {
   max-height: 560px;
   overflow-y: auto;
@@ -4235,27 +4178,133 @@ html:not(.in-app) .in-app-only {
   animation: support-conn-pulse 1.4s ease-in-out infinite;
 }
 
-/* Panel expandible dentro de una fila de soporte — mismo criterio visual
-   que .schedule (subpanel con borde punteado dentro de un .cuenta-item
-   flex), sin pisar esa clase para no atarla semánticamente a itinerarios. */
-.admin-panel {
-  flex-basis: 100%;
-  max-width: 100%;
-  margin-top: 10px;
-  padding: 14px;
-  border: 1px dashed var(--border);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+/* Layout WhatsApp-style de Soporte: lista de conversaciones a la izquierda
+   (switcheable por tab Pendientes/Resueltos) + panel fijo de la conversación
+   abierta a la derecha. Esta card ocupa el ancho completo de .admin-grid
+   (ver .admin-support-card-full) en vez de compartir fila con otra card —
+   dos columnas internas necesitan más aire que la mitad de un grid de 2. */
+.admin-support-card-full {
+  grid-column: 1 / -1;
 }
 
-.admin-panel-head {
+.admin-support-layout {
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.admin-support-list-pane {
+  flex: 0 0 300px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-support-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 10px;
+}
+
+.admin-support-tab {
+  flex: 1 1 auto;
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.admin-support-tab.is-active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.admin-support-list {
+  max-height: 480px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.admin-support-row.is-active,
+.admin-support-resolved-row.is-active {
+  background: var(--accent-soft);
+  border-radius: 10px;
+}
+
+.admin-support-chat-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-support-chat-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
+
+/* Alto fijo: adentro, SOLO .admin-chat (los mensajes) scrollea — el
+   formulario de respuesta es un hermano flex con flex:none, nunca queda
+   dentro del contenedor con overflow. */
+.admin-support-chat-active {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 520px;
+}
+
+.admin-support-chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-bottom: 4px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+  font-size: 14px;
+  flex: none;
+}
+
+.admin-support-reply-form {
+  flex: none;
+}
+
+.admin-support-chat-resolved-info {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 800px) {
+  .admin-support-layout {
+    flex-direction: column;
+  }
+  .admin-support-list-pane {
+    flex: none;
+  }
+  .admin-support-chat-active,
+  .admin-support-chat-empty {
+    height: auto;
+    min-height: 260px;
+  }
 }
 
 /* Mismo indicador que .support-conn-dot (lado usuario, ver support-chat.js)
@@ -4289,7 +4338,8 @@ html:not(.in-app) .in-app-only {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 280px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   margin: 10px 0;
   padding: 10px;
