@@ -58,12 +58,23 @@ export async function listCoupons() {
   return get('/api/v1/admin/coupons');
 }
 
-export async function createCoupon({ code, label, trial_days, max_redemptions }) {
-  return post('/api/v1/admin/coupons', { code, label, trial_days, max_redemptions });
+export async function createCoupon({ code, label, trial_days, max_redemptions, commission_rate }) {
+  return post('/api/v1/admin/coupons', { code, label, trial_days, max_redemptions, commission_rate });
 }
 
 export async function updateCoupon(code, body) {
   return patch(`/api/v1/admin/coupons/${encodeURIComponent(code)}`, body);
+}
+
+/** Resumen de ventas/comisión por cupón (referidos) — ver admin.html →
+ * "📈 Ventas por cupón". Un item por cupón, incluidos los sin actividad;
+ * from/to opcionales, omitir ambos trae todo el historial. */
+export async function getAdminCouponSales(fromDate, toDate) {
+  const params = new URLSearchParams();
+  if (fromDate) params.set('from_date', fromDate);
+  if (toDate) params.set('to_date', toDate);
+  const qs = params.toString();
+  return get(`/api/v1/admin/coupons/sales${qs ? `?${qs}` : ''}`);
 }
 
 // ── Oneclick Mall: auto-renovación opcional, activada desde /cuenta ────────

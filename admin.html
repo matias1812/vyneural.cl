@@ -70,11 +70,34 @@
                 <input id="admin-coupon-max" type="number" min="1" />
               </label>
             </div>
+            <div class="cuenta-form-row">
+              <label>Comisión del referido (%)
+                <input id="admin-coupon-commission" type="number" min="0" max="100" step="0.5" value="15" />
+              </label>
+            </div>
             <div class="auth-error hidden" id="admin-coupon-error" role="alert"></div>
             <button type="submit" class="cuenta-btn" id="admin-coupon-create">Crear cupón</button>
           </form>
           <ul class="cuenta-list admin-coupon-scroll" id="admin-coupon-list"></ul>
           <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-coupon-show-all">Ver todos</button>
+        </div>
+
+        <div class="page-card" id="cuenta-admin-coupon-sales-card">
+          <div class="rutina-head">
+            <h3>📈 Ventas por cupón</h3>
+          </div>
+          <form id="admin-coupon-sales-form" class="cuenta-form">
+            <div class="cuenta-form-row">
+              <label>Desde
+                <input id="admin-coupon-sales-from" type="date" />
+              </label>
+              <label>Hasta
+                <input id="admin-coupon-sales-to" type="date" />
+              </label>
+            </div>
+            <button type="submit" class="cuenta-btn">Consultar</button>
+          </form>
+          <div id="admin-coupon-sales-summary"></div>
         </div>
 
         <div class="page-card" id="cuenta-admin-sales-card">
@@ -100,6 +123,42 @@
           <div id="admin-sales-summary"></div>
         </div>
 
+        <div class="page-card admin-contracts-card-full" id="cuenta-admin-contracts-card">
+          <div class="rutina-head">
+            <h3>📄 Generador de contratos</h3>
+          </div>
+          <div class="admin-contracts-layout">
+            <div class="admin-contracts-form-pane">
+              <label>Tipo de contrato
+                <select id="admin-contract-type">
+                  <option value="services">Prestación de Servicios de Consultoría y Desarrollo</option>
+                  <option value="affiliate">Contrato de Afiliado / Referido (Comisión 15%)</option>
+                </select>
+              </label>
+              <div id="admin-contract-fields" class="admin-contracts-fields"></div>
+
+              <div class="admin-contracts-signatures">
+                <div class="admin-contracts-sig-block">
+                  <span class="admin-contracts-sig-label" id="admin-contract-sig-label-a"></span>
+                  <canvas class="admin-contracts-sig-pad" id="admin-contract-sig-canvas-a" width="280" height="100"></canvas>
+                  <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-contract-sig-clear-a">Limpiar firma</button>
+                </div>
+                <div class="admin-contracts-sig-block">
+                  <span class="admin-contracts-sig-label" id="admin-contract-sig-label-b"></span>
+                  <canvas class="admin-contracts-sig-pad" id="admin-contract-sig-canvas-b" width="280" height="100"></canvas>
+                  <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-contract-sig-clear-b">Limpiar firma</button>
+                </div>
+              </div>
+
+              <button type="button" class="cuenta-btn" id="admin-contract-download">Descargar PDF</button>
+            </div>
+            <div class="admin-contracts-preview-pane">
+              <h4>Vista previa</h4>
+              <div class="admin-contracts-preview" id="admin-contract-preview"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="page-card admin-support-card-full" id="cuenta-admin-support-card">
           <div class="rutina-head">
             <h3>💬 Soporte</h3>
@@ -121,6 +180,7 @@
               </div>
               <div class="admin-support-chat-active hidden" id="admin-support-chat-active">
                 <div class="admin-support-chat-header">
+                  <button type="button" class="admin-support-chat-back" id="admin-support-chat-back" aria-label="Volver">←</button>
                   <span id="admin-support-chat-header-email"></span>
                   <span class="admin-conn-dot is-down" id="admin-support-chat-conn-dot" title="Sincronizando (sin conexión en vivo)" aria-hidden="true"></span>
                 </div>

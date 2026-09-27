@@ -13,7 +13,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { me } from './api/auth.js';
 import {
-  listCoupons, createCoupon, updateCoupon,
+  listCoupons, createCoupon, updateCoupon, getAdminCouponSales,
 } from './api/billing.js';
 import {
   getSalesSummary, downloadSalesCsv,
@@ -22,6 +22,7 @@ import {
 } from './api/admin.js';
 import { openSupportSocket } from './api/support-ws-client.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
+import { CONTRACT_TEMPLATES, fillContractTemplate } from './ui/contract-templates.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -80,7 +81,7 @@ function renderAdminCouponList(coupons) {
       return `<li class="admin-coupon-row${inactiveCls}${hiddenCls}">
         <div class="admin-coupon-row-main">
           <code class="admin-coupon-code">${escapeHtml(c.code)}</code>
-          <small class="admin-coupon-meta">${label} · ${c.trial_days}d · usado ${limit}</small>
+          <small class="admin-coupon-meta">${label} · ${c.trial_days}d · usado ${limit} · ${c.commission_rate}% comisión</small>
         </div>
         <button type="button" class="cuenta-btn admin-coupon-toggle" data-code="${escapeHtml(c.code)}" data-active="${c.active}">
           ${c.active ? 'Desactivar' : 'Activar'}
@@ -139,13 +140,18 @@ function wireAdminCouponForm() {
     const days = parseInt($('admin-coupon-days').value, 10) || 30;
     const maxRaw = $('admin-coupon-max').value.trim();
     const max = maxRaw ? parseInt(maxRaw, 10) : null;
+    const commissionRaw = $('admin-coupon-commission').value.trim();
+    const commission_rate = commissionRaw ? parseFloat(commissionRaw) : undefined;
     if (!code) return;
     const btn = $('admin-coupon-create');
     btn.disabled = true;
     try {
-      await createCoupon({ code, label, trial_days: days, max_redemptions: max });
+      await createCoupon({
+        code, label, trial_days: days, max_redemptions: max, commission_rate,
+      });
       form.reset();
       $('admin-coupon-days').value = '30';
+      $('admin-coupon-commission').value = '15';
       await loadAdminCoupons();
     } catch (err) {
       if (errorEl) {
@@ -156,6 +162,61 @@ function wireAdminCouponForm() {
       btn.disabled = false;
     }
   });
+}
+
+// ── Admin: Ventas por cupón (comisiones de referidos) ───────────────────────
+// Complemento de Cupones arriba: no gestiona cupones, solo muestra cuánto
+// vendió cada uno y cuánto se le debe de comisión al referido (mismo
+// criterio de admin: solo UX, el backend vuelve a chequear require_admin_user
+// en /api/v1/admin/coupons/sales).
+
+const ADMIN_COUPON_SALES_EMPTY_TEXT = 'Todavía no hay cupones creados.';
+
+function renderAdminCouponSales(rows) {
+  const el = $('admin-coupon-sales-summary');
+  if (!el) return;
+  if (!rows) {
+    el.innerHTML = '<p class="cuenta-empty">No se pudo cargar el resumen de ventas por cupón.</p>';
+    return;
+  }
+  if (!rows.length) {
+    el.innerHTML = `<p class="cuenta-empty">${ADMIN_COUPON_SALES_EMPTY_TEXT}</p>`;
+    return;
+  }
+  el.innerHTML = `<ul class="cuenta-list">${rows
+    .map(
+      (r) => `<li class="cuenta-item">
+        <div class="cuenta-item-body">
+          <b>${escapeHtml(r.code)}</b>${r.label ? ` — ${escapeHtml(r.label)}` : ''}
+          <small>${r.commission_rate}% comisión · ${r.payment_count} pago${r.payment_count === 1 ? '' : 's'} · ${fmtMoney(r.total_sales)} vendido</small>
+        </div>
+        <strong class="admin-coupon-sales-owed">${fmtMoney(r.commission_owed)}</strong>
+      </li>`,
+    )
+    .join('')}</ul>`;
+}
+
+async function loadAdminCouponSales() {
+  const el = $('admin-coupon-sales-summary');
+  const from = $('admin-coupon-sales-from').value || undefined;
+  const to = $('admin-coupon-sales-to').value || undefined;
+  if (el) el.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
+  try {
+    const rows = await getAdminCouponSales(from, to);
+    renderAdminCouponSales(rows);
+  } catch (_) {
+    renderAdminCouponSales(null);
+  }
+}
+
+function wireAdminCouponSalesForm() {
+  const form = $('admin-coupon-sales-form');
+  if (!form) return;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    loadAdminCouponSales();
+  });
+  loadAdminCouponSales();
 }
 
 // ── Admin: Ventas ────────────────────────────────────────────────────────
@@ -979,6 +1040,17 @@ function wireAdminSupportReplyForm() {
       submitBtn.disabled = false;
     }
   });
+
+  // Wire back button para cerrar la conversación activa
+  const backBtn = $('admin-support-chat-back');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      closeAdminSupportConversation();
+      $('admin-support-chat-empty').classList.remove('hidden');
+      $('admin-support-chat-active').classList.add('hidden');
+      renderAdminSupportList();
+    });
+  }
 }
 
 /** Aplica el cupo "Mostrar más" (oculta por CSS más allá de
@@ -1089,6 +1161,265 @@ async function loadAdminSupport() {
   ]);
 }
 
+// ── Admin: Generador de contratos ────────────────────────────────────────
+// Sección 100% client-side (mismo patrón que downloadSalesPdf más arriba):
+// el admin elige un tipo de contrato, llena un formulario generado desde
+// CONTRACT_TEMPLATES (src/ui/contract-templates.js), ve una vista previa en
+// vivo del texto ya sustituido, y puede descargar un PDF con líneas de
+// firma — opcionalmente con firmas dibujadas a mano en un <canvas>. Ningún
+// dato de esta sección toca el backend.
+
+// Trackea si cada canvas de firma tiene trazo dibujado (se resetea al
+// limpiar) — así downloadContractPdf() sabe si debe insertar la firma como
+// imagen o caer a una línea en blanco.
+const adminContractSigHasContent = { a: false, b: false };
+
+function renderContractFields(templateId) {
+  const container = $('admin-contract-fields');
+  const template = CONTRACT_TEMPLATES[templateId];
+  if (!container || !template) return;
+  container.innerHTML = template.fields
+    .map((f) => {
+      const id = `admin-contract-field-${f.key}`;
+      const defaultVal = f.default !== undefined ? f.default : '';
+      const placeholder = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : '';
+      const required = f.required ? ' required' : '';
+      if (f.type === 'textarea') {
+        return `<label>${escapeHtml(f.label)}
+          <textarea id="${id}" data-key="${f.key}"${placeholder}${required}>${escapeHtml(defaultVal)}</textarea>
+        </label>`;
+      }
+      const extra = f.type === 'number'
+        ? `${f.min !== undefined ? ` min="${f.min}"` : ''}${f.max !== undefined ? ` max="${f.max}"` : ''}`
+        : '';
+      return `<label>${escapeHtml(f.label)}
+        <input id="${id}" type="${f.type}" data-key="${f.key}" value="${escapeHtml(defaultVal)}"${placeholder}${required}${extra} />
+      </label>`;
+    })
+    .join('');
+  container.querySelectorAll('[data-key]').forEach((el) => {
+    el.addEventListener('input', updateContractPreview);
+    el.addEventListener('change', updateContractPreview);
+  });
+
+  const [sigA, sigB] = template.signatures;
+  const labelA = $('admin-contract-sig-label-a');
+  const labelB = $('admin-contract-sig-label-b');
+  if (labelA && sigA) labelA.textContent = `${sigA.partyLabel} — ${sigA.name || ''}`;
+  if (labelB && sigB) labelB.textContent = sigB.partyLabel;
+}
+
+function readContractFormValues(templateId) {
+  const container = $('admin-contract-fields');
+  const values = {};
+  if (!container) return values;
+  container.querySelectorAll('[data-key]').forEach((el) => {
+    values[el.dataset.key] = el.value;
+  });
+  return values;
+}
+
+function updateContractPreview() {
+  const templateId = $('admin-contract-type')?.value;
+  if (!templateId) return;
+  const values = readContractFormValues(templateId);
+  const body = fillContractTemplate(templateId, values);
+  const preview = $('admin-contract-preview');
+  if (!preview) return;
+  preview.innerHTML = body
+    .split('\n\n')
+    .map((para) => `<p>${escapeHtml(para)}</p>`)
+    .join('');
+
+  // La etiqueta de la firma B es dinámica (depende del cliente/afiliado
+  // ingresado) — se refresca acá junto con el resto de la vista previa.
+  const template = CONTRACT_TEMPLATES[templateId];
+  const sigB = template && template.signatures[1];
+  const labelB = $('admin-contract-sig-label-b');
+  if (labelB && sigB) {
+    const name = values[sigB.nameKey];
+    const rut = values[sigB.rutKey];
+    const namePart = name && name.trim() ? name : `[${sigB.nameKey}]`;
+    const rutPart = rut && rut.trim() ? rut : `[${sigB.rutKey}]`;
+    labelB.textContent = `${sigB.partyLabel} — ${namePart} (RUT ${rutPart})`;
+  }
+}
+
+// Dibujo básico mouse+touch sobre un <canvas> para capturar una firma a
+// mano. sigKey identifica la entrada correspondiente en
+// adminContractSigHasContent ('a' | 'b').
+function wireSignaturePad(canvasId, clearBtnId, sigKey) {
+  const canvas = $(canvasId);
+  const clearBtn = $(clearBtnId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.strokeStyle = '#eef0ff';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  let drawing = false;
+
+  const posFromEvent = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  canvas.addEventListener('pointerdown', (e) => {
+    drawing = true;
+    const { x, y } = posFromEvent(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!drawing) return;
+    const { x, y } = posFromEvent(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    adminContractSigHasContent[sigKey] = true;
+  });
+  const endStroke = () => { drawing = false; };
+  canvas.addEventListener('pointerup', endStroke);
+  canvas.addEventListener('pointerleave', endStroke);
+  canvas.addEventListener('pointercancel', endStroke);
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      adminContractSigHasContent[sigKey] = false;
+    });
+  }
+}
+
+async function downloadContractPdf() {
+  const templateId = $('admin-contract-type').value;
+  const values = readContractFormValues(templateId);
+  const body = fillContractTemplate(templateId, values);
+  const template = CONTRACT_TEMPLATES[templateId];
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const marginX = 20;
+  const maxWidth = pageWidth - marginX * 2;
+  const headTop = 15;
+
+  // Mismo header (logo + razón social + fecha) que downloadSalesPdf.
+  const logoDataUrl = await rasterizeLogoToPngDataUrl();
+  let textX = 14;
+  if (logoDataUrl) {
+    try {
+      doc.addImage(logoDataUrl, 'PNG', 14, headTop - 4, 16, 16);
+      textX = 34;
+    } catch (_) {
+      textX = 14;
+    }
+  }
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(16);
+  doc.text('Vyneural SpA', textX, headTop + 4);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10);
+  doc.text('RUT 78.505.157-2', textX, headTop + 10);
+  doc.text(`Generado: ${new Date().toLocaleString('es-CL')}`, pageWidth - 14, headTop + 4, { align: 'right' });
+
+  let y = headTop + 24;
+  doc.setDrawColor(200);
+  doc.line(14, y - 6, pageWidth - 14, y - 6);
+
+  doc.setFontSize(13);
+  doc.setFont(undefined, 'bold');
+  const titleLines = doc.splitTextToSize(template.title, maxWidth);
+  doc.text(titleLines, pageWidth / 2, y, { align: 'center' });
+  y += titleLines.length * 6 + 8;
+
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10.5);
+  const paragraphs = body.split('\n\n');
+  for (const para of paragraphs) {
+    const lines = doc.splitTextToSize(para, maxWidth);
+    for (const line of lines) {
+      if (y > pageHeight - 40) { doc.addPage(); y = 20; }
+      doc.text(line, marginX, y);
+      y += 5.5;
+    }
+    y += 4; // espacio entre párrafos
+  }
+
+  // Bloque de firmas — fuerza una página nueva si no queda espacio decente.
+  if (y > pageHeight - 70) { doc.addPage(); y = 20; }
+  y += 15;
+  const colWidth = (maxWidth - 20) / 2;
+  const colX = [marginX, marginX + colWidth + 20];
+  const sigCanvases = [$('admin-contract-sig-canvas-a'), $('admin-contract-sig-canvas-b')];
+  const sigKeys = ['a', 'b'];
+
+  template.signatures.forEach((sig, i) => {
+    const x = colX[i];
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(10);
+    doc.text(sig.partyLabel, x, y);
+
+    const canvas = sigCanvases[i];
+    const hasSig = canvas && adminContractSigHasContent[sigKeys[i]];
+    if (hasSig) {
+      try {
+        doc.addImage(canvas.toDataURL('image/png'), 'PNG', x, y + 4, 50, 20);
+      } catch (_) {
+        doc.text('________________________', x, y + 19);
+      }
+    } else {
+      doc.text('________________________', x, y + 19);
+    }
+
+    const printedName = sig.dynamic ? (values[sig.nameKey] || `[${sig.nameKey}]`) : sig.name;
+    const printedRut = sig.dynamic ? (values[sig.rutKey] || `[${sig.rutKey}]`) : sig.rut;
+    doc.setFont(undefined, 'normal');
+    doc.setFontSize(9);
+    doc.text(printedName, x, y + 28);
+    doc.text(`RUT ${printedRut}`, x, y + 33);
+  });
+
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i += 1) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text('Documento generado automáticamente — Vyneural SpA', 14, pageHeight - 10);
+    doc.text(`Página ${i} de ${totalPages}`, pageWidth - 14, pageHeight - 10, { align: 'right' });
+    doc.setTextColor(0);
+  }
+
+  doc.save(`contrato-${templateId}-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+function wireAdminContracts() {
+  const typeSel = $('admin-contract-type');
+  const downloadBtn = $('admin-contract-download');
+  if (!typeSel) return;
+  typeSel.addEventListener('change', () => {
+    renderContractFields(typeSel.value);
+    updateContractPreview();
+  });
+  renderContractFields(typeSel.value);
+  updateContractPreview();
+  wireSignaturePad('admin-contract-sig-canvas-a', 'admin-contract-sig-clear-a', 'a');
+  wireSignaturePad('admin-contract-sig-canvas-b', 'admin-contract-sig-clear-b', 'b');
+  if (downloadBtn) {
+    downloadBtn.addEventListener('click', async () => {
+      downloadBtn.disabled = true;
+      try {
+        await downloadContractPdf();
+      } catch (err) {
+        await notifyModal({
+          title: 'No se pudo generar el PDF',
+          text: (err && err.detail) || 'reintentá en unos segundos',
+        });
+      } finally {
+        downloadBtn.disabled = false;
+      }
+    });
+  }
+}
+
 // ── Arranque de la página ────────────────────────────────────────────────
 // A diferencia de renderAdminCard() en /cuenta (que solo ocultaba una card
 // dentro de una página de usuario normal), acá TODA la página es el panel
@@ -1116,9 +1447,11 @@ async function init() {
 
   loadAdminCoupons();
   wireAdminCouponForm();
+  wireAdminCouponSalesForm();
   wireAdminSalesForm();
   loadAdminUsers();
   wireAdminUsersForm();
+  wireAdminContracts();
   wireAdminSupportShowMoreButtons();
   wireAdminSupportTabs();
   wireAdminSupportReplyForm();

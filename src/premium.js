@@ -77,7 +77,7 @@ const PLAN_ORDER = ['monthly', 'annual', 'lifetime'];
 
 // Ítems cortos a propósito (una sola línea) — el resto ya está explicado en
 // el copy del hero de la página.
-const FEATURES = ['Frecuencias personalizadas', 'Alarmas ilimitadas', 'Itinerarios completos', 'Presets especiales (Schumann, 963 Hz · Divino)'];
+const FEATURES = ['Frecuencias personalizadas', 'Alarmas ilimitadas', 'Itinerarios completos', 'Soporte asistido 1 a 1', 'Presets especiales (Schumann, 963 Hz · Divino)'];
 
 // Precio mensual equivalente / ahorro — siempre derivado de los precios
 // reales que devuelve el backend (nunca hardcodeado), para que la promesa de

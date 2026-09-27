@@ -101,12 +101,12 @@ if (navToggle && navLinks) {
 // Inyecta el enlace de descarga en la nav, visible solo en la web (no dentro de la APK).
 const navLinksEl = document.getElementById('site-links');
 if (navLinksEl && !navLinksEl.querySelector('.nav-android-link')) {
-  const premiumLink = navLinksEl.querySelector('a[href="/premium"]');
   const androidLinkHtml = '<a href="/descargar" class="nav-android-link">Android</a>';
-  if (premiumLink) {
-    premiumLink.insertAdjacentHTML('afterend', androidLinkHtml);
+  const anchor = navLinksEl.querySelector('a[href="/premium"]') || navLinksEl.querySelector('a[href="/"]');
+  if (anchor) {
+    anchor.insertAdjacentHTML('afterend', androidLinkHtml);
   } else {
-    navLinksEl.insertAdjacentHTML('beforeend', androidLinkHtml);
+    navLinksEl.insertAdjacentHTML('afterbegin', androidLinkHtml);
   }
 }
 
