@@ -7,7 +7,7 @@
 // frontend. Mismo patrón que billing.js: funciones finas sobre
 // get/post de client.js, sin lógica de UI acá.
 
-import { get, post, patch, getText, API_BASE } from './client.js';
+import { get, post, getText, API_BASE } from './client.js';
 
 // ── Ventas (backend/app/routers/admin_sales.py) ─────────────────────────────
 
@@ -79,13 +79,6 @@ export async function listAdminUsers(search, page = 1, perPage = 10) {
 
 export async function getUserPayments(userId) {
   return get(`/api/v1/admin/users/${encodeURIComponent(userId)}/payments`);
-}
-
-/** Edita correo y/o nombre visible de un usuario (ver admin.js →
- * "Editar correo / nombre" en la fila de Usuarios). Body solo con lo que
- * cambió — ambos campos opcionales, ver backend/app/routers/admin_users.py. */
-export async function updateAdminUser(userId, body) {
-  return patch(`/api/v1/admin/users/${encodeURIComponent(userId)}`, body);
 }
 
 export async function grantUserPremium(userId, body) {

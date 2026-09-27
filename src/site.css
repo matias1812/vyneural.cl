@@ -5529,7 +5529,14 @@ label.it-step-notify-sub {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  flex: none;
+  /* flex:none (shrink:0) hacía que esta caja nunca encogiera por debajo del
+     ancho de sus 3 botones EN UNA sola línea — su propio flex-wrap nunca
+     llegaba a activarse porque la caja ya crecía hasta ese ancho y punto,
+     desbordando la card en mobile en vez de partir los botones en 2 líneas.
+     flex-shrink:1 (vía "flex: 0 1 auto") + min-width:0 le permite encoger y
+     recién ahí el wrap interno funciona. */
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .admin-coupon-edit-form {
@@ -5537,6 +5544,11 @@ label.it-step-notify-sub {
   padding-top: 10px;
   border-top: 1px dashed var(--border);
   flex-basis: 100%;
+}
+
+.admin-coupon-edit-save {
+  display: block;
+  margin: 10px 0 0 auto;
 }
 
 .admin-coupon-row-main {
@@ -5682,15 +5694,27 @@ label.it-step-notify-sub {
    no tantas como entren). */
 .admin-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   align-items: stretch;
+  /* Sin esto, el track 1fr no baja de su ancho mínimo de contenido — una
+     tabla con white-space:nowrap adentro de CUALQUIER card (ej. la de F29)
+     empuja TODO el grid (y por lo tanto cada card, incluidas las que no
+     tienen tablas) al ancho de esa tabla, aunque esa tabla tenga su propio
+     overflow-x:auto. Es el "grid blowout" clásico: overflow en un
+     descendiente no acota el mínimo intrínseco del ancestro grid a menos
+     que el propio track/item declare min-width:0. Confirmado en vivo: sin
+     esto, a 390px de viewport el grid completo medía ~1035px de ancho real
+     (scroll horizontal forzado) — la causa de fondo del reclamo "se ve muy
+     grande, tengo que hacer zoom out" en el celular. */
+  min-width: 0;
 }
 
 .admin-grid .page-card {
   margin: 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 /* Ventas no tiene una lista larga como las otras 3 cards (Usuarios, Cupones,
@@ -5703,7 +5727,7 @@ label.it-step-notify-sub {
 
 @media (max-width: 900px) {
   .admin-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -5754,6 +5778,28 @@ label.it-step-notify-sub {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
   color: var(--text);
+}
+
+/* El <select> nativo se ve plano en un tema oscuro (flecha del sistema
+   operativo, sin hover/focus propios) — se le agrega una flecha custom +
+   estados, mismo criterio visual que el resto del panel admin. */
+.admin-contracts-form-pane select {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23a78bfa' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  transition: border-color 0.15s;
+}
+
+.admin-contracts-form-pane select:hover {
+  border-color: rgba(167, 139, 250, 0.45);
+}
+
+.admin-contracts-form-pane select:focus {
+  outline: none;
+  border-color: rgba(167, 139, 250, 0.7);
 }
 
 /* Las opciones del desplegable se leen: fondo oscuro + texto claro (los
@@ -5855,12 +5901,71 @@ label.it-step-notify-sub {
 }
 
 .admin-contract-clause-body {
-  min-height: 60px;
+  min-height: 140px;
   resize: vertical;
 }
 
 .admin-contract-clause-remove {
   align-self: flex-end;
+}
+
+/* Acordeón para las cláusulas del contrato */
+.admin-contract-clause-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 0;
+  user-select: none;
+}
+
+.admin-contract-clause-header-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-contract-clause-label {
+  font-weight: 600;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.admin-contract-clause-preview {
+  font-size: 13px;
+  color: var(--text-dim);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.admin-contract-clause-chevron {
+  font-size: 18px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+  transform: rotate(0deg);
+}
+
+.admin-contract-clause-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.admin-contract-clause-body-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.admin-contract-clause-body-wrapper.hidden {
+  display: none;
 }
 
 .admin-contracts-preview-clause-title {
@@ -5936,6 +6041,13 @@ label.it-step-notify-sub {
 @media (max-width: 800px) {
   .admin-contracts-layout {
     flex-direction: column;
+    /* align-items:flex-start (arriba) tiene sentido en fila (no estirar la
+       altura de un pane para igualar al otro) pero en columna esa misma
+       propiedad pasa a controlar el ANCHO — sin este override, cada pane
+       encoge a su contenido en vez de ocupar el ancho de la card, y el
+       <select> de "Tipo de contrato" (opciones largas) se ve empujado a su
+       ancho intrínseco, desbordando la card entera en mobile. */
+    align-items: stretch;
   }
 }
 
@@ -5949,6 +6061,11 @@ label.it-step-notify-sub {
 
 .admin-accounting-table-wrap {
   overflow-x: auto;
+  /* Un mes con muchas ventas no debe estirar la card entera — mismo criterio
+     que .admin-users-scroll/.admin-coupon-scroll (listas con tope + scroll
+     propio en vez de crecer sin límite). */
+  max-height: 420px;
+  overflow-y: auto;
   margin: 14px 0;
 }
 

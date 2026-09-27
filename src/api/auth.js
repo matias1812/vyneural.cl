@@ -2,7 +2,7 @@
 // Autenticación contra el backend Vyneural. Aditivo: sin backend la app
 // funciona igual (todo local).
 
-import { post, cachedGet, clearSession, storeSession } from './client.js';
+import { post, patch, cachedGet, clearSession, storeSession } from './client.js';
 
 export async function register({ email, password, username, display_name, coupon_code }) {
   const session = await post('/api/v1/auth/register', {
@@ -58,6 +58,16 @@ export async function changePassword(currentPassword, newPassword) {
     current_password: currentPassword,
     new_password: newPassword,
   });
+}
+
+// Auto-edición del propio perfil (self-service, /cuenta) — display_name y/o
+// email. `current_password` solo hace falta cuando `email` cambia de verdad
+// (routers/users.py::update_profile exige re-auth en ese caso, igual que
+// changePassword/deleteAccount); mandarla de más cuando no cambia el email
+// no rompe nada del lado del backend, pero cuenta.js solo la incluye cuando
+// corresponde para no pedirle la contraseña al usuario sin motivo.
+export async function updateProfile({ display_name, email, current_password } = {}) {
+  return patch('/api/v1/users/me', { display_name, email, current_password });
 }
 
 // Borra la cuenta y TODOS los datos asociados (backend: DELETE del User,

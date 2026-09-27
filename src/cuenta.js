@@ -11,7 +11,7 @@
 // Aditiva: si no hay sesión muestra la puerta de entrada; sin backend la
 // app sigue funcionando igual.
 
-import { me, changePassword, resendVerification, deleteAccount } from './api/auth.js';
+import { me, changePassword, resendVerification, deleteAccount, updateProfile } from './api/auth.js';
 import { getAccessToken, notifyNativeAlarmsChanged } from './api/client.js';
 import { listFavorites, removeFavorite } from './api/favorites.js';
 import {
@@ -63,7 +63,15 @@ function renderGate({ retryOnBoot = false } = {}) {
 
 // ── Perfil ──────────────────────────────────────────────────────────────────
 
+// Último perfil cargado con éxito — lo lee el formulario de auto-edición
+// (wireEditProfile) para saber si el email del input realmente cambió
+// respecto al que ya está guardado (mismo criterio que el backend, ver
+// routers/users.py::update_profile: sin cambio real de email no hace falta
+// pedir la contraseña actual).
+let currentProfile = null;
+
 function renderProfile(p) {
+  currentProfile = p || currentProfile;
   const name = p?.display_name || p?.username || (p?.email || '').split('@')[0] || 'Usuario';
   $('cuenta-name').textContent = name;
   $('cuenta-email').textContent = p?.email || '';
@@ -1098,6 +1106,133 @@ function wirePushButtons() {
   }
 }
 
+// ── Auto-edición de perfil (nombre + email) ─────────────────────────────────
+// Self-service: el usuario edita SU PROPIA cuenta acá. No confundir con el
+// panel /admin (updateAdminUser en src/api/admin.js), que edita OTROS
+// usuarios — esa función no se toca.
+
+function normalizeEmailInput(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function editProfileEmailChanged() {
+  const emailInput = $('edit-profile-email');
+  if (!emailInput) return false;
+  return normalizeEmailInput(emailInput.value) !== normalizeEmailInput(currentProfile?.email);
+}
+
+// El input de contraseña actual solo se muestra/exige cuando el correo del
+// formulario difiere del ya guardado — mismo criterio que el backend
+// (routers/users.py::update_profile), para no pedirle la contraseña a quien
+// solo quiere cambiar su nombre.
+function updateEditProfilePasswordVisibility() {
+  const wrap = $('edit-profile-password-wrap');
+  const hint = $('edit-profile-password-hint');
+  const pwInput = $('edit-profile-password');
+  if (!wrap || !pwInput) return;
+  const changing = editProfileEmailChanged();
+  wrap.classList.toggle('hidden', !changing);
+  if (hint) hint.classList.toggle('hidden', !changing);
+  pwInput.required = changing;
+  if (!changing) pwInput.value = '';
+}
+
+function populateEditProfileForm() {
+  const nameInput = $('edit-profile-name');
+  const emailInput = $('edit-profile-email');
+  if (nameInput) nameInput.value = currentProfile?.display_name || '';
+  if (emailInput) emailInput.value = currentProfile?.email || '';
+  updateEditProfilePasswordVisibility();
+}
+
+function wireEditProfile() {
+  const btn = $('cuenta-edit-profile-btn');
+  const form = $('edit-profile-form');
+  if (!btn || !form) return;
+  const errEl = $('edit-profile-error');
+  const submitBtn = $('edit-profile-submit');
+  const cancelBtn = $('edit-profile-cancel');
+  const emailInput = $('edit-profile-email');
+
+  const hideMsg = () => {
+    errEl.classList.add('hidden');
+  };
+  // Mismo patrón que wirePasswordForm(): reusa .auth-error para errores y
+  // .auth-ok para el aviso de éxito, alternando la clase según corresponda.
+  const showErr = (msg) => {
+    errEl.classList.remove('auth-ok');
+    errEl.classList.add('auth-error');
+    errEl.textContent = msg;
+    errEl.classList.remove('hidden');
+  };
+  const showOk = (html) => {
+    errEl.classList.remove('auth-error');
+    errEl.classList.add('auth-ok');
+    errEl.innerHTML = html;
+    errEl.classList.remove('hidden');
+  };
+
+  const closeForm = () => {
+    form.classList.add('hidden');
+    hideMsg();
+  };
+
+  btn.addEventListener('click', () => {
+    if (form.classList.contains('hidden')) {
+      populateEditProfileForm();
+      hideMsg();
+      form.classList.remove('hidden');
+    } else {
+      closeForm();
+    }
+  });
+
+  if (cancelBtn) cancelBtn.addEventListener('click', closeForm);
+  if (emailInput) emailInput.addEventListener('input', updateEditProfilePasswordVisibility);
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    hideMsg();
+    const nameVal = $('edit-profile-name').value.trim();
+    const emailVal = $('edit-profile-email').value.trim();
+    const pwVal = $('edit-profile-password').value;
+    const emailChanged = editProfileEmailChanged();
+    if (emailChanged && !pwVal) {
+      return showErr('Ingresá tu contraseña actual para confirmar el cambio de correo.');
+    }
+    submitBtn.disabled = true;
+    const original = submitBtn.textContent;
+    submitBtn.textContent = 'Guardando…';
+    try {
+      const payload = {
+        // Vacío = "no tocar" (evita el 422 de display_name en blanco del
+        // backend); igual para email, así no se manda una cadena vacía.
+        display_name: nameVal || null,
+        email: emailVal || null,
+      };
+      // Solo se manda current_password cuando el email cambia de verdad —
+      // igual que el backend, no hace falta para renombrarse.
+      if (emailChanged) payload.current_password = pwVal;
+      const updated = await updateProfile(payload);
+      renderProfile(updated);
+      $('edit-profile-password').value = '';
+      updateEditProfilePasswordVisibility();
+      if (emailChanged) {
+        showOk(
+          'Perfil actualizado ✓<br>Correo actualizado — revisá tu bandeja de entrada en la nueva dirección para confirmarla.',
+        );
+      } else {
+        showOk('Perfil actualizado ✓');
+      }
+    } catch (err) {
+      showErr((err && err.detail) || 'No se pudo actualizar el perfil.');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = original;
+    }
+  });
+}
+
 // ── Cambio de contraseña ───────────────────────────────────────────────────
 
 function validatePasswordStrength(pw) {
@@ -1252,6 +1387,7 @@ function init() {
     });
   }
   wireVerify();
+  wireEditProfile();
   wirePasswordForm();
   wireDeleteAccount();
 

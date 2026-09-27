@@ -112,6 +112,7 @@
                   <button type="button" class="cuenta-item-btn" id="cuenta-recover-login">Iniciar sesión</button>
                   <button type="button" class="cuenta-item-btn cuenta-item-btn-ghost" id="cuenta-recover-retry">Reintentar</button>
                 </div>
+                <button type="button" class="cuenta-item-btn cuenta-item-btn-ghost" id="cuenta-edit-profile-btn">✏️ Editar perfil</button>
               </div>
               <div class="cuenta-head-actions">
                 <span class="roadmap-status rs-live" id="cuenta-sync-status" title="Estado de sincronización">—</span>
@@ -126,6 +127,31 @@
               <span class="roadmap-status rs-live" id="cuenta-verify-badge">—</span>
               <button type="button" class="cuenta-item-btn" id="cuenta-verify-resend">Reenviar correo de confirmación</button>
             </div>
+
+            <!-- Auto-edición de nombre/email (self-service) — distinto del panel
+                 admin (edita OTROS usuarios, ver src/api/admin.js). Oculto hasta
+                 tocar "Editar perfil"; el input de contraseña actual solo se
+                 muestra/exige cuando el correo cambia (mismo criterio que el
+                 backend, ver routers/users.py::update_profile). -->
+            <form class="cuenta-form hidden" id="edit-profile-form">
+              <label>Nombre
+                <input id="edit-profile-name" type="text" maxlength="128" autocomplete="name" />
+              </label>
+              <label>Correo
+                <input id="edit-profile-email" type="email" maxlength="320" autocomplete="email" />
+              </label>
+              <label class="hidden" id="edit-profile-password-wrap">Contraseña actual
+                <input id="edit-profile-password" type="password" autocomplete="current-password" maxlength="128" />
+              </label>
+              <small class="auth-hint hidden" id="edit-profile-password-hint">
+                Cambiar tu correo requiere confirmar tu contraseña actual.
+              </small>
+              <div class="auth-error hidden" id="edit-profile-error" role="alert"></div>
+              <div class="cuenta-form-row">
+                <button type="submit" class="cuenta-btn" id="edit-profile-submit">Guardar cambios</button>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="edit-profile-cancel">Cancelar</button>
+              </div>
+            </form>
           </div>
 
           <div class="page-card" id="cuenta-premium-card">

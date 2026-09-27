@@ -18,7 +18,7 @@ import {
 import {
   getSalesSummary, downloadSalesCsv,
   getMonthlyAccounting, downloadMonthlyAccountingCsv,
-  listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium, refundUserPayment, updateAdminUser,
+  listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium, refundUserPayment,
   listAdminSupportConversations, getAdminSupportMessages, sendAdminSupportMessage, getAdminSupportStats,
   resolveSupportConversation,
 } from './api/admin.js';
@@ -96,7 +96,7 @@ function renderAdminCouponList(coupons) {
             <button type="button" class="cuenta-btn cuenta-btn-danger admin-coupon-delete">🗑 Eliminar</button>
           </div>
         </div>
-        <div class="admin-coupon-edit-form hidden">
+        <div class="admin-coupon-edit-form cuenta-form hidden">
           <div class="cuenta-form-row">
             <label>Etiqueta
               <input type="text" class="admin-coupon-edit-label" maxlength="120" value="${escapeHtml(c.label || '')}" />
@@ -579,23 +579,6 @@ function renderAdminUserRow(u) {
       <small>${premiumLine}</small>
       <small>Alta ${fmtDateOrDash(u.created_at)} · último login ${fmtDateOrDash(u.last_login_at)}${u.last_seen_platform ? ` · ${escapeHtml(u.last_seen_platform)}` : ''}</small>
     </div>
-    <details class="cuenta-create">
-      <summary>Editar correo / nombre</summary>
-      <div class="cuenta-form">
-        <div class="cuenta-form-row">
-          <label>Correo
-            <input type="email" class="admin-user-edit-email" value="${escapeHtml(u.email)}" />
-          </label>
-          <label>Nombre
-            <input type="text" class="admin-user-edit-name" value="${escapeHtml(u.display_name || '')}" />
-          </label>
-        </div>
-        <div class="admin-inline-row">
-          <button type="button" class="cuenta-btn admin-user-edit-save">Guardar</button>
-        </div>
-        <div class="auth-error hidden admin-user-edit-error" role="alert"></div>
-      </div>
-    </details>
     <details class="cuenta-create admin-user-payments-details">
       <summary>Ver pagos</summary>
       <ul class="cuenta-list admin-user-payments-list"><li>Cargando…</li></ul>
@@ -628,10 +611,6 @@ function renderAdminUserRow(u) {
 function wireAdminUserRows(list) {
   list.querySelectorAll('.admin-user-row').forEach((row) => {
     const userId = row.dataset.userId;
-    // Selector específico (no el primer <details> de la fila): el nuevo
-    // bloque "Editar correo / nombre" se agregó ANTES de "Ver pagos" en el
-    // template de renderAdminUserRow, así que `row.querySelector('details')`
-    // a secas ahora apuntaría al bloque equivocado.
     const paymentsDetails = row.querySelector('.admin-user-payments-details');
     if (paymentsDetails) {
       paymentsDetails.addEventListener('toggle', async () => {
@@ -738,32 +717,6 @@ function wireAdminUserRows(list) {
           }
         } finally {
           revokeBtn.disabled = false;
-        }
-      });
-    }
-    const editEmailInput = row.querySelector('.admin-user-edit-email');
-    const editNameInput = row.querySelector('.admin-user-edit-name');
-    const editSaveBtn = row.querySelector('.admin-user-edit-save');
-    const editErrorEl = row.querySelector('.admin-user-edit-error');
-    if (editSaveBtn) {
-      editSaveBtn.addEventListener('click', async () => {
-        if (editErrorEl) editErrorEl.classList.add('hidden');
-        const newEmail = editEmailInput.value.trim();
-        const newName = editNameInput.value.trim();
-        const body = {};
-        if (newEmail) body.email = newEmail;
-        if (newName) body.display_name = newName;
-        if (!Object.keys(body).length) return;
-        editSaveBtn.disabled = true;
-        try {
-          await updateAdminUser(userId, body);
-          await loadAdminUsers();
-        } catch (err) {
-          editSaveBtn.disabled = false;
-          if (editErrorEl) {
-            editErrorEl.textContent = (err && err.detail) || 'No se pudo guardar los cambios.';
-            editErrorEl.classList.remove('hidden');
-          }
         }
       });
     }
@@ -1624,18 +1577,52 @@ const adminContractSigHasContent = { a: false, b: false };
 // resetea cada vez que cambia el TIPO de contrato (ver renderContractFields).
 let adminContractClauses = [];
 
+// Pista de qué cláusulas están expandidas en el acordeón.
+let expandedClauseIndices = new Set();
+
 function renderContractClauses() {
   const container = $('admin-contract-clauses');
   if (!container) return;
   container.innerHTML = adminContractClauses
     .map(
-      (c, i) => `<div class="admin-contract-clause" data-index="${i}">
-        <input type="text" class="admin-contract-clause-title" placeholder="Título de la cláusula (opcional)" value="${escapeHtml(c.title)}" />
-        <textarea class="admin-contract-clause-body" placeholder="Texto de la cláusula">${escapeHtml(c.body)}</textarea>
-        <button type="button" class="cuenta-btn cuenta-btn-ghost admin-contract-clause-remove">🗑 Eliminar</button>
-      </div>`,
+      (c, i) => {
+        const isExpanded = expandedClauseIndices.has(i);
+        // Generar label: usar título si existe, sino "Cláusula N" (1-indexed).
+        const label = c.title || `Cláusula ${i + 1}`;
+        // Preview: primeros ~50 caracteres del body, con ellipsis si es más largo.
+        const preview = c.body.length > 50 ? c.body.substring(0, 50) + '…' : c.body;
+        return `<div class="admin-contract-clause" data-index="${i}">
+          <div class="admin-contract-clause-header" data-index="${i}">
+            <div class="admin-contract-clause-header-content">
+              <span class="admin-contract-clause-label">${escapeHtml(label)}</span>
+              <span class="admin-contract-clause-preview">${escapeHtml(preview)}</span>
+            </div>
+            <span class="admin-contract-clause-chevron${isExpanded ? ' expanded' : ''}">›</span>
+          </div>
+          <div class="admin-contract-clause-body-wrapper${isExpanded ? '' : ' hidden'}">
+            <input type="text" class="admin-contract-clause-title" placeholder="Título de la cláusula (opcional)" value="${escapeHtml(c.title)}" />
+            <textarea class="admin-contract-clause-body" placeholder="Texto de la cláusula">${escapeHtml(c.body)}</textarea>
+            <button type="button" class="cuenta-btn cuenta-btn-ghost admin-contract-clause-remove">🗑 Eliminar</button>
+          </div>
+        </div>`;
+      },
     )
     .join('');
+
+  // Event listeners para los headers (toggle expanded).
+  container.querySelectorAll('.admin-contract-clause-header').forEach((headerEl) => {
+    const index = Number(headerEl.dataset.index);
+    headerEl.addEventListener('click', () => {
+      if (expandedClauseIndices.has(index)) {
+        expandedClauseIndices.delete(index);
+      } else {
+        expandedClauseIndices.add(index);
+      }
+      renderContractClauses();
+    });
+  });
+
+  // Event listeners para los inputs y delete buttons.
   container.querySelectorAll('.admin-contract-clause').forEach((el) => {
     const index = Number(el.dataset.index);
     const titleInput = el.querySelector('.admin-contract-clause-title');
@@ -1650,6 +1637,19 @@ function renderContractClauses() {
       updateContractPreview();
     });
     removeBtn.addEventListener('click', () => {
+      // Actualizar el Set de expanded indices: remover el eliminado y shiftar los posteriores.
+      const newExpanded = new Set();
+      expandedClauseIndices.forEach((idx) => {
+        if (idx === index) {
+          // No agregar el índice eliminado.
+        } else if (idx > index) {
+          // Shiftar hacia abajo los índices posteriores al eliminado.
+          newExpanded.add(idx - 1);
+        } else {
+          newExpanded.add(idx);
+        }
+      });
+      expandedClauseIndices = newExpanded;
       adminContractClauses.splice(index, 1);
       renderContractClauses();
       updateContractPreview();
@@ -1658,7 +1658,10 @@ function renderContractClauses() {
 }
 
 function addContractClause() {
+  const newIndex = adminContractClauses.length;
   adminContractClauses.push({ title: '', body: '' });
+  // Marcar la nueva cláusula como expandida para que el admin pueda empezar a escribir de inmediato.
+  expandedClauseIndices.add(newIndex);
   renderContractClauses();
   updateContractPreview();
 }

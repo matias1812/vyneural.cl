@@ -100,6 +100,29 @@
           <div id="admin-coupon-sales-summary"></div>
         </div>
 
+        <div class="page-card" id="cuenta-admin-sales-card">
+          <div class="rutina-head">
+            <h3>📊 Ventas</h3>
+          </div>
+          <form id="admin-sales-form" class="cuenta-form">
+            <div class="cuenta-form-row">
+              <label>Desde
+                <input id="admin-sales-from" type="date" />
+              </label>
+              <label>Hasta
+                <input id="admin-sales-to" type="date" />
+              </label>
+            </div>
+            <div class="admin-inline-row">
+              <button type="submit" class="cuenta-btn" id="admin-sales-query">Consultar</button>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-sales-csv">Descargar CSV</button>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-sales-pdf">Descargar informe contable (PDF)</button>
+            </div>
+            <div class="auth-error hidden" id="admin-sales-error" role="alert"></div>
+          </form>
+          <div id="admin-sales-summary"></div>
+        </div>
+
         <div class="page-card admin-accounting-card-full" id="cuenta-admin-accounting-card">
           <div class="rutina-head">
             <h3>🧾 Contabilidad Mensual y Control de F29</h3>
@@ -149,27 +172,44 @@
           </div>
         </div>
 
-        <div class="page-card" id="cuenta-admin-sales-card">
+        <div class="page-card admin-support-card-full" id="cuenta-admin-support-card">
           <div class="rutina-head">
-            <h3>📊 Ventas</h3>
+            <h3>💬 Soporte</h3>
+            <p class="admin-support-summary-line" id="admin-support-summary-line"></p>
           </div>
-          <form id="admin-sales-form" class="cuenta-form">
-            <div class="cuenta-form-row">
-              <label>Desde
-                <input id="admin-sales-from" type="date" />
-              </label>
-              <label>Hasta
-                <input id="admin-sales-to" type="date" />
-              </label>
+          <div class="admin-support-layout">
+            <div class="admin-support-list-pane">
+              <div class="admin-support-tabs" role="tablist">
+                <button type="button" class="admin-support-tab is-active" data-tab="open" role="tab" aria-selected="true">Pendientes <span id="admin-support-tab-open-count"></span></button>
+                <button type="button" class="admin-support-tab" data-tab="closed" role="tab" aria-selected="false">Resueltos <span id="admin-support-tab-closed-count"></span></button>
+              </div>
+              <ul class="cuenta-list admin-support-list" id="admin-support-list"></ul>
+              <p class="cuenta-empty hidden" id="admin-support-list-empty"></p>
+              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-support-show-all">Mostrar más</button>
             </div>
-            <div class="admin-inline-row">
-              <button type="submit" class="cuenta-btn" id="admin-sales-query">Consultar</button>
-              <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-sales-csv">Descargar CSV</button>
-              <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-sales-pdf">Descargar informe contable (PDF)</button>
+            <div class="admin-support-chat-pane">
+              <div class="admin-support-chat-empty" id="admin-support-chat-empty">
+                <p class="cuenta-empty">Elegí una conversación de la izquierda para verla acá.</p>
+              </div>
+              <div class="admin-support-chat-active hidden" id="admin-support-chat-active">
+                <div class="admin-support-chat-header">
+                  <button type="button" class="admin-support-chat-back" id="admin-support-chat-back" aria-label="Volver">←</button>
+                  <span id="admin-support-chat-header-email"></span>
+                  <button type="button" class="cuenta-btn cuenta-btn-ghost admin-support-resolve-btn" id="admin-support-resolve-btn">Marcar resuelta</button>
+                  <span class="admin-conn-dot is-down" id="admin-support-chat-conn-dot" title="Sincronizando (sin conexión en vivo)" aria-hidden="true"></span>
+                </div>
+                <div class="admin-chat" id="admin-support-chat-messages"></div>
+                <form class="cuenta-form admin-support-reply-form" id="admin-support-reply-form">
+                  <div class="admin-inline-row">
+                    <input type="text" class="admin-support-reply-input" id="admin-support-reply-input" placeholder="Responder…" maxlength="2000" required />
+                    <button type="submit" class="cuenta-btn">Enviar</button>
+                  </div>
+                  <div class="auth-error hidden" id="admin-support-reply-error" role="alert"></div>
+                </form>
+                <div class="admin-support-chat-resolved-info hidden" id="admin-support-chat-resolved-info"></div>
+              </div>
             </div>
-            <div class="auth-error hidden" id="admin-sales-error" role="alert"></div>
-          </form>
-          <div id="admin-sales-summary"></div>
+          </div>
         </div>
 
         <div class="page-card admin-contracts-card-full" id="cuenta-admin-contracts-card">
@@ -217,46 +257,6 @@
                 </div>
               </div>
               <div class="admin-contracts-preview" id="admin-contract-preview"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="page-card admin-support-card-full" id="cuenta-admin-support-card">
-          <div class="rutina-head">
-            <h3>💬 Soporte</h3>
-            <p class="admin-support-summary-line" id="admin-support-summary-line"></p>
-          </div>
-          <div class="admin-support-layout">
-            <div class="admin-support-list-pane">
-              <div class="admin-support-tabs" role="tablist">
-                <button type="button" class="admin-support-tab is-active" data-tab="open" role="tab" aria-selected="true">Pendientes <span id="admin-support-tab-open-count"></span></button>
-                <button type="button" class="admin-support-tab" data-tab="closed" role="tab" aria-selected="false">Resueltos <span id="admin-support-tab-closed-count"></span></button>
-              </div>
-              <ul class="cuenta-list admin-support-list" id="admin-support-list"></ul>
-              <p class="cuenta-empty hidden" id="admin-support-list-empty"></p>
-              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-support-show-all">Mostrar más</button>
-            </div>
-            <div class="admin-support-chat-pane">
-              <div class="admin-support-chat-empty" id="admin-support-chat-empty">
-                <p class="cuenta-empty">Elegí una conversación de la izquierda para verla acá.</p>
-              </div>
-              <div class="admin-support-chat-active hidden" id="admin-support-chat-active">
-                <div class="admin-support-chat-header">
-                  <button type="button" class="admin-support-chat-back" id="admin-support-chat-back" aria-label="Volver">←</button>
-                  <span id="admin-support-chat-header-email"></span>
-                  <button type="button" class="cuenta-btn cuenta-btn-ghost admin-support-resolve-btn" id="admin-support-resolve-btn">Marcar resuelta</button>
-                  <span class="admin-conn-dot is-down" id="admin-support-chat-conn-dot" title="Sincronizando (sin conexión en vivo)" aria-hidden="true"></span>
-                </div>
-                <div class="admin-chat" id="admin-support-chat-messages"></div>
-                <form class="cuenta-form admin-support-reply-form" id="admin-support-reply-form">
-                  <div class="admin-inline-row">
-                    <input type="text" class="admin-support-reply-input" id="admin-support-reply-input" placeholder="Responder…" maxlength="2000" required />
-                    <button type="submit" class="cuenta-btn">Enviar</button>
-                  </div>
-                  <div class="auth-error hidden" id="admin-support-reply-error" role="alert"></div>
-                </form>
-                <div class="admin-support-chat-resolved-info hidden" id="admin-support-chat-resolved-info"></div>
-              </div>
             </div>
           </div>
         </div>
