@@ -101,7 +101,13 @@ if (navToggle && navLinks) {
 // Inyecta el enlace de descarga en la nav, visible solo en la web (no dentro de la APK).
 const navLinksEl = document.getElementById('site-links');
 if (navLinksEl && !navLinksEl.querySelector('.nav-android-link')) {
-  navLinksEl.insertAdjacentHTML('beforeend', '<a href="/descargar" class="nav-android-link">📱 Android</a>');
+  const premiumLink = navLinksEl.querySelector('a[href="/premium"]');
+  const androidLinkHtml = '<a href="/descargar" class="nav-android-link">Android</a>';
+  if (premiumLink) {
+    premiumLink.insertAdjacentHTML('afterend', androidLinkHtml);
+  } else {
+    navLinksEl.insertAdjacentHTML('beforeend', androidLinkHtml);
+  }
 }
 
 // ---------------------------------------------------------------- Año del footer

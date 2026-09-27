@@ -76,8 +76,12 @@ function renderAdminCouponList(coupons) {
       const limit = c.max_redemptions != null ? `${c.times_redeemed}/${c.max_redemptions}` : `${c.times_redeemed}`;
       const label = c.label ? ` — ${escapeHtml(c.label)}` : '';
       const hiddenCls = !couponsExpanded && i >= ADMIN_COUPON_VISIBLE_BY_DEFAULT ? ' hidden' : '';
-      return `<li class="${hiddenCls.trim()}">
-        <code>${escapeHtml(c.code)}</code>${label} · ${c.trial_days}d · usado ${limit}
+      const inactiveCls = c.active ? '' : ' admin-coupon-row-inactive';
+      return `<li class="admin-coupon-row${inactiveCls}${hiddenCls}">
+        <div class="admin-coupon-row-main">
+          <code class="admin-coupon-code">${escapeHtml(c.code)}</code>
+          <small class="admin-coupon-meta">${label} · ${c.trial_days}d · usado ${limit}</small>
+        </div>
         <button type="button" class="cuenta-btn admin-coupon-toggle" data-code="${escapeHtml(c.code)}" data-active="${c.active}">
           ${c.active ? 'Desactivar' : 'Activar'}
         </button>
@@ -463,11 +467,23 @@ function wireAdminUserRows(list) {
         const ul = paymentsDetails.querySelector('.admin-user-payments-list');
         try {
           const payments = await getUserPayments(userId);
+          const paymentActionsHtml = (p) => {
+            if (p.channel === 'google_play') {
+              return '<small class="admin-payment-google-note">Gestionado por Google Play</small>';
+            }
+            if (p.status !== 'authorized') return '';
+            const badge = p.within_refund_window === true
+              ? `<span class="admin-refund-badge admin-refund-badge-ok">Dentro de ventana (${p.days_since_charge}d)</span>`
+              : p.within_refund_window === false
+                ? `<span class="admin-refund-badge admin-refund-badge-warn">Fuera de ventana (${p.days_since_charge}d)</span>`
+                : '';
+            return `${badge}<button type="button" class="cuenta-btn cuenta-btn-danger admin-payment-refund" data-payment-id="${escapeHtml(p.id)}" data-within-window="${p.within_refund_window}" data-days-since="${p.days_since_charge}">Reembolsar</button>`;
+          };
           ul.innerHTML = payments.length
             ? payments
                 .map((p) => `<li class="admin-payment-row" data-payment-id="${escapeHtml(p.id)}">
                   <span>${fmtDateOrDash(p.authorized_at || p.created_at)} · ${escapeHtml(ADMIN_PLAN_LABELS[p.plan] || p.plan)} · ${fmtMoney(p.amount)} ${escapeHtml(p.currency)} · ${escapeHtml(p.status)}</span>
-                  ${p.status === 'authorized' ? `<button type="button" class="cuenta-btn cuenta-btn-danger admin-payment-refund" data-payment-id="${escapeHtml(p.id)}">Reembolsar</button>` : ''}
+                  ${paymentActionsHtml(p)}
                 </li>`)
                 .join('')
             : '<li>Sin pagos registrados.</li>';
@@ -475,9 +491,12 @@ function wireAdminUserRows(list) {
             btn.addEventListener('click', async () => {
               const paymentId = btn.dataset.paymentId;
               const userEmail = row.querySelector('.cuenta-item-body b')?.textContent || '';
+              const outsideWindow = btn.dataset.withinWindow === 'false';
               const ok = await confirmModal({
                 title: 'Reembolsar pago',
-                text: `¿Reembolsar este pago a ${userEmail}? Esto revierte su Premium si estaba activo por este pago.`,
+                text: outsideWindow
+                  ? `Este pago tiene más de 7 días (${btn.dataset.daysSince}d) — ¿reembolsar de todos modos a ${userEmail}? Esto revierte su Premium si estaba activo por este pago.`
+                  : `¿Reembolsar este pago a ${userEmail}? Esto revierte su Premium si estaba activo por este pago.`,
                 confirmLabel: 'Reembolsar',
                 danger: true,
               });
@@ -577,7 +596,7 @@ async function loadAdminUsers() {
   const list = $('admin-users-list');
   if (!list) return;
   try {
-    const data = await listAdminUsers(adminUsersSearchTerm, adminUsersPage, 20);
+    const data = await listAdminUsers(adminUsersSearchTerm, adminUsersPage, 10);
     renderAdminUsersList(data);
   } catch (_) {
     list.innerHTML = '<li>No se pudo cargar la lista de usuarios.</li>';
@@ -626,6 +645,15 @@ let adminSupportLastSeenAt = null;
 // se pintaría dos veces en el chat del admin.
 let adminSeenMessageIds = new Set();
 let adminSocketHandle = null;
+// Estado de agrupación del hilo de chat (etiqueta de remitente suprimida en
+// mensajes consecutivos del mismo lado + separador de fecha) — persiste
+// ENTRE llamadas a renderAdminChatMessages (arranque + appends de polling/
+// socket) porque tiene que "recordar" el último mensaje pintado aunque haya
+// sido en una llamada anterior. Se resetea al abrir una conversación nueva
+// (ver openAdminSupportConversation) para no arrastrar el estado de la
+// conversación anterior.
+let adminChatLastRenderedSender = null;
+let adminChatLastRenderedDay = null;
 
 // "Mostrar más" — mismo patrón que comments.js::VISIBLE_BY_DEFAULT/expanded:
 // los items de más allá del cupo quedan en el DOM pero ocultos por CSS, y el
@@ -680,17 +708,48 @@ function admitNewAdminMessages(list) {
   return fresh;
 }
 
+/** Clave de "día calendario" local (no UTC) para agrupar mensajes por fecha
+ * — dos mensajes con la misma clave van bajo el mismo separador. */
+function chatDayKey(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** Texto del separador de fecha: "Hoy" / "Ayer" / fecha corta ("24 sep"). */
+function fmtChatDaySeparator(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (chatDayKey(iso) === chatDayKey(today)) return 'Hoy';
+  if (chatDayKey(iso) === chatDayKey(yesterday)) return 'Ayer';
+  return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+}
+
 function renderAdminChatMessages(container, messages, { append = false } = {}) {
+  if (!messages.length) {
+    if (!append) container.innerHTML = '<p class="cuenta-empty">Sin mensajes todavía.</p>';
+    return;
+  }
   const html = messages
-    .map(
-      (m) => `<div class="admin-chat-msg${m.sender === 'admin' ? ' admin-chat-msg-admin' : ''}">
+    .map((m) => {
+      const day = chatDayKey(m.created_at);
+      const dateSepHtml = day !== adminChatLastRenderedDay
+        ? `<div class="admin-chat-date-separator">${escapeHtml(fmtChatDaySeparator(m.created_at))}</div>`
+        : '';
+      const showSender = dateSepHtml !== '' || m.sender !== adminChatLastRenderedSender;
+      adminChatLastRenderedDay = day;
+      adminChatLastRenderedSender = m.sender;
+      return `${dateSepHtml}<div class="admin-chat-msg${m.sender === 'admin' ? ' admin-chat-msg-admin' : ''}">
         ${escapeHtml(m.content)}
-        <small>${m.sender === 'admin' ? 'Admin' : 'Usuario'} · ${fmtDate(m.created_at)}</small>
-      </div>`,
-    )
+        ${showSender ? `<small>${m.sender === 'admin' ? 'Admin' : 'Usuario'} · ${fmtDate(m.created_at)}</small>` : `<small>${fmtDate(m.created_at)}</small>`}
+      </div>`;
+    })
     .join('');
   if (append) container.insertAdjacentHTML('beforeend', html);
-  else container.innerHTML = html || '<p class="cuenta-empty">Sin mensajes todavía.</p>';
+  else container.innerHTML = html;
   container.scrollTop = container.scrollHeight;
 }
 
@@ -725,6 +784,8 @@ async function openAdminSupportConversation(conversationId, li) {
   panel.classList.remove('hidden');
   const chatEl = panel.querySelector('.admin-chat');
   chatEl.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
+  adminChatLastRenderedSender = null;
+  adminChatLastRenderedDay = null;
   try {
     const data = await getAdminSupportMessages(conversationId);
     const messages = admitNewAdminMessages((data && data.messages) || []);
@@ -761,11 +822,20 @@ function closeAdminSupportConversation(li) {
 
 function renderAdminSupportRow(c) {
   const preview = c.last_message_preview ? escapeHtml(c.last_message_preview) : '';
+  const email = c.user_email || '';
+  const initial = (email[0] || '?').toUpperCase();
+  const awaitingReply = c.last_message_sender === 'user';
   return `<li class="cuenta-item admin-support-row" data-conversation-id="${escapeHtml(c.id)}">
     <button type="button" class="cuenta-item-body admin-support-summary">
-      <b>${escapeHtml(c.user_email || '')}</b>
-      <small>${c.message_count ?? 0} mensajes · último ${fmtDateOrDash(c.last_message_at)}</small>
-      ${preview ? `<small>"${preview}"</small>` : ''}
+      <span class="admin-support-avatar" aria-hidden="true">${escapeHtml(initial)}</span>
+      <span class="admin-support-summary-text">
+        <span class="admin-support-summary-line1">
+          <b>${escapeHtml(email)}</b>
+          ${awaitingReply ? '<span class="admin-support-reply-dot" title="Esperando tu respuesta" aria-label="Esperando tu respuesta"></span>' : ''}
+        </span>
+        <small class="admin-support-preview">${preview ? `"${preview}"` : `${c.message_count ?? 0} mensajes`}</small>
+      </span>
+      <span class="admin-support-summary-time">${fmtDateOrDash(c.last_message_at)}</span>
     </button>
     <div class="admin-panel hidden">
       <div class="admin-panel-head">

@@ -50,7 +50,7 @@ export async function downloadSalesCsv(fromDate, toDate) {
 
 // ── Usuarios (backend/app/routers/admin_users.py) ───────────────────────────
 
-export async function listAdminUsers(search, page = 1, perPage = 20) {
+export async function listAdminUsers(search, page = 1, perPage = 10) {
   const params = new URLSearchParams();
   if (search) params.set('search', search);
   params.set('page', String(page));

@@ -592,7 +592,8 @@ function renderCoupon(premium) {
   const input = $('cuenta-coupon-input');
   const lookupBtn = $('cuenta-coupon-lookup');
   const result = $('cuenta-coupon-result');
-  const resultText = $('cuenta-coupon-result-text');
+  const headlineEl = $('cuenta-coupon-headline');
+  const referrerEl = $('cuenta-coupon-referrer');
   const switchEl = $('cuenta-coupon-switch');
   const switchLabel = $('cuenta-coupon-switch-label');
   const status = $('cuenta-coupon-status');
@@ -617,9 +618,10 @@ function renderCoupon(premium) {
   if (premium && premium.has_pending_coupon) {
     input.disabled = true;
     lookupBtn.disabled = true;
-    if (resultText) {
-      resultText.textContent = 'Tenés un código de referido activado — se aplica al elegir un plan Mensual o Anual.';
+    if (headlineEl) {
+      headlineEl.textContent = '🎁 Código de referido activado — se aplica al elegir un plan Mensual o Anual.';
     }
+    if (referrerEl) referrerEl.textContent = '';
     if (switchLabel) switchLabel.textContent = 'Activado';
     switchEl.checked = true;
     result.classList.remove('hidden');
@@ -635,7 +637,8 @@ async function lookupCouponCode() {
   const lookupBtn = $('cuenta-coupon-lookup');
   const errorEl = $('cuenta-coupon-error');
   const result = $('cuenta-coupon-result');
-  const resultText = $('cuenta-coupon-result-text');
+  const headlineEl = $('cuenta-coupon-headline');
+  const referrerEl = $('cuenta-coupon-referrer');
   const switchEl = $('cuenta-coupon-switch');
   const switchLabel = $('cuenta-coupon-switch-label');
   if (!input || !lookupBtn || !result) return;
@@ -648,9 +651,13 @@ async function lookupCouponCode() {
     const data = await lookupCoupon(code);
     if (data && data.valid) {
       couponLookupCode = data.code || code;
-      if (resultText) {
-        const label = data.label ? `${escapeHtml(data.label)} — ` : '';
-        resultText.textContent = `🎟️ ${label}${data.trial_days ?? 30} días de Premium gratis al activarlo.`;
+      if (headlineEl) {
+        const months = data.trial_days && data.trial_days >= 60 ? Math.round(data.trial_days / 30) : 1;
+        headlineEl.textContent = months === 1 ? '🎁 1 mes de Premium gratis' : `🎁 ${months} meses de Premium gratis`;
+      }
+      if (referrerEl) {
+        referrerEl.textContent = data.label ? `Invitado por ${data.label}` : '';
+        referrerEl.classList.toggle('hidden', !data.label);
       }
       if (switchLabel) switchLabel.textContent = 'Activar';
       if (switchEl) {

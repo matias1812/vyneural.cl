@@ -93,6 +93,27 @@ function fmtTime(iso) {
   }
 }
 
+/** Clave de "día calendario" local (no UTC) para agrupar mensajes por fecha
+ * — mismo criterio que admin.js::chatDayKey, duplicado acá porque este
+ * archivo no comparte módulo con el panel de admin. */
+function chatDayKey(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+/** Texto del separador de fecha: "Hoy" / "Ayer" / fecha corta ("24 sep"). */
+function fmtChatDaySeparator(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (chatDayKey(iso) === chatDayKey(today)) return 'Hoy';
+  if (chatDayKey(iso) === chatDayKey(yesterday)) return 'Ayer';
+  return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+}
+
 // ─────────────────────────────────────────────────────────── Construcción UI
 function build() {
   const fab = document.createElement('button');
@@ -256,6 +277,14 @@ export function initSupportChat() {
   // esto, ese mensaje se pintaría dos veces en el chat.
   let seenMessageIds = new Set();
   let wsHandle = null;
+  // Estado de agrupación del hilo (mismo criterio que admin.js): recuerda el
+  // remitente/día del último mensaje pintado para suprimir la etiqueta de
+  // remitente repetida e insertar separadores de fecha, persistiendo entre
+  // llamadas a appendMessages (polling/socket van agregando de a uno).
+  // Se resetea junto con el resto del estado del chat (ver ensureConversation
+  // y resetLocalState, donde messagesEl.innerHTML ya se limpia).
+  let lastRenderedSender = null;
+  let lastRenderedDay = null;
 
   function setConnStatus(status) {
     if (!connDotEl) return;
@@ -315,6 +344,8 @@ export function initSupportChat() {
     lastSeenAt = null;
     rating = 0;
     seenMessageIds = new Set();
+    lastRenderedSender = null;
+    lastRenderedDay = null;
     lsSet(LS_CONV_ID, '');
     lsSet(LS_LAST_SEEN, '');
     messagesEl.innerHTML = '';
@@ -329,18 +360,30 @@ export function initSupportChat() {
         seenMessageIds.add(m.id);
       }
       appended = true;
+      const day = chatDayKey(m.created_at);
+      if (day !== lastRenderedDay) {
+        const sep = document.createElement('div');
+        sep.className = 'support-date-separator';
+        sep.textContent = fmtChatDaySeparator(m.created_at);
+        messagesEl.appendChild(sep);
+      }
+      const showSender = day !== lastRenderedDay || m.sender !== lastRenderedSender;
+      lastRenderedDay = day;
+      lastRenderedSender = m.sender;
       const div = document.createElement('div');
       div.className = `support-msg support-msg-${m.sender === 'admin' ? 'admin' : 'user'}`;
-      const sender = document.createElement('span');
-      sender.className = 'support-msg-sender';
-      sender.textContent = m.sender === 'admin' ? 'Soporte' : 'Tú';
+      if (showSender) {
+        const sender = document.createElement('span');
+        sender.className = 'support-msg-sender';
+        sender.textContent = m.sender === 'admin' ? 'Soporte' : 'Tú';
+        div.appendChild(sender);
+      }
       const p = document.createElement('p');
       p.className = 'support-msg-text';
       p.textContent = m.content;
       const time = document.createElement('span');
       time.className = 'support-msg-time';
       time.textContent = fmtTime(m.created_at);
-      div.appendChild(sender);
       div.appendChild(p);
       div.appendChild(time);
       messagesEl.appendChild(div);
@@ -363,6 +406,8 @@ export function initSupportChat() {
       messagesEl.innerHTML = '';
       lastSeenAt = null;
       seenMessageIds = new Set();
+      lastRenderedSender = null;
+      lastRenderedDay = null;
       appendMessages(conv.messages);
       persist();
       hideBanner();
