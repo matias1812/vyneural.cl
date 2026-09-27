@@ -584,7 +584,7 @@ function renderAdminUserRow(u) {
       <b>${escapeHtml(u.email)}</b>
       <small>${escapeHtml(u.display_name || u.username || '')}</small>
       <small>${premiumLine}</small>
-      <small>Alta ${fmtDateOrDash(u.created_at)} · último login ${fmtDateOrDash(u.last_login_at)}${u.last_seen_platform ? ` · ${escapeHtml(u.last_seen_platform)}` : ''}</small>
+      <small>Alta ${fmtDateOrDash(u.created_at)} · último login ${fmtDateOrDash(u.last_login_at)} · última conexión ${fmtDateOrDash(u.last_seen_at)}${u.last_seen_platform ? ` · ${escapeHtml(u.last_seen_platform)}` : ''}</small>
     </div>
     <details class="cuenta-create admin-user-payments-details">
       <summary>Ver pagos</summary>
