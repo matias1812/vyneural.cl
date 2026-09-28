@@ -4205,7 +4205,13 @@ alarmModal.addEventListener('click', (e) => {
 });
 if (alarmSettingsToggle && alarmSettingsPanel) {
   alarmSettingsToggle.addEventListener('click', () => {
-    alarmSettingsPanel.classList.toggle('hidden');
+    isPremiumUser().then((premium) => {
+      if (premium) {
+        alarmSettingsPanel.classList.toggle('hidden');
+      } else {
+        openPremiumRequired('Configurar tu alarma es parte de Vyneural Premium.');
+      }
+    });
   });
 }
 

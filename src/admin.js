@@ -21,6 +21,8 @@ import {
   listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium, refundUserPayment,
   listAdminSupportConversations, getAdminSupportMessages, sendAdminSupportMessage, getAdminSupportStats,
   resolveSupportConversation,
+  getGooglePlayCodesAvailable, importGooglePlayCodes,
+  getUsageAnalytics,
 } from './api/admin.js';
 import { openSupportSocket } from './api/support-ws-client.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
@@ -1581,6 +1583,84 @@ function wireMonthlyAccounting() {
   loadMonthlyAccounting();
 }
 
+// ── Admin: Analítica de uso ──────────────────────────────────────────────
+// Uso por plataforma (APK, web, PWA): usuarios activos y top eventos.
+
+function renderUsageAnalytics(data) {
+  const summaryEl = $('admin-analytics-summary');
+  if (!summaryEl) return;
+  if (!data) {
+    summaryEl.innerHTML = '<p class="cuenta-empty">No se pudo cargar la analítica de uso.</p>';
+    return;
+  }
+
+  const activeUsers = data.active_users || { apk: 0, web: 0, pwa: 0 };
+  const topEvents = data.top_events || {};
+
+  // Tarjetas KPI para usuarios activos
+  const kpiRows = ['apk', 'web', 'pwa'].map((platform) => {
+    const count = activeUsers[platform] || 0;
+    const label = platform === 'apk' ? 'APK' : platform === 'web' ? 'Web' : 'PWA';
+    return `<div class="admin-stat"><strong>${count}</strong><span>Usuarios activos · ${label}</span></div>`;
+  }).join('');
+
+  let html = '';
+  if (kpiRows) {
+    html += `<div class="admin-stat-row">${kpiRows}</div>`;
+  }
+
+  // Barras de eventos por plataforma
+  for (const platform of ['apk', 'web', 'pwa']) {
+    const events = topEvents[platform] || [];
+    if (!events.length) continue;
+
+    const maxCount = Math.max(...events.map((e) => e.count), 1);
+    const eventRows = events.map((event) => {
+      const pct = (event.count / maxCount * 100).toFixed(1);
+      return `
+        <li class="admin-analytics-event-row">
+          <span class="admin-analytics-event-type">${escapeHtml(event.event_type)}</span>
+          <div class="admin-analytics-event-bar-wrapper">
+            <div class="admin-analytics-event-bar" style="width: ${pct}%"></div>
+          </div>
+          <span class="admin-analytics-event-count">${event.count}</span>
+        </li>`;
+    }).join('');
+
+    const platformLabel = platform === 'apk' ? 'APK' : platform === 'web' ? 'Web' : 'PWA';
+    html += `
+      <div class="admin-stat-breakdown">
+        <h4>Top eventos · ${platformLabel}</h4>
+        <ul class="cuenta-list admin-analytics-event-list">${eventRows}</ul>
+      </div>`;
+  }
+
+  summaryEl.innerHTML = html || '<p class="cuenta-empty">Sin datos para el período seleccionado.</p>';
+}
+
+async function loadUsageAnalytics() {
+  const summaryEl = $('admin-analytics-summary');
+  const daysInput = $('admin-analytics-days');
+  const days = parseInt(daysInput?.value || '30', 10);
+  if (summaryEl) summaryEl.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
+  try {
+    const data = await getUsageAnalytics(days);
+    renderUsageAnalytics(data);
+  } catch (_) {
+    renderUsageAnalytics(null);
+  }
+}
+
+function wireUsageAnalyticsForm() {
+  const form = $('admin-analytics-form');
+  if (!form) return;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    loadUsageAnalytics();
+  });
+  loadUsageAnalytics();
+}
+
 // ── Admin: Generador de contratos ────────────────────────────────────────
 // Sección 100% client-side (mismo patrón que downloadSalesPdf más arriba):
 // el admin elige un tipo de contrato, llena un formulario generado desde
@@ -2010,6 +2090,84 @@ function wireAdminContracts() {
   }
 }
 
+// ── Códigos de Google Play ───────────────────────────────────────────────────
+
+async function loadGooglePlayCodesAvailable() {
+  const displayEl = $('admin-gp-codes-available');
+  if (!displayEl) return;
+  try {
+    const result = await getGooglePlayCodesAvailable();
+    const monthly = result.monthly || 0;
+    const annual = result.annual || 0;
+    displayEl.textContent = `Disponibles: ${monthly} mensual · ${annual} anual`;
+  } catch (err) {
+    displayEl.textContent = `Error: no se pudo cargar disponibles (${err?.status || 'desconocido'})`;
+  }
+}
+
+function wireGooglePlayCodesImport() {
+  const fileInput = $('admin-gp-codes-file');
+  const fileBtn = $('admin-gp-codes-file-btn');
+  const fileName = $('admin-gp-codes-file-name');
+  const form = $('admin-gp-codes-import-form');
+  const planSelect = $('admin-gp-codes-plan');
+  const errorDiv = $('admin-gp-codes-error');
+  const resultDiv = $('admin-gp-codes-result');
+
+  if (!form || !fileInput || !fileBtn) return;
+
+  // Botón para abrir el file input
+  fileBtn.addEventListener('click', () => fileInput.click());
+
+  // Mostrar el nombre del archivo seleccionado
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files[0]) {
+      fileName.textContent = fileInput.files[0].name;
+    } else {
+      fileName.textContent = '';
+    }
+  });
+
+  // Manejar el submit del form
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorDiv.classList.add('hidden');
+    resultDiv.innerHTML = '';
+
+    if (!fileInput.files || !fileInput.files[0]) {
+      errorDiv.textContent = 'Por favor elegí un archivo CSV.';
+      errorDiv.classList.remove('hidden');
+      return;
+    }
+
+    const file = fileInput.files[0];
+    const plan = planSelect.value;
+    const reader = new FileReader();
+
+    reader.onload = async () => {
+      try {
+        const csvContent = reader.result;
+        const result = await importGooglePlayCodes(plan, csvContent);
+        resultDiv.innerHTML = `✅ Se importaron ${result.inserted} códigos nuevos (${result.skipped} ya existían).`;
+        fileInput.value = '';
+        fileName.textContent = '';
+        // Refrescar el contador de disponibles
+        await loadGooglePlayCodesAvailable();
+      } catch (err) {
+        errorDiv.textContent = err?.detail || 'Error en la importación. Verificá que el CSV sea válido.';
+        errorDiv.classList.remove('hidden');
+      }
+    };
+
+    reader.onerror = () => {
+      errorDiv.textContent = 'No pudimos leer el archivo. Intentá de nuevo.';
+      errorDiv.classList.remove('hidden');
+    };
+
+    reader.readAsText(file);
+  });
+}
+
 // ── Arranque de la página ────────────────────────────────────────────────
 // A diferencia de renderAdminCard() en /cuenta (que solo ocultaba una card
 // dentro de una página de usuario normal), acá TODA la página es el panel
@@ -2040,6 +2198,9 @@ async function init() {
   wireAdminCouponSalesForm();
   wireAdminSalesForm();
   wireMonthlyAccounting();
+  wireUsageAnalyticsForm();
+  loadGooglePlayCodesAvailable();
+  wireGooglePlayCodesImport();
   loadAdminUsers();
   wireAdminUsersForm();
   wireAdminContracts();

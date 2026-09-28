@@ -172,6 +172,28 @@
           </div>
         </div>
 
+        <div class="page-card admin-accounting-card-full" id="cuenta-admin-analytics-card">
+          <div class="rutina-head">
+            <h3>📊 Uso por plataforma</h3>
+          </div>
+          <form id="admin-analytics-form" class="cuenta-form">
+            <div class="cuenta-form-row">
+              <label>Ventana (días)
+                <select id="admin-analytics-days">
+                  <option value="7">Últimos 7 días</option>
+                  <option value="30" selected>Últimos 30 días</option>
+                  <option value="90">Últimos 90 días</option>
+                </select>
+              </label>
+            </div>
+            <div class="admin-inline-row">
+              <button type="submit" class="cuenta-btn" id="admin-analytics-query">Actualizar</button>
+            </div>
+            <div class="auth-error hidden" id="admin-analytics-error" role="alert"></div>
+          </form>
+          <div id="admin-analytics-summary"></div>
+        </div>
+
         <div class="page-card admin-support-card-full" id="cuenta-admin-support-card">
           <div class="rutina-head">
             <h3>💬 Soporte</h3>
@@ -259,6 +281,31 @@
               <div class="admin-contracts-preview" id="admin-contract-preview"></div>
             </div>
           </div>
+        </div>
+
+        <div class="page-card" id="cuenta-admin-google-play-codes-card">
+          <div class="rutina-head">
+            <h3>🎟️ Códigos de Google Play</h3>
+          </div>
+          <p id="admin-gp-codes-available" class="admin-gp-codes-summary"></p>
+          <form id="admin-gp-codes-import-form" class="cuenta-form">
+            <div class="cuenta-form-row">
+              <label>Plan
+                <select id="admin-gp-codes-plan" required>
+                  <option value="monthly">Mensual</option>
+                  <option value="annual">Anual</option>
+                </select>
+              </label>
+            </div>
+            <div class="admin-inline-row">
+              <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-gp-codes-file-btn">Elegir archivo CSV</button>
+              <span id="admin-gp-codes-file-name"></span>
+            </div>
+            <input type="file" id="admin-gp-codes-file" accept=".csv" hidden />
+            <button type="submit" class="cuenta-btn" id="admin-gp-codes-import-btn">Importar</button>
+            <div class="auth-error hidden" id="admin-gp-codes-error" role="alert"></div>
+            <div id="admin-gp-codes-result"></div>
+          </form>
         </div>
       </div>
     </main>

@@ -4035,6 +4035,52 @@ html:not(.in-app) .in-app-only {
   margin: 0 0 6px;
 }
 
+/* Barra de comparación para eventos (F4: analytics) — muestra event_type,
+   barra proporcional al conteo máximo, y conteo absoluto. */
+.admin-analytics-event-list {
+  list-style: none;
+  padding: 0;
+}
+
+.admin-analytics-event-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-dim);
+  font-size: 12px;
+}
+
+.admin-analytics-event-row:last-child {
+  border-bottom: none;
+}
+
+.admin-analytics-event-type {
+  word-break: break-word;
+  color: var(--text-dim);
+}
+
+.admin-analytics-event-bar-wrapper {
+  height: 16px;
+  background: var(--border-dim);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.admin-analytics-event-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.2s ease-out;
+}
+
+.admin-analytics-event-count {
+  text-align: right;
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* .cuenta-item es flex (ver comentario en .schedule más arriba): un
    <details class="cuenta-create"> suelto (pagos/otorgar premium por fila
    de usuario) necesita el mismo flex-basis:100% para ocupar la fila entera

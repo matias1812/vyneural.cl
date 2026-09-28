@@ -270,12 +270,18 @@ function showError(msg) {
 // MainActivity.kt ya intercepta cualquier http(s):// clickeado dentro de la
 // WebView y lo manda a startActivity(ACTION_VIEW) — mismo mecanismo que el
 // link de "gestionar en Google Play" de renderPlans, nada nuevo que armar).
-function showGooglePlayCode(code, redeemUrl) {
+// actualPlan y requestedPlan son opcionales — si vienen y son distintos,
+// mostramos una nota alertando que el código es de otro plan (el usuario pudo
+// haber pedido uno nuevo pero la cuenta ya tenía uno anterior emitido).
+function showGooglePlayCode(code, redeemUrl, actualPlan, requestedPlan) {
   const el = $('premium-error');
   if (!el) return;
   el.classList.remove('auth-error');
   el.classList.add('auth-ok');
-  el.innerHTML = `${ICONS.gem} Tu código de Google Play: <strong>${code}</strong> — canjealo para sumar tu mes de Premium gratis:
+  const planMismatchNote = actualPlan && requestedPlan && actualPlan !== requestedPlan
+    ? ` — <strong>nota: tu cuenta ya tenía un código activado para el plan ${PLAN_LABELS[actualPlan]?.title || actualPlan}</strong> — es el que se va a canjear, no el que acabás de tocar`
+    : '';
+  el.innerHTML = `${ICONS.gem} Tu código de Google Play: <strong>${code}</strong>${planMismatchNote} — canjealo para sumar tu mes de Premium gratis:
     <a href="${redeemUrl}" target="_blank" rel="noopener">Canjear en Google Play</a>.
     Una vez canjeado, tu Premium se activa solo (puede tardar unos minutos).`;
   el.classList.remove('hidden');
@@ -505,7 +511,15 @@ async function buyPlan(plan, btn, activePlanKey) {
         btn.disabled = false;
         btn.textContent = originalLabel;
         if (codeResult && codeResult.ok) {
-          showGooglePlayCode(codeResult.code, codeResult.redeem_url);
+          showGooglePlayCode(codeResult.code, codeResult.redeem_url, codeResult.plan, plan);
+          // Canjear un código de Play Console solo se puede hacer desde la
+          // superficie de Play Store, nunca desde el flujo nativo de Billing
+          // — navegamos solos en vez de dejar que el usuario tenga que
+          // encontrar y tocar el link a mano (MainActivity.kt ya intercepta
+          // http(s):// y lo abre con la Play Store real vía Intent). Google
+          // valida el método de pago en su propia pantalla de canje (docs
+          // oficiales de Play Billing) — no hace falta avisar nosotros antes.
+          window.location.href = codeResult.redeem_url;
         } else {
           showError((codeResult && codeResult.reason) || 'No pudimos generar tu código de Google Play. Reintentá en unos segundos.');
         }

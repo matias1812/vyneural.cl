@@ -93,6 +93,12 @@ export async function refundUserPayment(userId, paymentId) {
   return post(`/api/v1/admin/users/${encodeURIComponent(userId)}/payments/${encodeURIComponent(paymentId)}/refund`, {});
 }
 
+// ── Analítica de uso (backend/app/routers/admin_analytics.py) ──────────────
+
+export async function getUsageAnalytics(days = 30) {
+  return get(`/api/v1/admin/analytics/usage?days=${encodeURIComponent(days)}`);
+}
+
 // ── Soporte (backend/app/routers/support.py::admin_router) ─────────────────
 
 export async function listAdminSupportConversations(status = 'open') {
@@ -123,4 +129,17 @@ export async function sendAdminSupportMessage(conversationId, content) {
 // calificar la próxima vez que abra el chat (ver support-chat.js).
 export async function resolveSupportConversation(conversationId) {
   return post(`/api/v1/admin/support/conversations/${encodeURIComponent(conversationId)}/resolve`, {});
+}
+
+// ── Códigos de Google Play (backend/app/routers/admin_google_play_codes.py) ──
+
+export async function getGooglePlayCodesAvailable() {
+  return get('/api/v1/admin/google-play-codes/available');
+}
+
+export async function importGooglePlayCodes(plan, csvContent) {
+  return post('/api/v1/admin/google-play-codes/import', {
+    plan,
+    csv_content: csvContent,
+  });
 }
