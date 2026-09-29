@@ -18,6 +18,7 @@ import {
 import {
   getSalesSummary, downloadSalesCsv,
   getMonthlyAccounting, downloadMonthlyAccountingCsv,
+  createExpense, listExpenses, deleteExpense,
   listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium, refundUserPayment,
   listAdminSupportConversations, getAdminSupportMessages, sendAdminSupportMessage, getAdminSupportStats,
   resolveSupportConversation,
@@ -375,21 +376,18 @@ async function loadAdminSalesSummary() {
   }
 }
 
-// Rasteriza public/icon.svg a un PNG en un <canvas> offscreen para poder
-// pasarlo a doc.addImage() (jsPDF no soporta SVG nativo sin un plugin
-// aparte). Si algo falla en el camino, devuelve null y el PDF se genera
-// igual, solo que sin el logo — nunca debe bloquear el informe completo.
+// Rasteriza el ícono real de la app (public/icons/icon-512-playstore.png)
+// a un PNG en un <canvas> offscreen para poder pasarlo a doc.addImage()
+// (jsPDF no soporta todas las transformaciones de imagen directamente).
+// Si algo falla en el camino, devuelve null y el PDF se genera igual, solo
+// que sin el logo — nunca debe bloquear el informe completo.
 async function rasterizeLogoToPngDataUrl() {
   try {
-    const res = await fetch('/icon.svg');
-    if (!res.ok) return null;
-    const svgText = await res.text();
-    const svgUrl = `data:image/svg+xml;base64,${btoa(svgText)}`;
     const img = new Image();
     await new Promise((resolve, reject) => {
       img.onload = resolve;
       img.onerror = reject;
-      img.src = svgUrl;
+      img.src = '/icons/icon-512-playstore.png';
     });
     const size = 128;
     const canvas = document.createElement('canvas');
@@ -574,6 +572,7 @@ function wireAdminSalesForm() {
 
 let adminUsersPage = 1;
 let adminUsersSearchTerm = '';
+let adminUsersOrphanOnly = false;
 
 function renderAdminUserRow(u) {
   const premiumLine = u.premium_lifetime
@@ -605,6 +604,14 @@ function renderAdminUserRow(u) {
           </label>
           <label>Días (opcional)<em> — vacío usa el default del plan</em>
             <input type="number" min="1" class="admin-user-days" />
+          </label>
+          <label>Canal (opcional)
+            <select class="admin-user-channel">
+              <option value="">Sin canal</option>
+              <option value="google_play">Google Play (APK)</option>
+              <option value="oneclick">Oneclick (Web)</option>
+              <option value="webpay_plus">Webpay Plus (Web)</option>
+            </select>
           </label>
         </div>
         <div class="admin-inline-row">
@@ -688,15 +695,17 @@ function wireAdminUserRows(list) {
     const revokeBtn = row.querySelector('.admin-user-revoke');
     const planSel = row.querySelector('.admin-user-plan');
     const daysInput = row.querySelector('.admin-user-days');
+    const channelSel = row.querySelector('.admin-user-channel');
     const errorEl = row.querySelector('.admin-user-premium-error');
     if (grantBtn) {
       grantBtn.addEventListener('click', async () => {
         if (errorEl) errorEl.classList.add('hidden');
         const plan = planSel.value;
         const daysRaw = daysInput.value.trim();
+        const channel = channelSel.value || undefined;
         const body = plan === 'lifetime'
-          ? { plan, lifetime: true }
-          : { plan, days: daysRaw ? parseInt(daysRaw, 10) : undefined };
+          ? { plan, lifetime: true, channel }
+          : { plan, days: daysRaw ? parseInt(daysRaw, 10) : undefined, channel };
         grantBtn.disabled = true;
         try {
           await grantUserPremium(userId, body);
@@ -757,7 +766,7 @@ async function loadAdminUsers() {
   const list = $('admin-users-list');
   if (!list) return;
   try {
-    const data = await listAdminUsers(adminUsersSearchTerm, adminUsersPage, 10);
+    const data = await listAdminUsers(adminUsersSearchTerm, adminUsersPage, 10, adminUsersOrphanOnly);
     renderAdminUsersList(data);
   } catch (_) {
     list.innerHTML = '<li>No se pudo cargar la lista de usuarios.</li>';
@@ -768,10 +777,18 @@ function wireAdminUsersForm() {
   const form = $('admin-users-search-form');
   const prevBtn = $('admin-users-prev');
   const nextBtn = $('admin-users-next');
+  const orphanFilter = $('admin-users-orphan-filter');
   if (form) {
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       adminUsersSearchTerm = $('admin-users-search').value.trim();
+      adminUsersPage = 1;
+      loadAdminUsers();
+    });
+  }
+  if (orphanFilter) {
+    orphanFilter.addEventListener('change', () => {
+      adminUsersOrphanOnly = orphanFilter.checked;
       adminUsersPage = 1;
       loadAdminUsers();
     });
@@ -1331,6 +1348,13 @@ const ADMIN_ACCOUNTING_STATUS_LABELS = {
   rejected: 'Rechazado',
 };
 
+const ADMIN_EXPENSE_CATEGORIES = {
+  servicio_externo: 'Servicio externo',
+  consultoria: 'Consultoría',
+  mantencion: 'Mantención',
+  otro: 'Otro',
+};
+
 function renderMonthlyAccounting(data) {
   const summaryEl = $('admin-accounting-summary');
   const f29El = $('admin-accounting-f29-body');
@@ -1362,7 +1386,49 @@ function renderMonthlyAccounting(data) {
     f29El.innerHTML = `
       <p>Código [538] Ventas Afectas a IVA (Neto): <strong>${fmtMoney(f29.code_538_net_sales)}</strong></p>
       <p>Código [504] Débito Fiscal (IVA 19%): <strong>${fmtMoney(f29.code_504_iva_debit)}</strong></p>
-      <p>Total Comisiones a Terceros: <strong>${fmtMoney(f29.total_referral_commissions)}</strong></p>`;
+      <p>Total Comisiones a Terceros: <strong>${fmtMoney(f29.total_referral_commissions)}</strong></p>
+      <p>IVA Crédito Fiscal (gastos): <strong>${fmtMoney(f29.total_iva_credit)}</strong></p>
+      <p>IVA a Pagar (neto): <strong>${fmtMoney(f29.iva_a_pagar_neto)}</strong></p>`;
+  }
+
+  // Renderizar gastos del mes
+  const expensesTbody = $('admin-expenses-table-body');
+  const expensesTable = $('admin-expenses-table');
+  const expensesEmpty = $('admin-expenses-empty');
+  const expenseSummaryEl = $('admin-expense-summary');
+  const { expenses, expense_summary } = data;
+
+  if (expensesTbody) {
+    if (!expenses || !expenses.length) {
+      if (expensesTable) expensesTable.classList.add('hidden');
+      if (expensesEmpty) expensesEmpty.classList.remove('hidden');
+      expensesTbody.innerHTML = '';
+    } else {
+      if (expensesTable) expensesTable.classList.remove('hidden');
+      if (expensesEmpty) expensesEmpty.classList.add('hidden');
+      expensesTbody.innerHTML = expenses
+        .map(
+          (e) => `<tr>
+            <td>${fmtDateOrDash(e.fecha)}</td>
+            <td>${escapeHtml(e.descripcion)}</td>
+            <td>${escapeHtml(ADMIN_EXPENSE_CATEGORIES[e.categoria] || e.categoria)}</td>
+            <td>${escapeHtml(e.proveedor || '—')}</td>
+            <td>${fmtMoney(e.monto_neto)}</td>
+            <td>${fmtMoney(e.monto_iva)}</td>
+            <td><button type="button" class="admin-expense-delete-btn cuenta-btn cuenta-btn-ghost" data-id="${escapeHtml(e.id)}">Borrar</button></td>
+          </tr>`,
+        )
+        .join('');
+    }
+  }
+
+  if (expenseSummaryEl && expense_summary) {
+    expenseSummaryEl.innerHTML = `
+      <div class="admin-stat-row">
+        <div class="admin-stat"><strong>${fmtMoney(expense_summary.total_gross)}</strong><span>Total bruto</span></div>
+        <div class="admin-stat"><strong>${fmtMoney(expense_summary.total_neto)}</strong><span>Total neto</span></div>
+        <div class="admin-stat"><strong>${fmtMoney(expense_summary.total_iva)}</strong><span>Total IVA</span></div>
+      </div>`;
   }
 
   // Empty state explícito pedido por el dueño del producto — ver
@@ -1579,6 +1645,72 @@ function wireMonthlyAccounting() {
       }
     });
   }
+
+  // Wiring del formulario de gastos
+  const expenseForm = $('admin-expense-form');
+  const expenseError = $('admin-expense-error');
+  if (expenseForm) {
+    expenseForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (expenseError) expenseError.classList.add('hidden');
+      const month = parseInt(monthSel.value, 10);
+      const year = parseInt(yearInput.value, 10);
+      const fecha = $('admin-expense-fecha').value;
+      const descripcion = $('admin-expense-descripcion').value;
+      const categoria = $('admin-expense-categoria').value;
+      const proveedor = $('admin-expense-proveedor').value || null;
+      const numero_documento = $('admin-expense-numero').value || null;
+      const monto_neto = parseFloat($('admin-expense-monto-neto').value);
+      const monto_iva = parseFloat($('admin-expense-monto-iva').value);
+
+      expenseForm.disabled = true;
+      try {
+        await createExpense({
+          fecha,
+          descripcion,
+          categoria,
+          proveedor,
+          numero_documento,
+          monto_neto,
+          monto_iva,
+        });
+        // Limpiar formulario
+        expenseForm.reset();
+        // Recargar la contabilidad del mes para actualizar la tabla y resumen
+        await loadMonthlyAccounting();
+      } catch (err) {
+        if (expenseError) {
+          expenseError.textContent = (err && err.detail) || 'No se pudo crear el gasto.';
+          expenseError.classList.remove('hidden');
+        }
+      } finally {
+        expenseForm.disabled = false;
+      }
+    });
+  }
+
+  // Delegación: manejador de botones de borrar gastos
+  document.addEventListener('click', async (e) => {
+    if (e.target.classList.contains('admin-expense-delete-btn')) {
+      const expenseId = e.target.getAttribute('data-id');
+      if (!expenseId || !confirm('¿Estás seguro de que querés borrar este gasto?')) return;
+      if (expenseError) expenseError.classList.add('hidden');
+      const month = parseInt(monthSel.value, 10);
+      const year = parseInt(yearInput.value, 10);
+      e.target.disabled = true;
+      try {
+        await deleteExpense(expenseId);
+        // Recargar la contabilidad del mes para actualizar la tabla y resumen
+        await loadMonthlyAccounting();
+      } catch (err) {
+        if (expenseError) {
+          expenseError.textContent = (err && err.detail) || 'No se pudo borrar el gasto.';
+          expenseError.classList.remove('hidden');
+        }
+        e.target.disabled = false;
+      }
+    }
+  });
 
   loadMonthlyAccounting();
 }
@@ -1874,6 +2006,16 @@ function readContractFormValues(templateId) {
     // <select> ya expone `.value` igual que un input de texto, sin cambios.
     values[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value;
   });
+
+  // Para la plantilla 'services', calcular MONTO_ANTICIPO y MONTO_SALDO
+  // basado en MONTO_TOTAL y PORCENTAJE_ANTICIPO.
+  if (templateId === 'services') {
+    const montoTotal = Number(values.MONTO_TOTAL) || 0;
+    const porcentajeAnticipo = Number(values.PORCENTAJE_ANTICIPO) || 0;
+    values.MONTO_ANTICIPO = Math.round(montoTotal * porcentajeAnticipo / 100);
+    values.MONTO_SALDO = montoTotal - values.MONTO_ANTICIPO;
+  }
+
   return values;
 }
 

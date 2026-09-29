@@ -501,6 +501,31 @@ class AndroidBridge(
                     }
                     respond("ACCEPTED", command, JSONObject().put("id", id))
                 }
+                "CHECK_PLAY_PURCHASES" -> {
+                    // Consulta de SOLO LECTURA (queryPurchasesAsync, nunca abre
+                    // el diálogo de compra) — detecta una suscripción ya
+                    // canjeada fuera de la app (código promocional redimido
+                    // directo en la Play Store) al volver a primer plano.
+                    // Mismo shape async que START_PLAY_PURCHASE, pero con un
+                    // callback JS DISTINTO (__vyneuralCheckPurchasesResponse)
+                    // a propósito: para que esta consulta nunca resuelva por
+                    // error la promesa de una compra normal en curso del lado
+                    // JS (__vyneuralPlayPurchaseResponse).
+                    val id = payload?.optLong("id", -1L) ?: -1L
+                    val productIdsJson = payload?.optJSONArray("productIds")
+                    val productIds = mutableListOf<String>()
+                    if (productIdsJson != null) {
+                        for (i in 0 until productIdsJson.length()) {
+                            val value = productIdsJson.optString(i, "")
+                            if (value.isNotEmpty()) productIds.add(value)
+                        }
+                    }
+                    if (id < 0 || productIds.isEmpty()) return respond("INVALID", command, null)
+                    playBilling.checkActiveSubscriptions(productIds) { result ->
+                        activity.pushToWeb("window.__vyneuralCheckPurchasesResponse($id, ${JSONObject.quote(result.toString())})")
+                    }
+                    respond("ACCEPTED", command, JSONObject().put("id", id))
+                }
                 "PICK_ALARM_SOUND" -> {
                     // P7 — personalización de alarma: picker de tonos del PROPIO
                     // sistema (ACTION_RINGTONE_PICKER, TYPE_ALARM), no un catálogo

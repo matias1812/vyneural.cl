@@ -1211,7 +1211,27 @@ export class CymaticsRenderer {
       this._physicsState.coherence     += (0.5 - this._physicsState.coherence)     * restK;
       this._physicsState.velocity      += (0.2 - this._physicsState.velocity)      * restK;
       this._physicsState.complexity    += (0.3 - this._physicsState.complexity)    * restK;
-      this._physicsState.baseFrequency += (base  - this._physicsState.baseFrequency) * restK;
+      // FIX (2026-09-28, "eco de cambiar de frecuencia" — reportado en vivo:
+      // elegir un preset SIN reproducir y recién después apretar play mostraba
+      // una transición animada de varios segundos, como si el plato viajara
+      // en vivo desde el preset viejo hacia el nuevo justo al arrancar el
+      // audio). CAUSA: baseFrequency usaba el MISMO restK lento de arriba
+      // (τ=3s, pensado para que coherence/velocity/complexity — la
+      // "vivacidad" del plato — se apaguen gradualmente al pausar una sesión
+      // que SÍ estaba sonando) también para la frecuencia representada. Sin
+      // reproducción no hay ningún patrón sonando del que "relajarse
+      // gradualmente" — medido en vivo (harness Node determinístico), tras
+      // 700ms sin play pBase apenas recorría un 13% del salto 963→190 Hz, así
+      // que CUALQUIER play posterior arrancaba a mitad de un glide de varios
+      // segundos más, con cambios de modo reales en pleno reproducir. El
+      // resto del pipeline (main.js selectState → simulation.setProfile) ya
+      // trata "sin reproducción" como "actualizar el estado/UI al instante"
+      // (ver comentario Golden Rule) — pBase debe seguir ese mismo criterio:
+      // sin audio sonando, el plato refleja el preset elegido de inmediato,
+      // no lo persigue con inercia. (τ de coherence/velocity/complexity no
+      // cambia: esas sí deben apagarse gradualmente al pausar una sesión real,
+      // caso no reportado como bug.)
+      this._physicsState.baseFrequency = base;
     }
     const coherence = this._physicsState.coherence;
     const velocity  = this._physicsState.velocity;
@@ -1331,7 +1351,20 @@ export class CymaticsRenderer {
     // de esa gota. Cada gota arranca ahora en SU propio objetivo real.
     if (!this._dropF) this._dropF = [drops[0].f, drops[1].f, drops[2].f];
     for (let i = 0; i < 3; i++) {
-      this._dropF[i] += (drops[i].f - this._dropF[i]) * emaK;
+      // FIX (2026-09-28, mismo "eco de cambiar de frecuencia" que
+      // physicsState.baseFrequency más arriba): el EMA (τ=1,5s) es el
+      // afinado "líquido" correcto MIENTRAS hay una sesión sonando, pero sin
+      // reproducción no hay nada que suene todavía — arrastrar el afinado de
+      // cada gota con esta misma inercia es lo que hacía que, al recién
+      // apretar play después de cambiar de preset en frío, las gotas
+      // siguieran "viajando" varios segundos hacia el preset ya elegido en
+      // vez de arrancar ya afinadas en él. Sin reproducción, cada gota
+      // adopta su objetivo al instante.
+      if (playing) {
+        this._dropF[i] += (drops[i].f - this._dropF[i]) * emaK;
+      } else {
+        this._dropF[i] = drops[i].f;
+      }
       drops[i].f = Math.max(0.5, this._dropF[i]);
     }
     const n = drops.length;
@@ -1443,7 +1476,18 @@ export class CymaticsRenderer {
       // de detuning usan esta versión con inercia extra de d.f, NUNCA d.f
       // crudo — así el modo no puede saltar más rápido de lo que la textura
       // puede reconstruirse.
-      if (this._heldF[i] == null) this._heldF[i] = d.f;
+      // FIX (2026-09-28, mismo "eco de cambiar de frecuencia" que _dropF y
+      // physicsState.baseFrequency): este EMA (τ=1s) corría SIEMPRE, sin
+      // gate de `playing` — a diferencia de _dropF/baseFrequency (ya
+      // corregidos arriba), _heldF seguía arrastrando el modo desde la
+      // frecuencia vieja incluso con el resto del estado ya instantáneo, y
+      // era justo lo que el harness determinístico seguía mostrando como
+      // fundido espurio al apretar play tras cambiar de preset en frío (esta
+      // función corre en CADA frame, aunque el plato esté en "agua en calma"
+      // — el atajo barato de más abajo solo evita el rasterizado por
+      // píxel). Sin reproducción, el modo se ancla al instante al `d.f` ya
+      // snapshotteado, igual que el resto del pipeline.
+      if (this._heldF[i] == null || !playing) this._heldF[i] = d.f;
       else this._heldF[i] += (d.f - this._heldF[i]) * (1 - Math.exp(-dt / 1.0));
       const df = this._heldF[i];
       const ws = Math.PI * df; // ω_s = π·f (respuesta subarmónica)
@@ -1976,7 +2020,17 @@ export class CymaticsRenderer {
       }
       // Al volver a sonar, el primer fotograma con patrón captura la
       // instantánea actual (sin intentar fundir desde un estado antiguo).
-      for (let i = 0; i < n; i++) this._lastKey[i] = '';
+      // FIX (2026-09-28, "eco de cambiar de frecuencia"): antes solo se
+      // limpiaba _lastKey acá — _lastP (el patrón que el fundido cruzado usa
+      // como "viejo") seguía apuntando al último patrón REALMENTE renderizado
+      // antes de entrar en calma, que puede ser de una sesión o preset
+      // totalmente distinto (repro confirmado: jugar preset A, parar, cambiar
+      // a preset B en frío, volver a jugar — el primer fundido de la sesión
+      // nueva arrancaba desde A, un eco real del preset viejo, en vez de
+      // capturar B de una sin fundir nada). Limpiar también _lastP hace que
+      // el próximo modo se capture directo — exactamente lo que este
+      // comentario ya decía que debía pasar.
+      for (let i = 0; i < n; i++) { this._lastKey[i] = ''; this._lastP[i] = null; }
     } else {
     for (let i = 0; i < n; i++) {
       const d = drops[i];

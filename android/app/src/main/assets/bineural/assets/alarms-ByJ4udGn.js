@@ -1,0 +1,1 @@
+import{z as t,d as l,f as r,p as e}from"./support-ws-client-DZt-oWPu.js";const p=()=>t("/api/v1/alarms"),c=a=>e("/api/v1/alarms",a),o=(a,s)=>r(`/api/v1/alarms/${a}`,s),d=a=>l(`/api/v1/alarms/${a}`);export{c,d,p as l,o as u};

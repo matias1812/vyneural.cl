@@ -39,6 +39,9 @@
               <input id="admin-users-search" type="text" placeholder="Buscar por email…" />
               <button type="submit" class="cuenta-btn" id="admin-users-search-btn">Buscar</button>
             </div>
+            <div class="admin-inline-row">
+              <label><input type="checkbox" id="admin-users-orphan-filter" /> Solo Premium sin canal (huérfano)</label>
+            </div>
           </form>
           <ul class="cuenta-list admin-users-scroll" id="admin-users-list"></ul>
           <p class="cuenta-empty hidden" id="admin-users-empty">Sin resultados.</p>
@@ -169,6 +172,59 @@
           <div class="admin-accounting-f29">
             <h4>Resumen para Formulario 29 (SII)</h4>
             <div id="admin-accounting-f29-body"></div>
+          </div>
+
+          <div class="admin-accounting-expenses-section" id="admin-accounting-expenses-section">
+            <h4>Gastos del mes (crédito fiscal)</h4>
+            <form id="admin-expense-form" class="cuenta-form">
+              <div class="cuenta-form-row">
+                <label>Fecha del documento
+                  <input id="admin-expense-fecha" type="date" required />
+                </label>
+                <label>Categoría
+                  <select id="admin-expense-categoria" required>
+                    <option value="">Seleccionar…</option>
+                    <option value="servicio_externo">Servicio externo</option>
+                    <option value="consultoria">Consultoría</option>
+                    <option value="mantencion">Mantención</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </label>
+              </div>
+              <div class="cuenta-form-row">
+                <label>Descripción
+                  <input id="admin-expense-descripcion" type="text" maxlength="500" required />
+                </label>
+              </div>
+              <div class="cuenta-form-row">
+                <label>Proveedor (opcional)
+                  <input id="admin-expense-proveedor" type="text" maxlength="200" />
+                </label>
+                <label>N° documento (opcional)
+                  <input id="admin-expense-numero" type="text" maxlength="64" />
+                </label>
+              </div>
+              <div class="cuenta-form-row">
+                <label>Monto neto
+                  <input id="admin-expense-monto-neto" type="number" min="0" step="0.01" required />
+                </label>
+                <label>Monto IVA
+                  <input id="admin-expense-monto-iva" type="number" min="0" step="0.01" required />
+                </label>
+              </div>
+              <div class="auth-error hidden" id="admin-expense-error" role="alert"></div>
+              <button type="submit" class="cuenta-btn" id="admin-expense-create">Agregar gasto</button>
+            </form>
+            <div class="admin-accounting-table-wrap">
+              <table class="admin-accounting-table" id="admin-expenses-table">
+                <thead>
+                  <tr><th>Fecha</th><th>Descripción</th><th>Categoría</th><th>Proveedor</th><th>Neto</th><th>IVA</th><th>Acción</th></tr>
+                </thead>
+                <tbody id="admin-expenses-table-body"></tbody>
+              </table>
+            </div>
+            <div id="admin-expenses-empty" class="cuenta-empty hidden">Sin gastos registrados para este mes.</div>
+            <div id="admin-expense-summary"></div>
           </div>
         </div>
 

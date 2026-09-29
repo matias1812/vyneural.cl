@@ -7,7 +7,7 @@
 // frontend. Mismo patrón que billing.js: funciones finas sobre
 // get/post de client.js, sin lógica de UI acá.
 
-import { get, post, getText, API_BASE } from './client.js';
+import { get, post, del, getText, API_BASE } from './client.js';
 
 // ── Ventas (backend/app/routers/admin_sales.py) ─────────────────────────────
 
@@ -69,11 +69,12 @@ export async function downloadMonthlyAccountingCsv(year, month) {
 
 // ── Usuarios (backend/app/routers/admin_users.py) ───────────────────────────
 
-export async function listAdminUsers(search, page = 1, perPage = 10) {
+export async function listAdminUsers(search, page = 1, perPage = 10, orphanPremium = false) {
   const params = new URLSearchParams();
   if (search) params.set('search', search);
   params.set('page', String(page));
   params.set('per_page', String(perPage));
+  if (orphanPremium) params.set('orphan_premium', 'true');
   return get(`/api/v1/admin/users?${params.toString()}`);
 }
 
@@ -129,6 +130,20 @@ export async function sendAdminSupportMessage(conversationId, content) {
 // calificar la próxima vez que abra el chat (ver support-chat.js).
 export async function resolveSupportConversation(conversationId) {
   return post(`/api/v1/admin/support/conversations/${encodeURIComponent(conversationId)}/resolve`, {});
+}
+
+// ── Gastos y crédito fiscal (backend/app/routers/admin_accounting.py) ─────
+
+export async function createExpense(expenseData) {
+  return post('/api/v1/admin/accounting/expenses', expenseData);
+}
+
+export async function listExpenses(year, month) {
+  return get(`/api/v1/admin/accounting/expenses?year=${year}&month=${month}`);
+}
+
+export async function deleteExpense(expenseId) {
+  return del(`/api/v1/admin/accounting/expenses/${encodeURIComponent(expenseId)}`);
 }
 
 // ── Códigos de Google Play (backend/app/routers/admin_google_play_codes.py) ──

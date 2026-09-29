@@ -217,6 +217,14 @@ class MainActivity : ComponentActivity() {
                 // Enlaces externos (GitHub, Instagram, fuentes): abrir en el
                 // navegador del sistema, nunca dentro de la WebView.
                 if (url.startsWith("http://") || url.startsWith("https://")) {
+                    // Para URLs de canje de Google Play, intentar abrir
+                    // directamente en la Play Store app (si está disponible).
+                    if (url.startsWith("https://play.google.com/redeem")) {
+                        if (tryOpenInPlayStoreApp(url)) {
+                            return true
+                        }
+                    }
+                    // Fallback genérico para otros URLs externos.
                     try {
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                     } catch (e: Exception) {
@@ -337,6 +345,22 @@ class MainActivity : ComponentActivity() {
         webView.loadUrl("file:///android_asset/bineural/$clean.html$suffix")
     }
 
+    /** Intenta abrir una URL de Google Play (redeem, etc.) directamente en la
+     *  aplicación Play Store mediante setPackage(). Devuelve true si el
+     *  intent se lanzó con éxito, false si la Play Store no está disponible
+     *  (en cuyo caso el caller debe usar ACTION_VIEW genérico como fallback). */
+    private fun tryOpenInPlayStoreApp(url: String): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                setPackage("com.android.vending")
+            }
+            startActivity(intent)
+            true
+        } catch (e: android.content.ActivityNotFoundException) {
+            false
+        }
+    }
+
     /** Query string ?freq=&beat=&wave=&autostart=true a partir de los extras
      *  del Intent (ver companion object), o null si el intent no es un deep
      *  link de alarma. `autostart` acá solo prepara la UI para el gesto del
@@ -419,6 +443,15 @@ class MainActivity : ComponentActivity() {
         // directamente (setAutoCancel(true) en alarmNotification() solo cubre
         // ese caso). No-op si ya no había notificación activa.
         NotificationHelper.cancelAlarm(this)
+        // visibilitychange de la WebView no es confiable para detectar "la app
+        // volvió a primer plano" con launchMode="singleTask" (reabrir desde el
+        // ícono/task switcher trae esta misma Activity a onResume() sin
+        // recargar la página, así que el evento DOM no dispara solo). Esta es
+        // la señal nativa explícita — usada hoy por premium.js para reintentar
+        // checkForRedeemedGooglePlayCode() tras canjear un código de Google
+        // Play fuera de la app (bug real visto en vivo: el canje se confirmaba
+        // en Play Store pero el Premium no se otorgaba al volver).
+        pushToWeb("window.dispatchEvent(new CustomEvent('vyneural:resumed'))")
     }
 
     // AlarmSync corre en 2do plano SIEMPRE (esté la Activity pausada o no) y

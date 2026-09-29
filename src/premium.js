@@ -17,7 +17,7 @@ import {
   GOOGLE_PLAY_PRODUCT_IDS,
   ANDROID_PACKAGE_ID,
 } from './api/billing.js';
-import { detectNativeBridge, startPlayPurchase } from './platform/native-bridge.js';
+import { detectNativeBridge, startPlayPurchase, checkPlayPurchases } from './platform/native-bridge.js';
 import { initStarfield } from './starfield.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
 
@@ -241,6 +241,36 @@ async function resumePendingGooglePlayPurchase() {
     // loguearse de nuevo en el instante siguiente).
   } finally {
     resumingPendingPurchase = false;
+  }
+}
+
+// Red de seguridad para el canje de cupón vía código de Google Play (ver
+// plan swirling-gliding-turing.md, tarea C3): canjear un código en la
+// superficie de la Play Store nunca vuelve a la app sola, así que nada en el
+// cliente pregunta si la compra se concretó. Al volver a primer plano (boot
+// y visibilitychange, ver init()), le preguntamos a Play Billing si hay
+// alguna suscripción activa — si encuentra una, la corremos por el MISMO
+// pipeline de verify que ya usa una compra normal (verifyGooglePlayPurchaseWithRetry
+// → /google-play/verify), sin duplicar nada. Corre 100% en background, sin
+// gesto de usuario: nunca debe mostrar ruido si no hay nada que confirmar
+// todavía, ni romper la página si algo falla.
+async function checkForRedeemedGooglePlayCode() {
+  try {
+    if (detectNativeBridge()?.platform !== 'android') return;
+    if (!getAccessToken()) return;
+    const result = await checkPlayPurchases([GOOGLE_PLAY_PRODUCT_IDS.monthly, GOOGLE_PLAY_PRODUCT_IDS.annual]);
+    if (!result || !result.purchaseToken) return; // {found:false} u otro shape sin match: nada que hacer, se reintenta solo
+    const verifyResult = await verifyGooglePlayPurchaseWithRetry(result.purchaseToken, result.productId, () => {});
+    if (verifyResult.ok) {
+      await loadContent();
+      await notifyModal({ title: '¡Listo!', text: 'Tu compra se confirmó — ya tenés Premium.' });
+    }
+    // sessionExpired/permanentError/reintentos agotados: silencioso a
+    // propósito — esto corre sin que el usuario haya tocado nada, no hay
+    // botón que actualizar ni contexto para mostrar un error entendible. Se
+    // vuelve a intentar solo en el próximo boot/visibilitychange.
+  } catch {
+    /* nunca debe romper la página: consulta de background sin gesto de usuario */
   }
 }
 
@@ -511,6 +541,21 @@ async function buyPlan(plan, btn, activePlanKey) {
         btn.disabled = false;
         btn.textContent = originalLabel;
         if (codeResult && codeResult.ok) {
+          // Si el código que se va a canjear es de otro plan (mismatch), pedir
+          // confirmación explícita antes de navegar a Play Store, para evitar
+          // que el usuario canjee el código equivocado sin darse cuenta.
+          if (codeResult.plan !== plan) {
+            const confirmed = await confirmModal({
+              title: 'Tu cuenta ya tiene un código de otro plan',
+              text: `Tu cuenta ya tenía un código de Google Play activado para el plan ${PLAN_LABELS[codeResult.plan]?.title || codeResult.plan} — es ESE el que se va a canjear en la Play Store, no ${PLAN_LABELS[plan]?.title || plan}. ¿Querés continuar igual?`,
+              confirmLabel: 'Continuar y canjear ese código',
+            });
+            if (!confirmed) {
+              // Usuario canceló — mostrar el código igual, pero SIN navegar.
+              showGooglePlayCode(codeResult.code, codeResult.redeem_url, codeResult.plan, plan);
+              return;
+            }
+          }
           showGooglePlayCode(codeResult.code, codeResult.redeem_url, codeResult.plan, plan);
           // Canjear un código de Play Console solo se puede hacer desde la
           // superficie de Play Store, nunca desde el flujo nativo de Billing
@@ -716,6 +761,7 @@ function init() {
   renderGate({ retryOnBoot: true });
   renderPaymentNote();
   resumePendingGooglePlayPurchase();
+  checkForRedeemedGooglePlayCode(); // cubre "cerré la app del todo tras canjear y la reabrí" (fire-and-forget)
   const loginBtn = $('premium-login-btn');
   const regBtn = $('premium-register-btn');
   if (loginBtn) loginBtn.addEventListener('click', () => openAuth('login'));
@@ -724,6 +770,19 @@ function init() {
     renderGate();
     if (e.detail && e.detail.type === 'login') resumePendingGooglePlayPurchase();
   });
+  // Mismo patrón que src/cuenta.js (init()::readNativeNotificationState en
+  // visibilitychange) — cubre "recién canjeé en Play Store y vuelvo a la app
+  // con el task switcher". checkForRedeemedGooglePlayCode() ya hace su
+  // propio guard de plataforma/sesión, no hace falta duplicarlo acá.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkForRedeemedGooglePlayCode();
+  });
+  // Señal nativa explícita (MainActivity.onResume(), ver pushToWeb ahí):
+  // visibilitychange no dispara de forma confiable en esta WebView con
+  // launchMode="singleTask" (reabrir desde el ícono trae la Activity ya
+  // existente a onResume() sin recargar la página). Defensa extra además del
+  // listener de arriba, que sigue cubriendo PWA/web sin bridge nativo.
+  document.addEventListener('vyneural:resumed', () => checkForRedeemedGooglePlayCode());
 }
 
 document.addEventListener('DOMContentLoaded', init, { once: true });

@@ -243,6 +243,75 @@ class PlayBillingManager(private val activity: Activity) : PurchasesUpdatedListe
         }
     }
 
+    /**
+     * Consulta de SOLO LECTURA: pregunta a Play Billing qué suscripciones
+     * PURCHASED tiene activas esta cuenta/dispositivo — NUNCA lanza el
+     * diálogo de compra. Existe para el caso de un código promocional
+     * canjeado directo en la superficie de la Play Store (fuera de
+     * `startPurchase`/`queryAndLaunch`): ahí Google nunca nos avisa (RTDN
+     * no expone el código de un solo uso canjeado, confirmado contra la
+     * doc oficial), así que la única forma de enterarnos es preguntarle a
+     * `queryPurchasesAsync` al volver a la app. SIEMPRE `SUBS`
+     * (mensual/anual) — un cupón nunca aplica al plan "de por vida".
+     *
+     * Devuelve {purchaseToken, orderId, productId} — MISMO shape que
+     * `startPurchase`/`queryAndLaunch`, para que el JS lo trate igual que
+     * una compra normal — o {found: false} si no hay match, hay timeout, o
+     * falla la conexión (nunca dispara `launchNewPurchase`, a diferencia de
+     * `queryAndLaunch`).
+     *
+     * No comparte `pendingCallback` con `startPurchase`: esto nunca pasa por
+     * `onPurchasesUpdated` (es una consulta directa, no un flujo de compra),
+     * así que no hay riesgo de pisar/consumir el callback de una compra en
+     * curso.
+     */
+    fun checkActiveSubscriptions(productIds: List<String>, onResult: (JSONObject) -> Unit) {
+        ensureClient(
+            onReady = { billingClient -> queryActiveSubscriptions(billingClient, productIds, onResult) },
+            onError = { message ->
+                BineuralLog.d("play-billing", "checkActiveSubscriptions: $message")
+                onResult(JSONObject().put("found", false))
+            },
+        )
+    }
+
+    private fun queryActiveSubscriptions(
+        billingClient: BillingClient,
+        productIds: List<String>,
+        onResult: (JSONObject) -> Unit,
+    ) {
+        val resolved = AtomicBoolean(false)
+        val timeoutRunnable = Runnable {
+            if (resolved.compareAndSet(false, true)) {
+                BineuralLog.d("play-billing", "checkActiveSubscriptions: queryPurchasesAsync no contestó a tiempo")
+                onResult(JSONObject().put("found", false))
+            }
+        }
+        mainHandler.postDelayed(timeoutRunnable, QUERY_TIMEOUT_MS)
+
+        val queryParams = QueryPurchasesParams.newBuilder()
+            .setProductType(BillingClient.ProductType.SUBS)
+            .build()
+        billingClient.queryPurchasesAsync(queryParams) { _, purchases ->
+            if (!resolved.compareAndSet(false, true)) return@queryPurchasesAsync
+            mainHandler.removeCallbacks(timeoutRunnable)
+            val match = purchases.firstOrNull { p ->
+                p.purchaseState == Purchase.PurchaseState.PURCHASED && p.products.any { it in productIds }
+            }
+            if (match != null) {
+                BineuralLog.d("play-billing", "checkActiveSubscriptions: compra activa encontrada")
+                onResult(
+                    JSONObject()
+                        .put("purchaseToken", match.purchaseToken)
+                        .put("orderId", match.orderId ?: "")
+                        .put("productId", match.products.firstOrNull { it in productIds } ?: match.products.firstOrNull() ?: "")
+                )
+            } else {
+                onResult(JSONObject().put("found", false))
+            }
+        }
+    }
+
     override fun onPurchasesUpdated(result: BillingResult, purchases: MutableList<Purchase>?) {
         val callback = pendingCallback ?: return
         pendingCallback = null

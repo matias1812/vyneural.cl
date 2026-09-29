@@ -46,6 +46,7 @@ export const BRIDGE_COMMANDS = Object.freeze([
   'SESSION_END', // M1 — aviso nativo de fin de sesión (la WebView no muestra new Notification())
   'START_PLAY_PURCHASE', // Google Play Billing — plan Premium, SOLO APK (ver startPlayPurchase abajo)
   'PICK_ALARM_SOUND', // P7 — picker de tonos del sistema para personalizar la alarma (ver pickAlarmSound abajo)
+  'CHECK_PLAY_PURCHASES', // consulta silenciosa de suscripciones activas en Play Billing (ver checkPlayPurchases abajo)
 ]);
 
 /**
@@ -222,6 +223,86 @@ export function startPlayPurchase(productId, isSubscription = true) {
       clearTimeout(timer);
       playPurchasePending.delete(id);
       reject(new Error('BRIDGE_ERROR'));
+    }
+  });
+}
+
+// Consulta silenciosa de compras activas en Play Billing (queryPurchasesAsync
+// del lado Kotlin) — a diferencia de startPlayPurchase, esto NUNCA lanza el
+// diálogo de compra ni requiere gesto del usuario: se llama en background (al
+// boot y en cada visibilitychange, ver premium.js::checkForRedeemedGooglePlayCode)
+// para detectar una suscripción que el usuario canjeó por código directo en
+// la Play Store (ver plan swirling-gliding-turing.md, tarea C3). Mismo shape
+// de resultado que startPlayPurchase cuando hay match ({purchaseToken,
+// orderId, productId}), pero SIEMPRE resuelve (nunca reject) — sin bridge,
+// timeout, ACK inválido o error de parseo, resuelve {found:false} en vez de
+// tirar una excepción, para que el caller pueda hacer
+// `const r = await checkPlayPurchases([...])` sin try/catch. Map de
+// pendientes y callback global PROPIOS (no comparte los de startPlayPurchase)
+// para que una consulta de background nunca resuelva/pise la promesa de una
+// compra real en curso, ni viceversa.
+const CHECK_PURCHASES_TIMEOUT_MS = 10 * 1000; // consulta local a la caché de Play, no una interacción de usuario
+let checkPurchasesSeq = 0;
+const checkPurchasesPending = new Map();
+
+if (typeof window !== 'undefined' && !window.__vyneuralCheckPurchasesResponse) {
+  window.__vyneuralCheckPurchasesResponse = (rid, json) => {
+    const entry = checkPurchasesPending.get(rid);
+    if (!entry) return;
+    checkPurchasesPending.delete(rid);
+    clearTimeout(entry.timer);
+    let parsed = null;
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      parsed = null;
+    }
+    // { purchaseToken, orderId, productId } | { found: false }
+    entry.resolve(parsed && typeof parsed === 'object' ? parsed : { found: false });
+  };
+}
+
+/**
+ * Pregunta a Play Billing si hay alguna suscripción activa entre `productIds`
+ * (ej. `[GOOGLE_PLAY_PRODUCT_IDS.monthly, GOOGLE_PLAY_PRODUCT_IDS.annual]`).
+ * Nunca lanza UI de compra, nunca rechaza la promesa.
+ * @returns {Promise<{purchaseToken:string,orderId:string,productId:string} | {found:false}>}
+ */
+export function checkPlayPurchases(productIds) {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve({ found: false });
+      return;
+    }
+    const bridge = window.AndroidBridgeNative;
+    if (!bridge || typeof bridge.postMessage !== 'function') {
+      resolve({ found: false });
+      return;
+    }
+    const id = ++checkPurchasesSeq;
+    const timer = setTimeout(() => {
+      checkPurchasesPending.delete(id);
+      resolve({ found: false });
+    }, CHECK_PURCHASES_TIMEOUT_MS);
+    checkPurchasesPending.set(id, { resolve, timer });
+    let ack = null;
+    try {
+      ack = bridge.postMessage(
+        JSON.stringify({ command: 'CHECK_PLAY_PURCHASES', payload: { id, productIds } }),
+      );
+    } catch {
+      ack = null;
+    }
+    let ackObj = null;
+    try {
+      ackObj = typeof ack === 'string' ? JSON.parse(ack) : ack;
+    } catch {
+      ackObj = null;
+    }
+    if (!ackObj || ackObj.status !== 'ACCEPTED') {
+      clearTimeout(timer);
+      checkPurchasesPending.delete(id);
+      resolve({ found: false });
     }
   });
 }
