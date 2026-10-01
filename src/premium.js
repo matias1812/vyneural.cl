@@ -12,12 +12,17 @@ import {
   inscribeOneclick,
   premiumStatus,
   oneclickStatus,
-  verifyGooglePlayPurchase,
   getGooglePlayCouponCode,
   GOOGLE_PLAY_PRODUCT_IDS,
   ANDROID_PACKAGE_ID,
 } from './api/billing.js';
-import { detectNativeBridge, startPlayPurchase, checkPlayPurchases } from './platform/native-bridge.js';
+import { detectNativeBridge, startPlayPurchase } from './platform/native-bridge.js';
+import {
+  markGooglePlayRedeemCodeIssued,
+  noteBackendPendingCouponStatus,
+  verifyGooglePlayPurchaseWithRetry,
+  RETRY_DELAYS_MS,
+} from './platform/google-play-redeem.js';
 import { initStarfield } from './starfield.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
 
@@ -127,10 +132,9 @@ const WAKEUP_HINT_MS = 4000;
 // verificación se rinde después de un solo intento, la compra queda
 // "comprada pero nunca confirmada" hasta que Google la revierte sola por
 // falta de acknowledge (bug real visto en vivo probando la APK).
-const RETRY_DELAYS_MS = [
-  3000, 6000, 12000, 20000, // ~41s — cold start "típico"
-  30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, // +270s — cold start largo
-]; // ~5m11s de cobertura total
+// RETRY_DELAYS_MS vive en platform/google-play-redeem.js (compartida con
+// verifyGooglePlayPurchaseWithRetry, importada arriba) — loadContentOnBoot()
+// más abajo reusa la misma escala de backoff.
 
 // Compra de Google Play completada pero todavía no confirmada con nuestro
 // backend — sobrevive un reload/relogin de la página (sessionStorage, no
@@ -166,48 +170,12 @@ function clearPendingGooglePlayPurchase() {
   }
 }
 
-// Reintenta verifyGooglePlayPurchase con el mismo backoff que loadContentOnBoot
-// (RETRY_DELAYS_MS) — PERO a diferencia de un cold start (transitorio, vale
-// la pena esperar), un 401 que sobrevive el refresh automático de client.js
-// significa sesión REALMENTE muerta: reintentar el mismo request no cambia
-// nada, solo quema los ~5 minutos de presupuesto mostrando "confirmando…"
-// mientras la ventana real que tiene Google antes de auto-cancelar la compra
-// por falta de acknowledge (confirmado en vivo: minutos, no los 3 días
-// documentados) se cierra sola. Por eso corta apenas detecta UNAUTHORIZED en
-// vez de agotar el loop — y guarda el pendiente para reintentar apenas haya
-// sesión de nuevo (ver resumePendingGooglePlayPurchase).
-async function verifyGooglePlayPurchaseWithRetry(purchaseToken, productId, onAttempt) {
-  for (let attempt = 0; ; attempt++) {
-    if (onAttempt) onAttempt(attempt);
-    try {
-      await verifyGooglePlayPurchase(purchaseToken, productId);
-      clearPendingGooglePlayPurchase();
-      return { ok: true };
-    } catch (err) {
-      if (err && err.code === 'UNAUTHORIZED') {
-        savePendingGooglePlayPurchase(purchaseToken, productId);
-        return { ok: false, sessionExpired: true };
-      }
-      // 409: conflicto PERMANENTE — este mismo comprobante de Google ya se
-      // otorgó a otra cuenta de Vyneural (routers/payments.py::
-      // google_play_verify). Reintentar nunca lo resuelve: es la misma
-      // cuenta de Google Play en el dispositivo, no una falla transitoria.
-      // Bug real reportado en vivo (2026-09-24): los logs de Render mostraban
-      // ~10 reintentos de 409 seguidos antes de rendirse con un mensaje
-      // genérico que no explicaba nada.
-      if (err && err.status === 409) {
-        clearPendingGooglePlayPurchase();
-        return { ok: false, sessionExpired: false, permanentError: err.detail || 'esta compra ya está registrada en otra cuenta' };
-      }
-      if (attempt < RETRY_DELAYS_MS.length) {
-        savePendingGooglePlayPurchase(purchaseToken, productId);
-        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
-        continue;
-      }
-      return { ok: false, sessionExpired: false };
-    }
-  }
-}
+// verifyGooglePlayPurchaseWithRetry vive en platform/google-play-redeem.js
+// (importada arriba) — mismo comportamiento (401 corta apenas se detecta en
+// vez de agotar el loop, 409 es conflicto permanente), parametrizado con
+// onPersist/onClear en vez de llamar directo a savePendingGooglePlayPurchase/
+// clearPendingGooglePlayPurchase (esas dos son específicas del pendiente de
+// sessionStorage de este archivo, el módulo compartido no las conoce).
 
 // Se llama al cargar /premium con sesión, y de nuevo apenas se loguea (ver
 // init()) — retoma sola una compra que quedó pendiente sin que el usuario
@@ -226,7 +194,10 @@ async function resumePendingGooglePlayPurchase() {
   if (!pending) return;
   resumingPendingPurchase = true;
   try {
-    const result = await verifyGooglePlayPurchaseWithRetry(pending.purchaseToken, pending.productId);
+    const result = await verifyGooglePlayPurchaseWithRetry(pending.purchaseToken, pending.productId, {
+      onPersist: () => savePendingGooglePlayPurchase(pending.purchaseToken, pending.productId),
+      onClear: clearPendingGooglePlayPurchase,
+    });
     if (result.ok) {
       await loadContent();
       await notifyModal({ title: '¡Listo!', text: 'Tu compra se confirmó — ya tenés Premium.' });
@@ -244,35 +215,11 @@ async function resumePendingGooglePlayPurchase() {
   }
 }
 
-// Red de seguridad para el canje de cupón vía código de Google Play (ver
-// plan swirling-gliding-turing.md, tarea C3): canjear un código en la
-// superficie de la Play Store nunca vuelve a la app sola, así que nada en el
-// cliente pregunta si la compra se concretó. Al volver a primer plano (boot
-// y visibilitychange, ver init()), le preguntamos a Play Billing si hay
-// alguna suscripción activa — si encuentra una, la corremos por el MISMO
-// pipeline de verify que ya usa una compra normal (verifyGooglePlayPurchaseWithRetry
-// → /google-play/verify), sin duplicar nada. Corre 100% en background, sin
-// gesto de usuario: nunca debe mostrar ruido si no hay nada que confirmar
-// todavía, ni romper la página si algo falla.
-async function checkForRedeemedGooglePlayCode() {
-  try {
-    if (detectNativeBridge()?.platform !== 'android') return;
-    if (!getAccessToken()) return;
-    const result = await checkPlayPurchases([GOOGLE_PLAY_PRODUCT_IDS.monthly, GOOGLE_PLAY_PRODUCT_IDS.annual]);
-    if (!result || !result.purchaseToken) return; // {found:false} u otro shape sin match: nada que hacer, se reintenta solo
-    const verifyResult = await verifyGooglePlayPurchaseWithRetry(result.purchaseToken, result.productId, () => {});
-    if (verifyResult.ok) {
-      await loadContent();
-      await notifyModal({ title: '¡Listo!', text: 'Tu compra se confirmó — ya tenés Premium.' });
-    }
-    // sessionExpired/permanentError/reintentos agotados: silencioso a
-    // propósito — esto corre sin que el usuario haya tocado nada, no hay
-    // botón que actualizar ni contexto para mostrar un error entendible. Se
-    // vuelve a intentar solo en el próximo boot/visibilitychange.
-  } catch {
-    /* nunca debe romper la página: consulta de background sin gesto de usuario */
-  }
-}
+// El chequeo de "¿se canjeó un código de Google Play?" ahora vive en
+// platform/google-play-redeem.js (initGooglePlayRedeemWatch(), cableado una
+// sola vez desde site.js para TODAS las páginas, no solo acá) — ver el
+// listener de 'vyneural:premium-granted' en init() más abajo, que es cómo
+// esta página se entera cuando ese chequeo encuentra algo.
 
 function openAuth(mode) {
   const auth = window.__vyneuralAuth;
@@ -557,6 +504,11 @@ async function buyPlan(plan, btn, activePlanKey) {
             }
           }
           showGooglePlayCode(codeResult.code, codeResult.redeem_url, codeResult.plan, plan);
+          // Deja un rastro durable (localStorage, sobrevive días) de que se
+          // emitió un código y sigue sin confirmar — es lo único que permite
+          // retomar el chequeo después, sin importar a qué página vuelva el
+          // usuario tras canjear (ver platform/google-play-redeem.js).
+          markGooglePlayRedeemCodeIssued(codeResult.plan);
           // Canjear un código de Play Console solo se puede hacer desde la
           // superficie de Play Store, nunca desde el flujo nativo de Billing
           // — navegamos solos en vez de dejar que el usuario tenga que
@@ -594,11 +546,15 @@ async function buyPlan(plan, btn, activePlanKey) {
       const verifyResult = await verifyGooglePlayPurchaseWithRetry(
         purchase.purchaseToken,
         purchase.productId,
-        (attempt) => {
-          btn.textContent =
-            attempt === 0
-              ? 'Confirmando tu compra…'
-              : 'Confirmando tu compra con Google… puede tardar unos minutos';
+        {
+          onAttempt: (attempt) => {
+            btn.textContent =
+              attempt === 0
+                ? 'Confirmando tu compra…'
+                : 'Confirmando tu compra con Google… puede tardar unos minutos';
+          },
+          onPersist: () => savePendingGooglePlayPurchase(purchase.purchaseToken, purchase.productId),
+          onClear: clearPendingGooglePlayPurchase,
         },
       );
       btn.disabled = false;
@@ -708,7 +664,10 @@ async function loadContent() {
     hasSession ? premiumStatus().catch(() => null) : Promise.resolve(null),
     hasSession ? oneclickStatus().catch(() => null) : Promise.resolve(null),
   ]);
-  if (status) renderActiveBanner(status);
+  if (status) {
+    renderActiveBanner(status);
+    noteBackendPendingCouponStatus(status.has_pending_coupon);
+  }
   if (plansResult.ok) {
     renderPlans(plansResult.plans, status, oneclick);
     return false;
@@ -761,7 +720,6 @@ function init() {
   renderGate({ retryOnBoot: true });
   renderPaymentNote();
   resumePendingGooglePlayPurchase();
-  checkForRedeemedGooglePlayCode(); // cubre "cerré la app del todo tras canjear y la reabrí" (fire-and-forget)
   const loginBtn = $('premium-login-btn');
   const regBtn = $('premium-register-btn');
   if (loginBtn) loginBtn.addEventListener('click', () => openAuth('login'));
@@ -770,19 +728,15 @@ function init() {
     renderGate();
     if (e.detail && e.detail.type === 'login') resumePendingGooglePlayPurchase();
   });
-  // Mismo patrón que src/cuenta.js (init()::readNativeNotificationState en
-  // visibilitychange) — cubre "recién canjeé en Play Store y vuelvo a la app
-  // con el task switcher". checkForRedeemedGooglePlayCode() ya hace su
-  // propio guard de plataforma/sesión, no hace falta duplicarlo acá.
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) checkForRedeemedGooglePlayCode();
+  // El chequeo de código de Google Play canjeado corre en site.js
+  // (initGooglePlayRedeemWatch(), cableado para todas las páginas) — esta
+  // página solo se entera del resultado por este evento de datos, sin
+  // importar si el chequeo que lo disparó corrió acá, en /cuenta o en
+  // cualquier otra página.
+  document.addEventListener('vyneural:premium-granted', async () => {
+    await loadContent();
+    await notifyModal({ title: '¡Listo!', text: 'Tu compra se confirmó — ya tenés Premium.' });
   });
-  // Señal nativa explícita (MainActivity.onResume(), ver pushToWeb ahí):
-  // visibilitychange no dispara de forma confiable en esta WebView con
-  // launchMode="singleTask" (reabrir desde el ícono trae la Activity ya
-  // existente a onResume() sin recargar la página). Defensa extra además del
-  // listener de arriba, que sigue cubriendo PWA/web sin bridge nativo.
-  document.addEventListener('vyneural:resumed', () => checkForRedeemedGooglePlayCode());
 }
 
 document.addEventListener('DOMContentLoaded', init, { once: true });

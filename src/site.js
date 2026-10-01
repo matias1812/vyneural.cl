@@ -3,6 +3,7 @@ import './support-chat.js';
 import './ui/auth.js';
 import { initPermissionsModal, openPermissions } from './ui/permissions-modal.js';
 import { initDegradedAlarmBanner } from './ui/degraded-alarm-banner.js';
+import { initGooglePlayRedeemWatch } from './platform/google-play-redeem.js';
 import { unsubscribeFromPush } from './api/push.js';
 import { inject } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
@@ -191,6 +192,13 @@ document.querySelectorAll('.site-links a').forEach((a) => {
 // (site.js se carga también en el reproductor, ver index.html) — así se ve
 // con solo abrir la app, sin depender de que el usuario abra ningún modal.
 initDegradedAlarmBanner();
+
+// ---------------------------------------------------------------- Canje de cupón de Google Play
+// Mismo criterio que el aviso de arriba: sin gate de página, se cablea en
+// TODAS (ver src/platform/google-play-redeem.js) — así se detecta un código
+// canjeado en Play Store sin importar a qué página haya vuelto el usuario
+// (antes solo corría en /premium, el cupón se activa desde /cuenta).
+initGooglePlayRedeemWatch();
 
 // ---------------------------------------------------------------- Permisos de la web
 // El reproductor ("/") ya trae su propia copia más rica del modal (main.js —

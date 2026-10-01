@@ -22,6 +22,7 @@ import { listAlarms, deleteAlarm, updateAlarm } from './api/alarms.js';
 import { listItineraries } from './api/itineraries.js';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
 import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, lookupCoupon, redeemCoupon, cancelCoupon, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
+import { noteBackendPendingCouponStatus, checkForRedeemedGooglePlayCode } from './platform/google-play-redeem.js';
 import { getStatus, onStatusChange, STATUS } from './api/status.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
 import { requestPermission } from './notifications.js';
@@ -585,6 +586,8 @@ function resetCouponCard() {
   const result = $('cuenta-coupon-result');
   const switchEl = $('cuenta-coupon-switch');
   const errorEl = $('cuenta-coupon-error');
+  const verifyBtn = $('cuenta-coupon-verify-now');
+  const gpHint = $('cuenta-coupon-gp-hint');
   couponLookupCode = null;
   if (input) {
     input.disabled = false;
@@ -594,6 +597,11 @@ function resetCouponCard() {
   if (result) result.classList.add('hidden');
   if (switchEl) switchEl.checked = false;
   if (errorEl) errorEl.classList.add('hidden');
+  if (verifyBtn) verifyBtn.classList.add('hidden');
+  if (gpHint) {
+    gpHint.classList.add('hidden');
+    gpHint.textContent = '';
+  }
 }
 
 function renderCoupon(premium) {
@@ -606,6 +614,8 @@ function renderCoupon(premium) {
   const switchLabel = $('cuenta-coupon-switch-label');
   const status = $('cuenta-coupon-status');
   const errorEl = $('cuenta-coupon-error');
+  const verifyBtn = $('cuenta-coupon-verify-now');
+  const gpHint = $('cuenta-coupon-gp-hint');
   if (!input || !lookupBtn || !result || !switchEl || !status) return;
 
   if (premium && premium.has_redeemed_coupon_before) {
@@ -613,6 +623,8 @@ function renderCoupon(premium) {
     lookupBtn.disabled = true;
     result.classList.add('hidden');
     if (errorEl) errorEl.classList.add('hidden');
+    if (verifyBtn) verifyBtn.classList.add('hidden');
+    if (gpHint) gpHint.classList.add('hidden');
     status.textContent = 'Ya usaste un código de referido — solo se puede activar uno por cuenta.';
     status.classList.remove('hidden');
     return;
@@ -633,9 +645,18 @@ function renderCoupon(premium) {
     if (switchLabel) switchLabel.textContent = 'Activado';
     switchEl.checked = true;
     result.classList.remove('hidden');
+    // El canje real de un código de Google Play ocurre fuera de la SPA (ver
+    // platform/google-play-redeem.js) — este botón es la red de seguridad
+    // manual para cuando el chequeo automático en background todavía no
+    // encontró el canje (lag de la caché de Play Billing, o el usuario
+    // volvió acá en vez de a /premium). Solo tiene sentido dentro de la APK.
+    if (verifyBtn) verifyBtn.classList.toggle('hidden', !isApk());
+    if (gpHint) gpHint.classList.add('hidden');
     return;
   }
 
+  if (verifyBtn) verifyBtn.classList.add('hidden');
+  if (gpHint) gpHint.classList.add('hidden');
   input.disabled = false;
   lookupBtn.disabled = false;
 }
@@ -744,6 +765,43 @@ function wireCouponButton() {
       }
     });
   }
+}
+
+// Botón manual de "Ya canjeé el código, verificar ahora" (solo visible
+// dentro de la APK con un cupón pendiente, ver renderCoupon) — mismo
+// checkForRedeemedGooglePlayCode que corre solo en background, pero con
+// force:true: ignora el gate de "nada pendiente localmente" y el cooldown,
+// para que un click sí dispare un chequeo real incluso si el automático
+// recién corrió.
+function wireManualGooglePlayVerify() {
+  const btn = $('cuenta-coupon-verify-now');
+  const hint = $('cuenta-coupon-gp-hint');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = 'Verificando…';
+    if (hint) hint.classList.add('hidden');
+    try {
+      const result = await checkForRedeemedGooglePlayCode({ force: true });
+      if (result.ok) {
+        await loadAll();
+        celebrateBurst(btn);
+        await notifyModal({ title: '¡Listo!', text: 'Tu compra se confirmó — ya tenés Premium.' });
+        return;
+      }
+      if (result.verifyResult?.permanentError) {
+        if (hint) { hint.textContent = `No pudimos otorgar la compra: ${result.verifyResult.permanentError}.`; hint.classList.remove('hidden'); }
+      } else if (!result.found) {
+        if (hint) { hint.textContent = 'Todavía no vemos el canje confirmado en Google Play — puede tardar unos minutos. Probá de nuevo en un rato.'; hint.classList.remove('hidden'); }
+      } else {
+        if (hint) { hint.textContent = 'Tu canje se detectó pero no pudimos confirmarlo todavía — se reintenta solo.'; hint.classList.remove('hidden'); }
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
 }
 
 function wireOneclickButtons() {
@@ -923,6 +981,7 @@ async function loadAll() {
   const [profile, favs, freqs, alarms, its, push, devices, premium, oneclick] = results.map((r) =>
     r.status === 'fulfilled' ? r.value : null,
   );
+  noteBackendPendingCouponStatus(premium && premium.has_pending_coupon);
 
   // Este dispositivo reporta su estado real (APK nativo / web / PWA).
   reportDevice();
@@ -1375,6 +1434,7 @@ function init() {
   wirePushButtons();
   wireOneclickButtons();
   wireCouponButton();
+  wireManualGooglePlayVerify();
   wireListShowAllButtons();
 
   // Tras el diálogo nativo de permisos (o volver de Ajustes) el WebView
@@ -1413,6 +1473,15 @@ function init() {
   document.addEventListener('vyneural:auth', () => {
     renderGate();
     if (getAccessToken()) loadAll();
+  });
+
+  // El chequeo de código de Google Play canjeado corre en site.js
+  // (initGooglePlayRedeemWatch(), cableado para todas las páginas) — esta
+  // página solo se entera del resultado por este evento de datos, igual que
+  // premium.js.
+  document.addEventListener('vyneural:premium-granted', async () => {
+    await loadAll();
+    await notifyModal({ title: '¡Listo!', text: 'Tu compra se confirmó — ya tenés Premium.' });
   });
 }
 
