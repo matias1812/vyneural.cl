@@ -3973,6 +3973,22 @@ html:not(.in-app) .in-app-only {
   flex: 1 1 200px;
 }
 
+/* Fila de un solo checkbox dentro de .admin-inline-row (ej. filtro "Premium
+   sin canal") — sin esto, la regla genérica de arriba (`flex: 1 1 200px`)
+   también agarra al <input type="checkbox"> por ser selector descendiente,
+   estirándolo a lo ancho y haciéndolo verse como "un check gigante" al lado
+   del texto largo de su <label>. */
+.admin-checkbox-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-checkbox-row input[type='checkbox'] {
+  flex: none;
+  width: auto;
+}
+
 /* Fila de un pago dentro de "Ver pagos" — el botón Reembolsar (solo presente
    en pagos "authorized") no debe quedar apilado bajo el texto del pago. */
 .admin-payment-row {

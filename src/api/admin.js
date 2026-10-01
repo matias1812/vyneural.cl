@@ -132,18 +132,21 @@ export async function resolveSupportConversation(conversationId) {
   return post(`/api/v1/admin/support/conversations/${encodeURIComponent(conversationId)}/resolve`, {});
 }
 
-// ── Gastos y crédito fiscal (backend/app/routers/admin_accounting.py) ─────
+// ── Facturas de consultoría (backend/app/routers/admin_accounting.py) ─────
+// Ventas de la consultora a otros clientes, separadas de Vyneural — suman al
+// IVA débito/venta neta del F29 (código 538/504) junto con Payment, no se
+// restan como crédito fiscal. Reemplaza a la sección de "Gastos" (borrada).
 
-export async function createExpense(expenseData) {
-  return post('/api/v1/admin/accounting/expenses', expenseData);
+export async function createConsultingInvoice(invoiceData) {
+  return post('/api/v1/admin/accounting/consulting-invoices', invoiceData);
 }
 
-export async function listExpenses(year, month) {
-  return get(`/api/v1/admin/accounting/expenses?year=${year}&month=${month}`);
+export async function listConsultingInvoices(year, month) {
+  return get(`/api/v1/admin/accounting/consulting-invoices?year=${year}&month=${month}`);
 }
 
-export async function deleteExpense(expenseId) {
-  return del(`/api/v1/admin/accounting/expenses/${encodeURIComponent(expenseId)}`);
+export async function deleteConsultingInvoice(invoiceId) {
+  return del(`/api/v1/admin/accounting/consulting-invoices/${encodeURIComponent(invoiceId)}`);
 }
 
 // ── Códigos de Google Play (backend/app/routers/admin_google_play_codes.py) ──

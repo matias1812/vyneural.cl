@@ -18,7 +18,7 @@ import {
 import {
   getSalesSummary, downloadSalesCsv,
   getMonthlyAccounting, downloadMonthlyAccountingCsv,
-  createExpense, listExpenses, deleteExpense,
+  createConsultingInvoice, listConsultingInvoices, deleteConsultingInvoice,
   listAdminUsers, getUserPayments, grantUserPremium, revokeUserPremium, refundUserPayment,
   listAdminSupportConversations, getAdminSupportMessages, sendAdminSupportMessage, getAdminSupportStats,
   resolveSupportConversation,
@@ -1348,13 +1348,6 @@ const ADMIN_ACCOUNTING_STATUS_LABELS = {
   rejected: 'Rechazado',
 };
 
-const ADMIN_EXPENSE_CATEGORIES = {
-  servicio_externo: 'Servicio externo',
-  consultoria: 'Consultoría',
-  mantencion: 'Mantención',
-  otro: 'Otro',
-};
-
 function renderMonthlyAccounting(data) {
   const summaryEl = $('admin-accounting-summary');
   const f29El = $('admin-accounting-f29-body');
@@ -1386,48 +1379,49 @@ function renderMonthlyAccounting(data) {
     f29El.innerHTML = `
       <p>Código [538] Ventas Afectas a IVA (Neto): <strong>${fmtMoney(f29.code_538_net_sales)}</strong></p>
       <p>Código [504] Débito Fiscal (IVA 19%): <strong>${fmtMoney(f29.code_504_iva_debit)}</strong></p>
-      <p>Total Comisiones a Terceros: <strong>${fmtMoney(f29.total_referral_commissions)}</strong></p>
-      <p>IVA Crédito Fiscal (gastos): <strong>${fmtMoney(f29.total_iva_credit)}</strong></p>
-      <p>IVA a Pagar (neto): <strong>${fmtMoney(f29.iva_a_pagar_neto)}</strong></p>`;
+      <p>Total Comisiones a Terceros: <strong>${fmtMoney(f29.total_referral_commissions)}</strong></p>`;
   }
 
-  // Renderizar gastos del mes
-  const expensesTbody = $('admin-expenses-table-body');
-  const expensesTable = $('admin-expenses-table');
-  const expensesEmpty = $('admin-expenses-empty');
-  const expenseSummaryEl = $('admin-expense-summary');
-  const { expenses, expense_summary } = data;
+  // Renderizar facturas de consultoría del mes — ventas de la consultora a
+  // otros clientes, separadas de Vyneural (ya sumadas a code_538/504 por el
+  // backend, ver admin_accounting.py). Reemplaza a la sección de "Gastos"
+  // (borrada) — mismo patrón de render.
+  const invoicesTbody = $('admin-consulting-invoices-table-body');
+  const invoicesTable = $('admin-consulting-invoices-table');
+  const invoicesEmpty = $('admin-consulting-invoices-empty');
+  const invoiceSummaryEl = $('admin-consulting-invoice-summary');
+  const { consulting_invoices, consulting_invoice_summary } = data;
 
-  if (expensesTbody) {
-    if (!expenses || !expenses.length) {
-      if (expensesTable) expensesTable.classList.add('hidden');
-      if (expensesEmpty) expensesEmpty.classList.remove('hidden');
-      expensesTbody.innerHTML = '';
+  if (invoicesTbody) {
+    if (!consulting_invoices || !consulting_invoices.length) {
+      if (invoicesTable) invoicesTable.classList.add('hidden');
+      if (invoicesEmpty) invoicesEmpty.classList.remove('hidden');
+      invoicesTbody.innerHTML = '';
     } else {
-      if (expensesTable) expensesTable.classList.remove('hidden');
-      if (expensesEmpty) expensesEmpty.classList.add('hidden');
-      expensesTbody.innerHTML = expenses
+      if (invoicesTable) invoicesTable.classList.remove('hidden');
+      if (invoicesEmpty) invoicesEmpty.classList.add('hidden');
+      invoicesTbody.innerHTML = consulting_invoices
         .map(
-          (e) => `<tr>
-            <td>${fmtDateOrDash(e.fecha)}</td>
-            <td>${escapeHtml(e.descripcion)}</td>
-            <td>${escapeHtml(ADMIN_EXPENSE_CATEGORIES[e.categoria] || e.categoria)}</td>
-            <td>${escapeHtml(e.proveedor || '—')}</td>
-            <td>${fmtMoney(e.monto_neto)}</td>
-            <td>${fmtMoney(e.monto_iva)}</td>
-            <td><button type="button" class="admin-expense-delete-btn cuenta-btn cuenta-btn-ghost" data-id="${escapeHtml(e.id)}">Borrar</button></td>
+          (inv) => `<tr>
+            <td>${fmtDateOrDash(inv.fecha)}</td>
+            <td>${escapeHtml(inv.cliente)}</td>
+            <td>${escapeHtml(inv.descripcion)}</td>
+            <td>${escapeHtml(inv.numero_documento || '—')}</td>
+            <td>${fmtMoney(inv.monto_neto)}</td>
+            <td>${fmtMoney(inv.monto_iva)}</td>
+            <td><button type="button" class="admin-consulting-invoice-delete-btn cuenta-btn cuenta-btn-ghost" data-id="${escapeHtml(inv.id)}">Borrar</button></td>
           </tr>`,
         )
         .join('');
     }
   }
 
-  if (expenseSummaryEl && expense_summary) {
-    expenseSummaryEl.innerHTML = `
+  if (invoiceSummaryEl && consulting_invoice_summary) {
+    invoiceSummaryEl.innerHTML = `
       <div class="admin-stat-row">
-        <div class="admin-stat"><strong>${fmtMoney(expense_summary.total_gross)}</strong><span>Total bruto</span></div>
-        <div class="admin-stat"><strong>${fmtMoney(expense_summary.total_neto)}</strong><span>Total neto</span></div>
-        <div class="admin-stat"><strong>${fmtMoney(expense_summary.total_iva)}</strong><span>Total IVA</span></div>
+        <div class="admin-stat"><strong>${fmtMoney(consulting_invoice_summary.total_gross)}</strong><span>Total bruto</span></div>
+        <div class="admin-stat"><strong>${fmtMoney(consulting_invoice_summary.total_neto)}</strong><span>Total neto</span></div>
+        <div class="admin-stat"><strong>${fmtMoney(consulting_invoice_summary.total_iva)}</strong><span>Total IVA</span></div>
       </div>`;
   }
 
@@ -1646,66 +1640,61 @@ function wireMonthlyAccounting() {
     });
   }
 
-  // Wiring del formulario de gastos
-  const expenseForm = $('admin-expense-form');
-  const expenseError = $('admin-expense-error');
-  if (expenseForm) {
-    expenseForm.addEventListener('submit', async (e) => {
+  // Wiring del formulario de facturas de consultoría (reemplaza al de
+  // "Gastos" borrado — mismo patrón: crear/borrar y recargar el mes).
+  const invoiceForm = $('admin-consulting-invoice-form');
+  const invoiceError = $('admin-consulting-invoice-error');
+  if (invoiceForm) {
+    invoiceForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (expenseError) expenseError.classList.add('hidden');
-      const month = parseInt(monthSel.value, 10);
-      const year = parseInt(yearInput.value, 10);
-      const fecha = $('admin-expense-fecha').value;
-      const descripcion = $('admin-expense-descripcion').value;
-      const categoria = $('admin-expense-categoria').value;
-      const proveedor = $('admin-expense-proveedor').value || null;
-      const numero_documento = $('admin-expense-numero').value || null;
-      const monto_neto = parseFloat($('admin-expense-monto-neto').value);
-      const monto_iva = parseFloat($('admin-expense-monto-iva').value);
+      if (invoiceError) invoiceError.classList.add('hidden');
+      const fecha = $('admin-consulting-invoice-fecha').value;
+      const cliente = $('admin-consulting-invoice-cliente').value;
+      const descripcion = $('admin-consulting-invoice-descripcion').value;
+      const numero_documento = $('admin-consulting-invoice-numero').value || null;
+      const monto_neto = parseFloat($('admin-consulting-invoice-monto-neto').value);
+      const monto_iva = parseFloat($('admin-consulting-invoice-monto-iva').value);
 
-      expenseForm.disabled = true;
+      invoiceForm.disabled = true;
       try {
-        await createExpense({
+        await createConsultingInvoice({
           fecha,
+          cliente,
           descripcion,
-          categoria,
-          proveedor,
           numero_documento,
           monto_neto,
           monto_iva,
         });
         // Limpiar formulario
-        expenseForm.reset();
+        invoiceForm.reset();
         // Recargar la contabilidad del mes para actualizar la tabla y resumen
         await loadMonthlyAccounting();
       } catch (err) {
-        if (expenseError) {
-          expenseError.textContent = (err && err.detail) || 'No se pudo crear el gasto.';
-          expenseError.classList.remove('hidden');
+        if (invoiceError) {
+          invoiceError.textContent = (err && err.detail) || 'No se pudo crear la factura.';
+          invoiceError.classList.remove('hidden');
         }
       } finally {
-        expenseForm.disabled = false;
+        invoiceForm.disabled = false;
       }
     });
   }
 
-  // Delegación: manejador de botones de borrar gastos
+  // Delegación: manejador de botones de borrar facturas de consultoría
   document.addEventListener('click', async (e) => {
-    if (e.target.classList.contains('admin-expense-delete-btn')) {
-      const expenseId = e.target.getAttribute('data-id');
-      if (!expenseId || !confirm('¿Estás seguro de que querés borrar este gasto?')) return;
-      if (expenseError) expenseError.classList.add('hidden');
-      const month = parseInt(monthSel.value, 10);
-      const year = parseInt(yearInput.value, 10);
+    if (e.target.classList.contains('admin-consulting-invoice-delete-btn')) {
+      const invoiceId = e.target.getAttribute('data-id');
+      if (!invoiceId || !confirm('¿Estás seguro de que querés borrar esta factura?')) return;
+      if (invoiceError) invoiceError.classList.add('hidden');
       e.target.disabled = true;
       try {
-        await deleteExpense(expenseId);
+        await deleteConsultingInvoice(invoiceId);
         // Recargar la contabilidad del mes para actualizar la tabla y resumen
         await loadMonthlyAccounting();
       } catch (err) {
-        if (expenseError) {
-          expenseError.textContent = (err && err.detail) || 'No se pudo borrar el gasto.';
-          expenseError.classList.remove('hidden');
+        if (invoiceError) {
+          invoiceError.textContent = (err && err.detail) || 'No se pudo borrar la factura.';
+          invoiceError.classList.remove('hidden');
         }
         e.target.disabled = false;
       }
