@@ -6,7 +6,7 @@ reportes con un servicio de terceros gratuito, sin backend propio.
 ## 1. Activar FormSubmit (una sola vez)
 
 1. El email receptor está en `src/report-bug.js` → `BUG_EMAIL`
-   (actualmente `matias.torres1812@gmail.com`).
+   (actualmente `soporte@vyneural.cl`).
 2. Al **primer envío real** (o al reporte de activación), FormSubmit manda un
    correo de confirmación a esa dirección.
 3. Abrir ese correo y pulsar el enlace **"Activate"** una sola vez.

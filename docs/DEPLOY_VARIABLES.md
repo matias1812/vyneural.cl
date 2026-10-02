@@ -41,9 +41,9 @@ El frontend NO guarda secretos: en Vercel solo se publica el rewrite de `/api`
 | `EMAIL_PROVIDER` | `smtp` (default) |
 | `SMTP_HOST` | `smtp.gmail.com` |
 | `SMTP_PORT` | `587` |
-| `SMTP_USER` | `matias.torres1812@gmail.com` |
+| `SMTP_USER` | `soporte@vyneural.cl` |
 | `SMTP_PASSWORD` | app password de Gmail (nunca en Git; ya está en `backend/.env` local) |
-| `SMTP_FROM` | `matias.torres1812@gmail.com` |
+| `SMTP_FROM` | `soporte@vyneural.cl` |
 | `SMTP_FROM_NAME` | `Vyneural` |
 | `SMTP_TLS` | `true` |
 | `SMTP_SSL` | `false` |
@@ -65,7 +65,7 @@ El frontend NO guarda secretos: en Vercel solo se publica el rewrite de `/api`
 |---|---|
 | `VAPID_PUBLIC_KEY` | generada con `py -m app.push.keys` (o la del `.env` local) |
 | `VAPID_PRIVATE_KEY` | ídem (secreta) |
-| `VAPID_SUBJECT` | `mailto:matias.torres1812@gmail.com` |
+| `VAPID_SUBJECT` | `mailto:soporte@vyneural.cl` |
 | `CORS_ORIGINS` | `https://www.vyneural.cl,https://vyneural.cl,https://vyneural-six.vercel.app,null,file://` *(`null`/`file://`: origen opaco del WebView de la APK, sin origen http/https propio)* |
 | `ENVIRONMENT` | `production` |
 | `LOG_LEVEL` | `INFO` |

@@ -73,7 +73,7 @@
       </nav>
 
       <header class="page-hero">
-        <span class="page-kicker">Transparencia</span>
+        <span class="page-kicker">Borrador — en revisión</span>
         <h1>Política de privacidad</h1>
         <p class="page-lead">
           Resumen en una frase: el audio se genera en tu dispositivo y nunca lo vemos; los datos que
@@ -87,17 +87,18 @@
         <ul>
           <li><strong>Tu audio no sale de tu dispositivo.</strong> Los tonos binaurales y los sonidos se generan en tiempo real en tu navegador (Web Audio API) o en el motor de audio nativo de la app Android. No se graban, no se analizan y no se suben a ningún servidor.</li>
           <li><strong>La cuenta es opcional.</strong> Sin cuenta, la app funciona igual y todo queda guardado solo en tu dispositivo. Con cuenta, podés sincronizar favoritos, frecuencias, recordatorios e itinerarios entre tus dispositivos.</li>
-          <li><strong>Guardamos lo que creás y lo mínimo de la cuenta</strong> (correo, nombre y contraseña cifrada). No vendemos datos, no hay anuncios y no hay seguimiento entre sitios web.</li>
-          <li><strong>Podés pedir que borremos tus datos</strong> escribiéndonos al correo del final de esta página.</li>
+          <li><strong>Guardamos lo que creás y lo mínimo de la cuenta</strong> (correo, nombre y el hash de tu contraseña). No vendemos datos, no hay anuncios y no hay seguimiento entre sitios web.</li>
+          <li><strong>Podés descargar o borrar todo cuando quieras, vos mismo.</strong> En <a href="/cuenta">Mi cuenta</a> hay un botón para exportar tus datos en un archivo JSON y otro para eliminar la cuenta con todo su contenido, al instante y sin pedirnos permiso.</li>
         </ul>
 
         <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></span>Qué datos guardamos y por qué</h2>
         <p>
           Todo lo que guardamos tiene un motivo concreto y está asociado a tu cuenta. Puedes verlo y
-          gestionarlo desde la página <a href="/cuenta">Mi cuenta</a>.
+          gestionarlo desde la página <a href="/cuenta">Mi cuenta</a>, y descargarlo completo con
+          «Exportar mis datos».
         </p>
         <ul>
-          <li><strong>Datos de la cuenta:</strong> correo electrónico, nombre visible, hash de tu contraseña (nunca la contraseña en texto plano) y si verificaste tu correo. Sirven para iniciar sesión, recuperar la cuenta y mantenerla segura.</li>
+          <li><strong>Datos de la cuenta:</strong> correo electrónico, nombre visible, hash de tu contraseña (nunca la contraseña en texto plano), si verificaste tu correo, la fecha y hora en que aceptaste los <a href="/terminos">Términos</a> y esta política al registrarte, y —si activás la verificación en dos pasos— lo necesario para validarla. Sirven para iniciar sesión, recuperar la cuenta y mantenerla segura.</li>
           <li><strong>Preferencias:</strong> tema, idioma, zona horaria y volumen predeterminado, para que la app se vea y suene como la dejaste.</li>
           <li><strong>Tu contenido:</strong> frecuencias guardadas, favoritos, recordatorios/alarmas e itinerarios (con sus pasos). Es tuyo: podés editarlo o eliminarlo desde <a href="/cuenta">Mi cuenta</a>.</li>
           <li><strong>Sesiones:</strong> guardamos un <em>hash</em> de tus tokens de sesión (nunca el token en sí), el navegador/dispositivo aproximado y la IP del último acceso, con su fecha de expiración. Sirve para mantener la sesión abierta, cerrarla de forma remota y detectar accesos sospechosos.</li>
@@ -108,6 +109,7 @@
             <strong>Transbank</strong> (web) o <strong>Google Play</strong> (app Android): ni Transbank ni
             Google Play nos entregan el número completo de tu tarjeta ni tus datos bancarios, y nosotros
             nunca los guardamos. Más detalle sobre pagos en <a href="/terminos">Términos y condiciones</a>.</li>
+          <li><strong>Soporte y comentarios:</strong> si nos escribís por la burbuja 🐞 o dejás un comentario, guardamos esos mensajes (y tu valoración, si la das) para poder responderte y mejorar. Si canjeaste un cupón, también queda registrado cuál y cuándo.</li>
           <li><strong>Auditoría mínima:</strong> registros de eventos relevantes (qué acción, cuándo) sin datos sensibles, para proteger el servicio contra abusos.</li>
         </ul>
 
@@ -123,6 +125,14 @@
           Solo enviamos correos <strong>transaccionales</strong>: verificación de tu correo al
           registrarte y recuperación de contraseña. Se envían únicamente a la dirección que
           registraste y no hacemos envíos promocionales ni boletines.
+        </p>
+        <p>
+          El envío lo hace <strong>Brevo</strong>, un proveedor externo de correo transaccional, a
+          través de su API por HTTPS. Para poder entregarte el mensaje, Brevo procesa tu dirección
+          de correo y el contenido de ese correo (un enlace de verificación o de restablecimiento):
+          no recibe tu contraseña, tus frecuencias ni el resto de tu contenido, y no usamos su
+          plataforma para marketing. Más detalles en la
+          <a href="https://www.brevo.com/legal/privacypolicy/" rel="noopener noreferrer" target="_blank">política de privacidad de Brevo</a>.
         </p>
 
         <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>Analítica: Vercel Web Analytics y Speed Insights</h2>
@@ -170,13 +180,28 @@
           estándar de entrega según su propia política; más detalles en la
           <a href="https://firebase.google.com/support/privacy" rel="noopener noreferrer" target="_blank">política de privacidad de Firebase</a>.
         </p>
+        <p>
+          <strong>Transferencias internacionales:</strong> varios de estos proveedores operan
+          servidores fuera de Chile, así que parte del tratamiento ocurre en el extranjero. La lista
+          completa de quiénes intervienen es: <strong>Vercel</strong> (hosting de la web y
+          analítica), <strong>Render</strong> (backend y base de datos), <strong>Brevo</strong>
+          (correos transaccionales), <strong>QStash / Upstash</strong> (el disparador horario, sin
+          datos personales), <strong>Firebase Cloud Messaging</strong> (entrega de notificaciones en
+          Android), <strong>Transbank</strong> (pagos en la web) y <strong>Google Play</strong>
+          (compras dentro de la app Android). Cada uno recibe únicamente lo que necesita para su
+          función, lo trata bajo su propia política de privacidad y ninguno lo recibe para usarlo
+          por su cuenta.
+        </p>
 
         <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>Seguridad</h2>
         <ul>
-          <li>Las contraseñas se guardan con <strong>hash</strong> (bcrypt); nunca en texto plano.</li>
+          <li>Las contraseñas se guardan con <strong>hash Argon2id</strong>; nunca en texto plano ni en un formato del que se pueda recuperar la contraseña original.</li>
+          <li><strong>Verificación en dos pasos (2FA), opcional:</strong> podés activarla desde <a href="/cuenta">Mi cuenta</a> con cualquier app de códigos temporales (TOTP). Es una capa extra: si alguien llegara a tener tu contraseña, no le alcanzaría para entrar.</li>
           <li>Los tokens de sesión se guardan como <em>hash</em> (sha256) y son revocables: podés cerrar todas tus sesiones desde <a href="/cuenta">Mi cuenta</a> al cambiar la contraseña.</li>
-          <li>Toda la comunicación va por HTTPS y el backend restringe los orígenes permitidos (CORS).</li>
-          <li>Si encontrás una vulnerabilidad, avisanos por el correo de contacto: lo tomamos en serio.</li>
+          <li>Toda la comunicación va por HTTPS. La API además fuerza el canal seguro con <strong>HSTS</strong>, declara su propia <strong>CSP</strong> y restringe los orígenes permitidos (CORS).</li>
+          <li><strong>Consentimiento registrado:</strong> guardamos la fecha y hora exactas en que aceptaste los <a href="/terminos">Términos</a> y esta política al registrarte, para que tu consentimiento sea verificable y no una suposición nuestra.</li>
+          <li><strong>Control interno:</strong> el panel de administración deja un registro de auditoría cuando alguien del equipo consulta los datos de una cuenta en particular. Nadie mira tus datos sin que quede rastro de quién y cuándo.</li>
+          <li>Si encontrás una vulnerabilidad, avisanos a <a href="mailto:soporte@vyneural.cl">soporte@vyneural.cl</a>: lo tomamos en serio.</li>
         </ul>
 
         <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><path d="M12 18h.01"/></svg></span>Permisos de la app Android (APK)</h2>
@@ -191,10 +216,15 @@
         <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></span>Tus derechos</h2>
         <ul>
           <li><strong>Acceso y corrección:</strong> desde <a href="/cuenta">Mi cuenta</a> podés ver y editar tus datos, tu contenido y tus preferencias en cualquier momento.</li>
-          <li><strong>Supresión:</strong> todavía no hay un botón automático de borrado de cuenta. Escribinos al correo de contacto y eliminamos tu cuenta y todos sus datos (frecuencias, favoritos, alarmas, itinerarios, suscripciones de notificaciones y sesiones). Solo conservamos la auditoría mínima, sin datos personales, por seguridad.</li>
+          <li><strong>Portabilidad:</strong> en <a href="/cuenta">Mi cuenta</a>, sección «Tus datos», el botón <strong>«Exportar mis datos»</strong> descarga un archivo JSON con todo lo que tenemos asociado a tu cuenta: perfil (incluida la fecha en que aceptaste los Términos), preferencias, frecuencias guardadas, favoritos, itinerarios, alarmas y sus avisos, historial de pagos, la tarjeta guardada (solo tipo y últimos 4 dígitos), dispositivos registrados, suscripciones de notificaciones, comentarios, conversaciones de soporte y cupones usados. Es inmediato, no hace falta pedirlo por correo, y el formato es legible y reutilizable en otra herramienta.</li>
+          <li><strong>Qué no entra en la exportación:</strong> por seguridad quedan afuera los secretos que no deben salir de nuestro lado ni viajar en un archivo: el hash de tu contraseña, el secreto de la verificación en dos pasos, las claves criptográficas crudas de las notificaciones push y las respuestas en bruto de Transbank. No son datos tuyos que te estemos ocultando: son credenciales cuyo valor está justamente en no copiarse.</li>
+          <li><strong>Supresión:</strong> en <a href="/cuenta">Mi cuenta</a>, en la «Zona de peligro», el botón <strong>«Eliminar mi cuenta y mis datos»</strong> borra todo en el momento: perfil, frecuencias, favoritos, alarmas, itinerarios, historial de pagos, suscripciones de notificaciones, dispositivos, sesiones y comentarios. La tarjeta guardada para la auto-renovación también se da de baja del lado de Transbank, así que no queda ningún cobro pendiente. Te pedimos tu contraseña de nuevo para confirmar que sos vos; no hay plazos de espera, ni revisión manual nuestra, ni forma de deshacerlo. Si querés quedarte con una copia, exportá tus datos <em>antes</em> de borrar. Después del borrado solo subsiste la auditoría mínima, sin datos personales, por seguridad del servicio.</li>
           <li><strong>Retención:</strong> tus datos se conservan mientras exista tu cuenta; las sesiones expiran solas y podés cerrarlas en cualquier momento.</li>
-          <li><strong>Marco legal:</strong> si estás en Chile, esta política se rige por la Ley 19.628; si estás en la Unión Europea, reconocés los derechos del RGPD (acceso, rectificación, supresión, limitación, portabilidad y oposición). Para ejercerlos, escribinos.</li>
-          <li><strong>Responsable de tus datos:</strong> Vyneural SpA, RUT 78.505.157-2.</li>
+          <li><strong>Oposición y limitación:</strong> no hacemos perfilado, publicidad ni decisiones automatizadas sobre tu persona, así que no hay un tratamiento de ese tipo al que oponerse. Las notificaciones son opt-in y las desactivás por dispositivo cuando quieras.</li>
+          <li><strong>Marco legal:</strong> en Chile, la <strong>Ley 21.719</strong> de protección de datos personales entra en plena vigencia el <strong>1 de diciembre de 2026</strong> y hoy todavía rige la Ley 19.628. Sin esperar esa fecha, nos preparamos voluntariamente para cumplir los estándares de la Ley 21.719: consentimiento explícito y registrado, derechos de acceso, rectificación, supresión, portabilidad y oposición ejercibles por vos mismo, y reconocemos la futura Agencia de Protección de Datos Personales que esa ley crea como la autoridad ante la que podés reclamar una vez vigente. Si estás en la Unión Europea, reconocemos los mismos derechos bajo el RGPD.</li>
+          <li><strong>Cómo ejercerlos:</strong> lo más rápido es hacerlo vos desde <a href="/cuenta">Mi cuenta</a> — acceso, corrección, exportación y borrado están ahí, sin intermediarios ni esperas. Si algo no se resuelve desde ahí, escribinos al contacto del final de esta página.</li>
+          <li><strong>Edad mínima:</strong> las cuentas de Vyneural son solo para personas mayores de 18 años. El detalle está en los <a href="/terminos#edad-minima">Términos y condiciones</a>.</li>
+          <li><strong>Responsable de tus datos:</strong> Vyneural SpA, RUT 78.505.157-2. Contacto de privacidad: <a href="mailto:soporte@vyneural.cl">soporte@vyneural.cl</a>.</li>
         </ul>
 
         <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>Cambios en esta política</h2>
@@ -206,9 +236,12 @@
         <div class="page-card">
           <h3>✉️ Contacto</h3>
           <p>
-            ¿Preguntas sobre esta política, tus datos o querés desactivar tu cuenta? Usá la
-            burbuja 🐞 (abajo a la derecha, en cualquier página) para escribirnos. Leemos todo.
-            Última actualización: <time datetime="2026-08-24">24 de agosto de 2026</time>.
+            ¿Preguntas sobre esta política o sobre tus datos? Escribinos a
+            <a href="mailto:soporte@vyneural.cl">soporte@vyneural.cl</a> —ese es también nuestro
+            contacto de privacidad— o usá la burbuja 🐞 (abajo a la derecha, en cualquier página).
+            Leemos todo. Para exportar o eliminar tu cuenta no hace falta escribirnos: lo hacés vos
+            desde <a href="/cuenta">Mi cuenta</a>.
+            Última actualización: <time datetime="2026-10-02">2 de octubre de 2026</time>.
           </p>
         </div>
       </div>
