@@ -2,7 +2,7 @@
 // Autenticación contra el backend Vyneural. Aditivo: sin backend la app
 // funciona igual (todo local).
 
-import { post, patch, cachedGet, clearSession, storeSession } from './client.js';
+import { post, patch, get, cachedGet, clearSession, storeSession } from './client.js';
 
 export async function register({ email, password, username, display_name, coupon_code }) {
   const session = await post('/api/v1/auth/register', {
@@ -16,10 +16,65 @@ export async function register({ email, password, username, display_name, coupon
   return session;
 }
 
+// Primer factor. El backend devuelve DOS formas posibles (ver
+// backvyneural/backend/app/routers/auth.py::login):
+//
+//  - sin 2FA → { access_token, refresh_token, ... } → se guarda la sesión.
+//  - con 2FA → { requires_totp: true, challenge_token, expires_in } → NO hay
+//    sesión todavía; hay que completar con verifyTotpLogin().
+//
+// El chequeo de `requires_totp` es obligatorio ANTES de storeSession(): sin
+// él, storeSession guardaría `undefined` en localStorage (literalmente el
+// string "undefined" como refresh token), dejando la sesión en un estado
+// corrupto que ningún refresh posterior puede arreglar.
 export async function login({ email, password }) {
-  const session = await post('/api/v1/auth/login', { email, password });
+  const result = await post('/api/v1/auth/login', { email, password });
+  if (result && result.requires_totp) return result;
+  storeSession(result);
+  return result;
+}
+
+// Segundo factor. `code` es el TOTP de 6 dígitos; alternativamente
+// `recovery_code` es uno de los códigos de recuperación de un solo uso.
+// Recién acá nace la sesión real.
+export async function verifyTotpLogin({ challenge_token, code, recovery_code }) {
+  const session = await post('/api/v1/auth/login/verify-totp', {
+    challenge_token,
+    code: code || undefined,
+    recovery_code: recovery_code || undefined,
+  });
   storeSession(session);
   return session;
+}
+
+// ── Verificación en dos pasos (2FA / TOTP), gestión desde /cuenta ───────────
+// Backend: backvyneural/backend/app/routers/totp.py.
+
+// Paso 1: genera el secreto y devuelve el otpauth:// para el QR. NO activa
+// nada todavía (totp_enabled sigue en false hasta confirmar).
+export async function enrollTotp() {
+  return post('/api/v1/auth/2fa/enroll');
+}
+
+// Paso 2: valida un código del secreto pendiente y ACTIVA el 2FA. Devuelve
+// los códigos de recuperación en texto plano — la única vez que existen.
+export async function confirmTotp(code) {
+  return post('/api/v1/auth/2fa/confirm', { code });
+}
+
+// Desactiva el 2FA: contraseña actual + segundo factor (código TOTP o uno de
+// recuperación sin usar). Borra el secreto y todos los códigos.
+export async function disableTotp({ password, code, recovery_code }) {
+  return post('/api/v1/auth/2fa/disable', {
+    password,
+    code: code || undefined,
+    recovery_code: recovery_code || undefined,
+  });
+}
+
+// Set nuevo de códigos de recuperación; los viejos quedan inválidos al toque.
+export async function regenerateRecoveryCodes(password) {
+  return post('/api/v1/auth/2fa/recovery-codes/regenerate', { password });
 }
 
 export async function logout() {
@@ -79,4 +134,11 @@ export async function deleteAccount(password) {
   const result = await post('/api/v1/users/me/delete', { password });
   clearSession();
   return result;
+}
+
+// Portabilidad de datos (Ley 21.719): todo lo que el backend tiene de esta
+// cuenta, en JSON. Contracara de deleteAccount — ver
+// backvyneural/backend/app/routers/users.py::export_my_data.
+export async function exportMyData() {
+  return get('/api/v1/users/me/export');
 }

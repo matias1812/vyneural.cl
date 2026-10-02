@@ -3912,6 +3912,107 @@ html:not(.in-app) .in-app-only {
   gap: 10px;
 }
 
+/* ------------------------------------- Verificación en dos pasos (2FA/TOTP) */
+/* Tarjeta de /cuenta, ver cuenta.html#cuenta-2fa-card + src/cuenta.js.
+   A diferencia de .cuenta-form-row (grid de 2 columnas fijo, que estiraría
+   tres botones a anchos raros), esta fila es flex con wrap: los botones
+   quedan con su ancho natural y bajan de línea solos en pantallas chicas. */
+.cuenta-2fa-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.cuenta-2fa-steps {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+/* La clave en texto plano para ingreso manual en la app de autenticación.
+   `user-select: all` para que un tap/clic la seleccione entera: son 32
+   caracteres y copiar "casi todo" produce un error silencioso (la app genera
+   códigos que nunca van a validar). */
+.cuenta-2fa-secret {
+  display: inline-block;
+  margin: 4px 6px 4px 0;
+  padding: 5px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  user-select: all;
+  word-break: break-all;
+}
+
+.cuenta-2fa-uri {
+  color: #a78bfa;
+  text-decoration: underline;
+}
+
+/* Envoltorio blanco: el QR necesita contraste alto para escanear bien, y la
+   UI de /cuenta es de tema oscuro — sin esto el quiet zone se pierde contra
+   el fondo y algunas apps de cámara no lo detectan. */
+.cuenta-2fa-qr-wrap {
+  display: inline-block;
+  margin: 2px 0 14px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  line-height: 0;
+}
+
+.cuenta-2fa-qr {
+  display: block;
+  width: 180px;
+  height: 180px;
+}
+
+.cuenta-2fa-codes {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.cuenta-2fa-codes-warn {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #fcd34d;
+}
+
+.cuenta-2fa-codes-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.cuenta-2fa-codes-list li {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  user-select: all;
+  text-align: center;
+}
+
 /* Selector de hora propio (solo APK, ver ui/apk-time-picker.js) — reemplaza
    el <input type="time"> nativo, cuyo TimePickerDialog del WebView de
    Android tiene un bug de conversión confirmado en producción (12:56 PM

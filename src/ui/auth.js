@@ -6,7 +6,8 @@
 //   sesión).
 // - Modal con vistas: login · registro (confirmar clave + términos y
 //   condiciones) · olvidé mi contraseña · "revisá tu correo" · "confirmá tu
-//   correo" (login bloqueado por verificación pendiente).
+//   correo" (login bloqueado por verificación pendiente) · verificación en
+//   dos pasos (segundo factor, cuando la cuenta tiene 2FA activo).
 // - Validación en cliente espejo del backend: email, contraseña ≥ 8 chars con
 //   letras y números, username [a-zA-Z0-9_.-]{3,64}. Mensajes genéricos
 //   (no revelan si el email existe), manejo de 429 y 401/403.
@@ -17,7 +18,7 @@
 //   window.__vyneuralAuth = { open(mode), onAuthChange(fn), isLoggedIn(), getProfile(), logout() }
 //   document 'vyneural:auth' → CustomEvent { type: 'login'|'register'|'logout' }
 
-import { login, register, logout, me, verifyEmail, resendVerification, forgotPassword } from '../api/auth.js';
+import { login, register, logout, me, verifyEmail, resendVerification, forgotPassword, verifyTotpLogin } from '../api/auth.js';
 import { getAccessToken, clearSession } from '../api/client.js';
 import { subscribeToPush, pushStatus } from '../api/push.js';
 import { initBackendIfConfigured } from '../api/integration.js';
@@ -29,8 +30,16 @@ const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,64}$/;
 let profile = null; // { id, email, username, display_name, email_verified, created_at }
 const listeners = new Set();
 let modalRoot = null;
-let view = 'login'; // login | register | forgot | sent | unverified
+let view = 'login'; // login | register | forgot | sent | unverified | totp
 let wakeupTimer = null; // ver setPending(): avisa cuando el backend tarda (cold start)
+
+// Challenge token del login en dos pasos (ver api/auth.js::login). Vive SOLO
+// en memoria, nunca en localStorage: es una credencial de vida corta (5 min)
+// cuyo único uso es canjearse por la sesión en el mismo flujo del modal — si
+// el usuario recarga la página a mitad, lo correcto es que tenga que volver a
+// poner email+contraseña, no que un token a medio camino quede guardado.
+let totpChallenge = null;
+let totpUseRecovery = false; // ¿el usuario eligió "usar un código de recuperación"?
 
 // El backend en Render free duerme tras inactividad: la primera request tras
 // eso tarda 20-50s. Un GET liviano acá (al abrir el modal, antes de que el
@@ -159,7 +168,9 @@ function renderNav() {
   // la seguridad real (require_admin_user en el backend vuelve a chequear
   // el email en cada request de /admin/*, ver deps.py). Nadie más ve este
   // botón porque nadie más puede tener esa cuenta (email único en la DB).
-  if (profile && profile.email === 'matias.torres1812@gmail.com') {
+  // El flag viene del backend (is_admin en /auth/me, ver serializers.py):
+  // así el email del admin no queda legible en el bundle JS público.
+  if (profile && profile.is_admin) {
     const admin = document.createElement('button');
     admin.type = 'button';
     admin.className = 'auth-menu-item';
@@ -327,6 +338,10 @@ function modalHTML() {
               <input id="auth-terms" type="checkbox" required />
               <span>Acepto los <a href="/terminos" target="_blank" rel="noopener noreferrer">Términos y condiciones</a> y la <a href="/privacidad" target="_blank" rel="noopener noreferrer">Política de privacidad</a>.</span>
             </label>
+            <label class="auth-check">
+              <input id="auth-age-18" type="checkbox" required />
+              <span>Declaro que soy mayor de 18 años.</span>
+            </label>
           </div>
 
           <div class="auth-error hidden" id="auth-error" role="alert"></div>
@@ -364,6 +379,31 @@ function modalHTML() {
         </div>
       </div>
 
+      <!-- Vista: segundo factor (2FA / TOTP) -->
+      <div id="auth-view-totp" hidden>
+        <form id="totp-form" novalidate>
+          <p class="auth-view-text" id="totp-intro">
+            Tu cuenta tiene verificación en dos pasos. Abrí tu app de
+            autenticación e ingresá el código de 6 dígitos.
+          </p>
+          <div class="auth-field" id="totp-code-field">
+            <label for="totp-code">Código de verificación</label>
+            <input id="totp-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                   maxlength="6" pattern="[0-9]*" placeholder="000000" />
+          </div>
+          <div class="auth-field" id="totp-recovery-field" hidden>
+            <label for="totp-recovery">Código de recuperación</label>
+            <input id="totp-recovery" name="recovery_code" type="text" autocomplete="off"
+                   maxlength="32" placeholder="ABCDE-FGHJK-LMNPQ-RSTUV" />
+            <small class="auth-hint">Es uno de los que guardaste al activar la verificación en dos pasos. Cada uno sirve una sola vez.</small>
+          </div>
+          <div class="auth-error hidden" id="totp-error" role="alert"></div>
+          <button type="submit" class="auth-submit" id="totp-submit">Verificar</button>
+          <button type="button" class="auth-link" id="totp-toggle-recovery">Usar un código de recuperación</button>
+          <button type="button" class="auth-link" id="totp-back">← Volver a iniciar sesión</button>
+        </form>
+      </div>
+
       <!-- Vista: login bloqueado por verificación pendiente -->
       <div id="auth-view-unverified" hidden>
         <div class="auth-success">
@@ -398,7 +438,16 @@ function wireModal() {
   const modal = document.getElementById('auth-modal');
   if (!modal) return;
 
-  const close = () => modal.classList.add('hidden');
+  const close = () => {
+    modal.classList.add('hidden');
+    // Cerrar el modal a mitad del segundo factor descarta el challenge: no
+    // debe quedar un token de "pasé el primer factor" vivo en memoria
+    // esperando que alguien reabra el modal. Reabrir empieza de cero.
+    if (totpChallenge) {
+      totpChallenge = null;
+      setView('login');
+    }
+  };
 
   modal.querySelector('#auth-close').addEventListener('click', close);
   modal.addEventListener('click', (e) => {
@@ -423,6 +472,18 @@ function wireModal() {
 
   modal.querySelector('#auth-form').addEventListener('submit', onSubmitAuth);
   modal.querySelector('#forgot-form').addEventListener('submit', onSubmitForgot);
+  modal.querySelector('#totp-form').addEventListener('submit', onSubmitTotp);
+
+  modal.querySelector('#totp-toggle-recovery').addEventListener('click', () => {
+    totpUseRecovery = !totpUseRecovery;
+    renderTotpMode();
+  });
+  modal.querySelector('#totp-back').addEventListener('click', () => {
+    // Abandonar el segundo paso descarta el challenge: volver atrás tiene que
+    // significar "empiezo el login de nuevo", no "dejo un token a medias".
+    totpChallenge = null;
+    setView('login');
+  });
 
   modal.querySelector('#auth-forgot-link').addEventListener('click', () => setView('forgot'));
   modal.querySelector('#forgot-back').addEventListener('click', () => setView('login'));
@@ -435,18 +496,26 @@ function wireModal() {
 function setView(next) {
   const modal = document.getElementById('auth-modal');
   if (!modal) return;
-  view = next === 'register' || next === 'forgot' || next === 'sent' || next === 'unverified' ? next : 'login';
+  const known = ['register', 'forgot', 'sent', 'unverified', 'totp'];
+  view = known.includes(next) ? next : 'login';
   const isAuth = view === 'login' || view === 'register';
 
   modal.querySelector('#auth-view-form').hidden = !isAuth;
   modal.querySelector('#auth-view-forgot').hidden = view !== 'forgot';
   modal.querySelector('#auth-view-sent').hidden = view !== 'sent';
   modal.querySelector('#auth-view-unverified').hidden = view !== 'unverified';
+  modal.querySelector('#auth-view-totp').hidden = view !== 'totp';
   modal.querySelector('.auth-foot').style.display = isAuth ? '' : 'none';
+
+  if (view === 'totp') {
+    modal.querySelector('#auth-title').textContent = 'Verificación en dos pasos';
+    modal.querySelector('#auth-sub').textContent = 'Un paso más para confirmar que sos vos.';
+  }
 
   if (!isAuth) {
     setError(null);
     setForgotError(null);
+    setTotpError(null);
     return;
   }
 
@@ -491,6 +560,114 @@ function setForgotError(msg) {
   err.classList.toggle('hidden', !msg);
 }
 
+function setTotpError(msg) {
+  const modal = document.getElementById('auth-modal');
+  if (!modal) return;
+  const err = modal.querySelector('#totp-error');
+  if (!err) return;
+  err.textContent = msg || '';
+  err.classList.toggle('hidden', !msg);
+}
+
+// Alterna entre "código de la app" y "código de recuperación". Se limpia el
+// campo que queda oculto: mandar los dos a la vez haría que el backend tome
+// el TOTP y el usuario crea que gastó un código de recuperación (o al revés).
+function renderTotpMode() {
+  const modal = document.getElementById('auth-modal');
+  if (!modal) return;
+  const codeField = modal.querySelector('#totp-code-field');
+  const recoveryField = modal.querySelector('#totp-recovery-field');
+  const toggle = modal.querySelector('#totp-toggle-recovery');
+  const intro = modal.querySelector('#totp-intro');
+  codeField.hidden = totpUseRecovery;
+  recoveryField.hidden = !totpUseRecovery;
+  if (totpUseRecovery) modal.querySelector('#totp-code').value = '';
+  else modal.querySelector('#totp-recovery').value = '';
+  toggle.textContent = totpUseRecovery
+    ? 'Usar el código de mi app de autenticación'
+    : 'Usar un código de recuperación';
+  intro.textContent = totpUseRecovery
+    ? 'Ingresá uno de los códigos de recuperación que guardaste al activar la verificación en dos pasos.'
+    : 'Tu cuenta tiene verificación en dos pasos. Abrí tu app de autenticación e ingresá el código de 6 dígitos.';
+  setTotpError(null);
+  setTimeout(() => {
+    const f = modal.querySelector(totpUseRecovery ? '#totp-recovery' : '#totp-code');
+    if (f) f.focus();
+  }, 30);
+}
+
+// Entra al segundo paso del login con el challenge recién emitido.
+function showTotpStep(challengeToken) {
+  totpChallenge = challengeToken;
+  totpUseRecovery = false;
+  setView('totp');
+  const modal = document.getElementById('auth-modal');
+  if (modal) {
+    modal.querySelector('#totp-code').value = '';
+    modal.querySelector('#totp-recovery').value = '';
+    modal.classList.remove('hidden');
+  }
+  renderTotpMode();
+}
+
+async function onSubmitTotp(e) {
+  e.preventDefault();
+  const modal = document.getElementById('auth-modal');
+  if (!modal) return;
+  if (!totpChallenge) {
+    // El challenge vive solo en memoria y dura 5 min: si no está, el flujo se
+    // reinicia desde el email+contraseña (no hay nada que reintentar acá).
+    setView('login');
+    setError('La verificación venció. Volvé a iniciar sesión.');
+    return;
+  }
+  const code = modal.querySelector('#totp-code').value.replace(/\s+/g, '');
+  const recovery = modal.querySelector('#totp-recovery').value.trim();
+
+  if (totpUseRecovery) {
+    if (!recovery) return setTotpError('Ingresá uno de tus códigos de recuperación.');
+  } else if (!/^\d{6}$/.test(code)) {
+    return setTotpError('El código son 6 dígitos.');
+  }
+
+  const submit = modal.querySelector('#totp-submit');
+  submit.disabled = true;
+  submit.textContent = 'Verificando…';
+  setTotpError(null);
+  const timer = setTimeout(() => {
+    submit.textContent = 'Despertando el servidor… puede tardar unos segundos';
+  }, WAKEUP_HINT_MS);
+  try {
+    await verifyTotpLogin(
+      totpUseRecovery
+        ? { challenge_token: totpChallenge, recovery_code: recovery }
+        : { challenge_token: totpChallenge, code },
+    );
+    // Sesión real emitida: desde acá es idéntico a un login sin 2FA.
+    totpChallenge = null;
+    await refreshProfile();
+    modal.classList.add('hidden');
+    renderNav();
+    notify();
+    document.dispatchEvent(new CustomEvent('vyneural:auth', { detail: { type: 'login' } }));
+    afterAuth();
+  } catch (err) {
+    if (err && err.status === 401) {
+      setTotpError(
+        totpUseRecovery
+          ? 'Ese código de recuperación no es válido o ya se usó. Probá con otro.'
+          : 'El código no es correcto o venció. Revisá el código actual de tu app e intentá de nuevo.',
+      );
+    } else {
+      setTotpError(friendlyError(err));
+    }
+  } finally {
+    clearTimeout(timer);
+    submit.disabled = false;
+    submit.textContent = 'Verificar';
+  }
+}
+
 // Validación espejo del backend (ver app/schemas/auth.py).
 function validateAuth() {
   const modal = document.getElementById('auth-modal');
@@ -511,6 +688,9 @@ function validateAuth() {
     if (confirm !== password) return 'Las contraseñas no coinciden.';
     if (!modal.querySelector('#auth-terms').checked) {
       return 'Tenés que aceptar los Términos y condiciones para crear la cuenta.';
+    }
+    if (!modal.querySelector('#auth-age-18').checked) {
+      return 'Tenés que confirmar que sos mayor de 18 años para crear una cuenta.';
     }
   }
   return null;
@@ -572,8 +752,9 @@ async function onSubmitAuth(e) {
         resend: true,
       });
     } else {
+      let result;
       try {
-        await login({ email, password });
+        result = await login({ email, password });
       } catch (err) {
         if (err && err.status === 403) {
           // Login bloqueado por verificación pendiente → pantalla de confirmación.
@@ -584,6 +765,13 @@ async function onSubmitAuth(e) {
           return;
         }
         throw err;
+      }
+      // Cuenta con 2FA: el primer factor pasó pero TODAVÍA no hay sesión
+      // (api/auth.js::login no guardó nada). Falta canjear el challenge por
+      // el segundo factor en la vista de abajo.
+      if (result && result.requires_totp) {
+        showTotpStep(result.challenge_token);
+        return;
       }
       await refreshProfile();
       modal.classList.add('hidden');
@@ -899,7 +1087,9 @@ export function open(mode) {
   setTimeout(() => {
     const f = view === 'forgot'
       ? modal.querySelector('#forgot-email')
-      : modal.querySelector('#auth-email');
+      : view === 'totp'
+        ? modal.querySelector('#totp-code')
+        : modal.querySelector('#auth-email');
     if (f) f.focus();
   }, 30);
 }

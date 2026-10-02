@@ -1,6 +1,13 @@
 // scripts/bridge-login-probe.mjs — POST /auth/login directo por el bridge
 // nativo (API_REQUEST) para depurar la cadena sin la UI.
 // Uso: EMAIL=… PASS=… node scripts/bridge-login-probe.mjs
+//
+// OJO con cuentas que tengan verificación en dos pasos activa: ahí
+// POST /auth/login responde 200 con { requires_totp, challenge_token } y SIN
+// access_token (es correcto, falta el segundo factor — ver
+// backend/app/routers/auth.py::login). O sea, `hasAccessToken: false` NO
+// significa que la cadena del bridge esté rota: probá con una cuenta sin 2FA
+// para depurar el transporte.
 import http from 'http';
 
 const email = process.env.EMAIL;

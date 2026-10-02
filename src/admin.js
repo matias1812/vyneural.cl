@@ -33,11 +33,6 @@ import {
 
 const $ = (id) => document.getElementById(id);
 
-// Mismo email que backend/app/config.py::admin_email por default — esto es
-// solo el gate visual, el backend vuelve a chequear settings.admin_email en
-// cada request sin importar este literal.
-const ADMIN_EMAIL = 'matias.torres1812@gmail.com';
-
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -2315,7 +2310,13 @@ async function init() {
   } catch (_) {
     profile = null;
   }
-  const isAdmin = !!(profile && profile.email === ADMIN_EMAIL);
+  // is_admin lo calcula el backend (/auth/me, ver serializers.py) con el
+  // mismo criterio que require_admin_user. Antes acá vivía el email del
+  // admin como literal, lo que lo dejaba legible en el bundle JS público:
+  // el frontend nunca necesita saber CUÁL es ese email, solo si esta sesión
+  // lo es. Sigue siendo solo el gate visual — el backend revalida en cada
+  // request de /admin/*.
+  const isAdmin = !!(profile && profile.is_admin);
   if (!isAdmin) {
     if (unauthorized) unauthorized.classList.remove('hidden');
     if (content) content.classList.add('hidden');

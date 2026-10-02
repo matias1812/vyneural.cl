@@ -293,6 +293,142 @@
             </form>
           </div>
 
+          <!-- Verificación en dos pasos (2FA / TOTP). Va acá, entre "Cambiar
+               contraseña" y "Tus datos", porque es seguridad de la cuenta:
+               el usuario que viene a cambiar la clave es el mismo que viene a
+               endurecer el acceso. Backend: app/routers/totp.py. -->
+          <div class="page-card" id="cuenta-2fa-card">
+            <div class="rutina-head">
+              <h3>🛡️ Verificación en dos pasos</h3>
+              <span class="roadmap-status rs-warn" id="cuenta-2fa-status">Consultando…</span>
+            </div>
+            <p class="rutina-hint" id="cuenta-2fa-text">Consultando el estado de tu cuenta…</p>
+
+            <!-- Estado: desactivado → botón para arrancar el enrolamiento -->
+            <div id="cuenta-2fa-off" hidden>
+              <p class="rutina-hint">
+                Sumá un segundo paso al iniciar sesión: además de tu contraseña, un
+                código de 6 dígitos que genera una app de autenticación en tu teléfono
+                (Google Authenticator, Authy, 1Password, Aegis y cualquier otra compatible
+                con TOTP). Si alguien llega a tener tu contraseña, no le alcanza.
+              </p>
+              <button type="button" class="cuenta-btn" id="cuenta-2fa-start">Activar verificación en dos pasos</button>
+            </div>
+
+            <!-- Estado: enrolando (paso 1 hecho, falta confirmar) -->
+            <div id="cuenta-2fa-enroll" hidden>
+              <div class="cuenta-2fa-qr-wrap">
+                <canvas id="cuenta-2fa-qr" class="cuenta-2fa-qr" width="200" height="200"></canvas>
+              </div>
+              <ol class="cuenta-2fa-steps">
+                <li>
+                  Escaneá el código QR de arriba con tu app de autenticación, o
+                  abrí tu app y agregá una cuenta nueva con
+                  <a href="#" id="cuenta-2fa-uri" class="cuenta-2fa-uri" rel="noopener">este enlace</a>
+                  (en el teléfono, el enlace la abre directo).
+                </li>
+                <li>
+                  Si tenés que ingresarla a mano, usá esta clave:
+                  <code class="cuenta-2fa-secret" id="cuenta-2fa-secret">—</code>
+                  <button type="button" class="cuenta-item-btn cuenta-item-btn-ghost" id="cuenta-2fa-copy">Copiar</button>
+                  <br />
+                  <small class="auth-hint">Tipo: basada en tiempo (TOTP) · 6 dígitos · 30 segundos.</small>
+                </li>
+                <li>Ingresá el código que te muestra la app para confirmar.</li>
+              </ol>
+              <form id="cuenta-2fa-confirm-form" class="cuenta-form">
+                <label>Código de la app
+                  <input id="cuenta-2fa-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                         maxlength="6" pattern="[0-9]*" placeholder="000000" required />
+                </label>
+                <div class="auth-error hidden" id="cuenta-2fa-enroll-error" role="alert"></div>
+                <div class="cuenta-2fa-actions">
+                  <button type="submit" class="cuenta-btn" id="cuenta-2fa-confirm">Confirmar y activar</button>
+                  <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-cancel">Cancelar</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Estado: activado → regenerar códigos o desactivar -->
+            <div id="cuenta-2fa-on" hidden>
+              <p class="rutina-hint">
+                Cada vez que inicies sesión te vamos a pedir el código de tu app. Si perdés
+                el teléfono, usá uno de tus códigos de recuperación.
+              </p>
+              <div class="cuenta-2fa-actions">
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-regen">Regenerar códigos de recuperación</button>
+                <button type="button" class="cuenta-btn cuenta-btn-danger" id="cuenta-2fa-disable-open">Desactivar</button>
+              </div>
+            </div>
+
+            <!-- Códigos de recuperación recién generados: se ven UNA vez -->
+            <div id="cuenta-2fa-codes" class="cuenta-2fa-codes" hidden>
+              <p class="cuenta-2fa-codes-warn">
+                ⚠️ Guardá estos códigos ahora. <strong>No los vas a poder volver a ver.</strong>
+                Cada uno te deja entrar una sola vez si perdés el acceso a tu app de
+                autenticación.
+              </p>
+              <ul class="cuenta-2fa-codes-list" id="cuenta-2fa-codes-list"></ul>
+              <div class="cuenta-2fa-actions">
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-codes-copy">Copiar todos</button>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-codes-download">Descargar .txt</button>
+                <button type="button" class="cuenta-btn" id="cuenta-2fa-codes-done">Ya los guardé</button>
+              </div>
+            </div>
+
+            <!-- Desactivar: pide contraseña + segundo factor -->
+            <form id="cuenta-2fa-disable-form" class="cuenta-form" hidden>
+              <p class="rutina-hint">
+                Para desactivarla te pedimos tu contraseña y un código: el de tu app, o uno
+                de recuperación sin usar si ya no tenés el teléfono.
+              </p>
+              <label>Contraseña actual
+                <input id="cuenta-2fa-disable-pw" type="password" autocomplete="current-password" maxlength="128" required />
+              </label>
+              <label id="cuenta-2fa-disable-code-wrap">Código de la app
+                <input id="cuenta-2fa-disable-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                       maxlength="6" pattern="[0-9]*" placeholder="000000" />
+              </label>
+              <label id="cuenta-2fa-disable-recovery-wrap" hidden>Código de recuperación
+                <input id="cuenta-2fa-disable-recovery" type="text" autocomplete="off" maxlength="32"
+                       placeholder="ABCDE-FGHJK-LMNPQ-RSTUV" />
+              </label>
+              <button type="button" class="cuenta-item-btn cuenta-item-btn-ghost" id="cuenta-2fa-disable-toggle">Usar un código de recuperación</button>
+              <div class="auth-error hidden" id="cuenta-2fa-disable-error" role="alert"></div>
+              <div class="cuenta-2fa-actions">
+                <button type="submit" class="cuenta-btn cuenta-btn-danger" id="cuenta-2fa-disable-submit">Desactivar</button>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-disable-cancel">Cancelar</button>
+              </div>
+            </form>
+
+            <!-- Regenerar: pide contraseña -->
+            <form id="cuenta-2fa-regen-form" class="cuenta-form" hidden>
+              <p class="rutina-hint">
+                Genera un set nuevo de 10 códigos. Los anteriores dejan de servir de
+                inmediato.
+              </p>
+              <label>Contraseña actual
+                <input id="cuenta-2fa-regen-pw" type="password" autocomplete="current-password" maxlength="128" required />
+              </label>
+              <div class="auth-error hidden" id="cuenta-2fa-regen-error" role="alert"></div>
+              <div class="cuenta-2fa-actions">
+                <button type="submit" class="cuenta-btn" id="cuenta-2fa-regen-submit">Generar códigos nuevos</button>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-regen-cancel">Cancelar</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="page-card">
+            <h3>📦 Tus datos</h3>
+            <p class="rutina-hint">
+              Descargá un archivo JSON con todos los datos que Vyneural tiene de tu cuenta
+              (perfil, preferencias, frecuencias favoritas, alarmas, itinerarios, historial de
+              pagos, tarjeta guardada, dispositivos, suscripciones de notificaciones,
+              conversaciones de soporte y cupones).
+            </p>
+            <button type="button" class="cuenta-btn" id="cuenta-export-data">Exportar mis datos</button>
+          </div>
+
           <div class="page-card cuenta-danger-zone">
             <h3>⚠️ Zona de peligro</h3>
             <p class="rutina-hint">

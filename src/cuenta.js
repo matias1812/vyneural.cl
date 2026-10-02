@@ -11,7 +11,10 @@
 // Aditiva: si no hay sesión muestra la puerta de entrada; sin backend la
 // app sigue funcionando igual.
 
-import { me, changePassword, resendVerification, deleteAccount, updateProfile } from './api/auth.js';
+import {
+  me, changePassword, resendVerification, deleteAccount, updateProfile, exportMyData,
+  enrollTotp, confirmTotp, disableTotp, regenerateRecoveryCodes,
+} from './api/auth.js';
 import { getAccessToken, notifyNativeAlarmsChanged } from './api/client.js';
 import { listFavorites, removeFavorite } from './api/favorites.js';
 import {
@@ -20,6 +23,7 @@ import {
 } from './api/frequencies.js';
 import { listAlarms, deleteAlarm, updateAlarm } from './api/alarms.js';
 import { listItineraries } from './api/itineraries.js';
+import QRCode from 'qrcode';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
 import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, lookupCoupon, redeemCoupon, cancelCoupon, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
 import { noteBackendPendingCouponStatus, checkForRedeemedGooglePlayCode } from './platform/google-play-redeem.js';
@@ -89,6 +93,7 @@ function renderProfile(p) {
     since.textContent = '';
   }
   renderVerify(p);
+  render2fa(p);
 }
 
 // ── Verificación de correo ─────────────────────────────────────────────────
@@ -1007,6 +1012,7 @@ async function loadAll() {
         ? 'Tu sesión venció: iniciá sesión para volver a sincronizar.'
         : 'Reiniciá sesión para seguir sincronizando.';
     renderVerify(null);
+    render2fa(null);
     showSessionRecovery(isNetwork);
     // Sesión realmente inválida: sincronizar el chip de la nav (evita el
     // estado "logueado" fantasma) sin tocar las demás pestañas.
@@ -1336,6 +1342,464 @@ function wirePasswordForm() {
   });
 }
 
+// ── Verificación en dos pasos (2FA / TOTP) ─────────────────────────────────
+// Backend: backvyneural/backend/app/routers/totp.py.
+//
+// Tres estados visibles, mutuamente excluyentes: desactivado (#cuenta-2fa-off),
+// enrolando (#cuenta-2fa-enroll: secreto ya emitido, falta confirmar con un
+// código real) y activo (#cuenta-2fa-on). El panel de códigos de recuperación
+// (#cuenta-2fa-codes) y los formularios de desactivar/regenerar se superponen
+// a eso según la acción en curso.
+//
+// Nada de esto toca localStorage: el secreto del enrolamiento y los códigos
+// de recuperación viven SOLO en memoria y solo mientras la pantalla está
+// abierta. Recargar /cuenta a mitad del enrolamiento vuelve a pedir /enroll
+// (el backend rota el secreto pendiente, que es lo correcto: el QR viejo
+// nunca se llegó a confirmar).
+
+let twoFaEnabled = false;
+let twoFaKnown = false; // ¿el backend ya nos dijo el estado real?
+let enrollSecret = null; // secreto del enrolamiento en curso (NO persistido)
+let shownRecoveryCodes = null; // códigos recién emitidos, visibles una vez
+let disableUseRecovery = false;
+
+function render2fa(p) {
+  if (p) {
+    twoFaEnabled = !!p.totp_enabled;
+    twoFaKnown = true;
+    // Si el backend dice que está activo, cualquier enrolamiento a medias que
+    // tengamos en memoria ya no aplica.
+    if (twoFaEnabled) enrollSecret = null;
+  } else if (!twoFaKnown) {
+    twoFaEnabled = false;
+  }
+  paint2fa();
+}
+
+function paint2fa() {
+  const badge = $('cuenta-2fa-status');
+  const text = $('cuenta-2fa-text');
+  const off = $('cuenta-2fa-off');
+  const enroll = $('cuenta-2fa-enroll');
+  const on = $('cuenta-2fa-on');
+  if (!badge || !off || !enroll || !on) return;
+
+  const enrolling = !twoFaEnabled && !!enrollSecret;
+
+  if (!twoFaKnown) {
+    badge.textContent = 'Consultando…';
+    badge.classList.add('rs-warn');
+    badge.classList.remove('rs-live');
+    if (text) text.textContent = 'Consultando el estado de tu cuenta…';
+    off.hidden = true;
+    enroll.hidden = true;
+    on.hidden = true;
+    return;
+  }
+
+  badge.textContent = twoFaEnabled ? 'Activa ✓' : enrolling ? 'Sin confirmar' : 'Desactivada';
+  badge.classList.toggle('rs-live', twoFaEnabled);
+  badge.classList.toggle('rs-warn', !twoFaEnabled);
+  badge.title = twoFaEnabled
+    ? 'Tu cuenta pide un código además de la contraseña al iniciar sesión.'
+    : 'Tu cuenta entra solo con la contraseña.';
+  if (text) {
+    text.textContent = twoFaEnabled
+      ? 'Tu cuenta está protegida con un segundo paso al iniciar sesión.'
+      : enrolling
+        ? 'Falta un paso: confirmá con el código que te muestra tu app para activarla.'
+        : 'Tu cuenta entra solo con la contraseña. Podés sumarle un segundo paso.';
+  }
+
+  off.hidden = twoFaEnabled || enrolling;
+  enroll.hidden = !enrolling;
+  on.hidden = !twoFaEnabled;
+}
+
+function show2faCodes(codes) {
+  shownRecoveryCodes = codes || [];
+  const panel = $('cuenta-2fa-codes');
+  const list = $('cuenta-2fa-codes-list');
+  if (!panel || !list) return;
+  list.innerHTML = '';
+  shownRecoveryCodes.forEach((code) => {
+    const li = document.createElement('li');
+    // textContent (no innerHTML): aunque el código venga del backend y sea
+    // [A-Z2-9-], se trata como dato, no como markup.
+    li.textContent = code;
+    list.appendChild(li);
+  });
+  panel.hidden = false;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function hide2faCodes() {
+  shownRecoveryCodes = null;
+  const panel = $('cuenta-2fa-codes');
+  const list = $('cuenta-2fa-codes-list');
+  if (panel) panel.hidden = true;
+  // Se vacía el DOM: los códigos no tienen que quedar en la página después de
+  // que el usuario dijo "ya los guardé".
+  if (list) list.innerHTML = '';
+}
+
+// Copiado con fallback: en el WebView de la APK (origen file://) la Clipboard
+// API puede estar bloqueada — mismo criterio que main.js::shareLink, que ya
+// cae a window.prompt cuando no hay portapapeles.
+async function copyToClipboard(value, btn, okLabel) {
+  const original = btn ? btn.textContent : '';
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+      if (btn) {
+        btn.textContent = okLabel || 'Copiado ✓';
+        setTimeout(() => { btn.textContent = original; }, 2500);
+      }
+      return true;
+    }
+  } catch (_) {
+    /* portapapeles bloqueado: sigue al fallback */
+  }
+  window.prompt('Copiá esto a mano:', value);
+  return false;
+}
+
+function set2faError(id, msg) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = msg || '';
+  el.classList.toggle('hidden', !msg);
+}
+
+function totpCodeProblem(code) {
+  return /^\d{6}$/.test(code) ? '' : 'El código son 6 dígitos.';
+}
+
+function wire2fa() {
+  const card = $('cuenta-2fa-card');
+  if (!card) return;
+
+  // ── Paso 1: pedir el secreto ──
+  const startBtn = $('cuenta-2fa-start');
+  if (startBtn) {
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      const original = startBtn.textContent;
+      startBtn.textContent = 'Generando…';
+      hide2faCodes();
+      try {
+        const data = await enrollTotp();
+        enrollSecret = data.secret;
+        $('cuenta-2fa-secret').textContent = data.secret;
+        const link = $('cuenta-2fa-uri');
+        if (link) {
+          // El href otpauth:// abre la app de autenticación en el teléfono.
+          // En escritorio no hay handler y no pasa nada — por eso el secreto
+          // en texto y el QR, abajo, son el camino garantizado.
+          link.href = data.otpauth_uri;
+        }
+        const qrCanvas = $('cuenta-2fa-qr');
+        if (qrCanvas && data.otpauth_uri) {
+          try {
+            // 100% client-side: no sale nada a ningún servidor, solo se
+            // dibuja el otpauth:// que ya vino del backend.
+            await QRCode.toCanvas(qrCanvas, data.otpauth_uri, { width: 180, margin: 1 });
+          } catch {
+            // Si falla el render del QR no es fatal — el link y la clave
+            // manual, abajo, siguen siendo el camino garantizado.
+          }
+        }
+        set2faError('cuenta-2fa-enroll-error', '');
+        $('cuenta-2fa-code').value = '';
+        paint2fa();
+      } catch (err) {
+        if (err && err.status === 409) {
+          // Ya estaba activo en el backend (otra pestaña/dispositivo lo
+          // activó): refrescar el estado real en vez de mentir en pantalla.
+          twoFaEnabled = true;
+          twoFaKnown = true;
+          paint2fa();
+        } else {
+          set2faError('cuenta-2fa-enroll-error', (err && err.detail) || 'No se pudo empezar el enrolamiento. Intentá de nuevo.');
+          $('cuenta-2fa-enroll').hidden = false;
+        }
+      } finally {
+        startBtn.disabled = false;
+        startBtn.textContent = original;
+      }
+    });
+  }
+
+  const copyBtn = $('cuenta-2fa-copy');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      if (enrollSecret) copyToClipboard(enrollSecret, copyBtn, 'Copiada ✓');
+    });
+  }
+
+  const cancelBtn = $('cuenta-2fa-cancel');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      // Solo descarta el enrolamiento EN PANTALLA. El secreto pendiente queda
+      // guardado en el backend sin activar (totp_enabled sigue false, o sea
+      // el login no cambia); volver a "Activar" lo rota por uno nuevo.
+      enrollSecret = null;
+      set2faError('cuenta-2fa-enroll-error', '');
+      paint2fa();
+    });
+  }
+
+  // ── Paso 2: confirmar y activar ──
+  const confirmForm = $('cuenta-2fa-confirm-form');
+  if (confirmForm) {
+    confirmForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const btn = $('cuenta-2fa-confirm');
+      const code = ($('cuenta-2fa-code').value || '').replace(/\s+/g, '');
+      const problem = totpCodeProblem(code);
+      if (problem) return set2faError('cuenta-2fa-enroll-error', problem);
+      set2faError('cuenta-2fa-enroll-error', '');
+      btn.disabled = true;
+      btn.textContent = 'Confirmando…';
+      try {
+        const data = await confirmTotp(code);
+        enrollSecret = null;
+        twoFaEnabled = true;
+        twoFaKnown = true;
+        paint2fa();
+        show2faCodes(data.recovery_codes);
+        $('cuenta-2fa-code').value = '';
+        // El chip de la nav lee el perfil por su cuenta: mantenerlo al día.
+        if (window.__vyneuralAuth && typeof window.__vyneuralAuth.refresh === 'function') {
+          window.__vyneuralAuth.refresh();
+        }
+      } catch (err) {
+        set2faError(
+          'cuenta-2fa-enroll-error',
+          (err && err.detail) || 'El código no es correcto. Revisá el que muestra tu app ahora mismo.',
+        );
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Confirmar y activar';
+      }
+    });
+  }
+
+  // ── Panel de códigos de recuperación ──
+  const codesCopy = $('cuenta-2fa-codes-copy');
+  if (codesCopy) {
+    codesCopy.addEventListener('click', () => {
+      if (shownRecoveryCodes) copyToClipboard(shownRecoveryCodes.join('\n'), codesCopy, 'Copiados ✓');
+    });
+  }
+  const codesDownload = $('cuenta-2fa-codes-download');
+  if (codesDownload) {
+    codesDownload.addEventListener('click', () => {
+      if (!shownRecoveryCodes) return;
+      const body = [
+        'Códigos de recuperación de Vyneural',
+        'Cada código sirve UNA sola vez para iniciar sesión si perdés el acceso',
+        'a tu app de autenticación. Guardalos en un lugar seguro.',
+        '',
+        ...shownRecoveryCodes,
+        '',
+        `Generados: ${new Date().toISOString()}`,
+      ].join('\n');
+      try {
+        const blob = new Blob([body], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'vyneural-codigos-de-recuperacion.txt';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      } catch (_) {
+        // Descarga bloqueada (p. ej. el WebView de la APK): el botón de
+        // copiar y la lista en pantalla siguen siendo el camino.
+        copyToClipboard(shownRecoveryCodes.join('\n'), codesDownload, 'Copiados ✓');
+      }
+    });
+  }
+  const codesDone = $('cuenta-2fa-codes-done');
+  if (codesDone) codesDone.addEventListener('click', hide2faCodes);
+
+  // ── Desactivar ──
+  const disableOpen = $('cuenta-2fa-disable-open');
+  const disableForm = $('cuenta-2fa-disable-form');
+  const disableToggle = $('cuenta-2fa-disable-toggle');
+  const paintDisableMode = () => {
+    const codeWrap = $('cuenta-2fa-disable-code-wrap');
+    const recWrap = $('cuenta-2fa-disable-recovery-wrap');
+    if (!codeWrap || !recWrap || !disableToggle) return;
+    codeWrap.hidden = disableUseRecovery;
+    recWrap.hidden = !disableUseRecovery;
+    // Se limpia el campo oculto: mandar los dos a la vez haría que el backend
+    // use el TOTP y el usuario crea que gastó un código de recuperación.
+    if (disableUseRecovery) $('cuenta-2fa-disable-code').value = '';
+    else $('cuenta-2fa-disable-recovery').value = '';
+    disableToggle.textContent = disableUseRecovery
+      ? 'Usar el código de mi app'
+      : 'Usar un código de recuperación';
+  };
+  if (disableOpen && disableForm) {
+    disableOpen.addEventListener('click', () => {
+      hide2faCodes();
+      disableUseRecovery = false;
+      disableForm.reset();
+      set2faError('cuenta-2fa-disable-error', '');
+      paintDisableMode();
+      disableForm.hidden = false;
+      $('cuenta-2fa-disable-pw').focus();
+    });
+  }
+  if (disableToggle) {
+    disableToggle.addEventListener('click', () => {
+      disableUseRecovery = !disableUseRecovery;
+      set2faError('cuenta-2fa-disable-error', '');
+      paintDisableMode();
+    });
+  }
+  const disableCancel = $('cuenta-2fa-disable-cancel');
+  if (disableCancel && disableForm) {
+    disableCancel.addEventListener('click', () => {
+      disableForm.reset();
+      disableForm.hidden = true;
+      set2faError('cuenta-2fa-disable-error', '');
+    });
+  }
+  if (disableForm) {
+    disableForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const btn = $('cuenta-2fa-disable-submit');
+      const password = $('cuenta-2fa-disable-pw').value;
+      const code = ($('cuenta-2fa-disable-code').value || '').replace(/\s+/g, '');
+      const recovery = ($('cuenta-2fa-disable-recovery').value || '').trim();
+      if (!password) return set2faError('cuenta-2fa-disable-error', 'Ingresá tu contraseña actual.');
+      if (disableUseRecovery) {
+        if (!recovery) return set2faError('cuenta-2fa-disable-error', 'Ingresá uno de tus códigos de recuperación.');
+      } else {
+        const problem = totpCodeProblem(code);
+        if (problem) return set2faError('cuenta-2fa-disable-error', problem);
+      }
+      set2faError('cuenta-2fa-disable-error', '');
+      btn.disabled = true;
+      btn.textContent = 'Desactivando…';
+      try {
+        await disableTotp(
+          disableUseRecovery
+            ? { password, recovery_code: recovery }
+            : { password, code },
+        );
+        disableForm.reset();
+        disableForm.hidden = true;
+        twoFaEnabled = false;
+        twoFaKnown = true;
+        enrollSecret = null;
+        hide2faCodes();
+        paint2fa();
+        if (window.__vyneuralAuth && typeof window.__vyneuralAuth.refresh === 'function') {
+          window.__vyneuralAuth.refresh();
+        }
+      } catch (err) {
+        set2faError(
+          'cuenta-2fa-disable-error',
+          (err && err.detail) || 'No se pudo desactivar. Verificá tu contraseña y el código.',
+        );
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Desactivar';
+      }
+    });
+  }
+
+  // ── Regenerar códigos de recuperación ──
+  const regenOpen = $('cuenta-2fa-regen');
+  const regenForm = $('cuenta-2fa-regen-form');
+  if (regenOpen && regenForm) {
+    regenOpen.addEventListener('click', () => {
+      hide2faCodes();
+      regenForm.reset();
+      set2faError('cuenta-2fa-regen-error', '');
+      regenForm.hidden = false;
+      $('cuenta-2fa-regen-pw').focus();
+    });
+  }
+  const regenCancel = $('cuenta-2fa-regen-cancel');
+  if (regenCancel && regenForm) {
+    regenCancel.addEventListener('click', () => {
+      regenForm.reset();
+      regenForm.hidden = true;
+      set2faError('cuenta-2fa-regen-error', '');
+    });
+  }
+  if (regenForm) {
+    regenForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const btn = $('cuenta-2fa-regen-submit');
+      const password = $('cuenta-2fa-regen-pw').value;
+      if (!password) return set2faError('cuenta-2fa-regen-error', 'Ingresá tu contraseña actual.');
+      set2faError('cuenta-2fa-regen-error', '');
+      btn.disabled = true;
+      btn.textContent = 'Generando…';
+      try {
+        const data = await regenerateRecoveryCodes(password);
+        regenForm.reset();
+        regenForm.hidden = true;
+        show2faCodes(data.recovery_codes);
+      } catch (err) {
+        set2faError(
+          'cuenta-2fa-regen-error',
+          (err && err.detail) || 'No se pudieron regenerar. Verificá tu contraseña.',
+        );
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generar códigos nuevos';
+      }
+    });
+  }
+
+  paint2fa();
+}
+
+// ── Exportar mis datos ──────────────────────────────────────────────────────
+// Portabilidad de datos (Ley 21.719): descarga el JSON de
+// GET /api/v1/users/me/export como archivo, mismo patrón que
+// main.js::downloadBackup (respaldo de localStorage) pero con datos del
+// backend.
+
+function wireExportData() {
+  const btn = $('cuenta-export-data');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = 'Exportando…';
+    try {
+      const data = await exportMyData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `vyneural-mis-datos-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      btn.textContent = '✅ Descargado';
+    } catch (err) {
+      btn.textContent = (err && err.status === 0) ? 'Sin conexión — reintentá' : 'Error — reintentá';
+    } finally {
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 4000);
+    }
+  });
+}
+
 // ── Eliminar cuenta ───────────────────────────────────────────────────────
 
 function wireDeleteAccount() {
@@ -1449,6 +1913,8 @@ function init() {
   wireVerify();
   wireEditProfile();
   wirePasswordForm();
+  wire2fa();
+  wireExportData();
   wireDeleteAccount();
 
   // Estado de sincronización en vivo.
