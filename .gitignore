@@ -10,3 +10,5 @@ emu.log
 .freebuff/*.db-shm
 .freebuff/*.db-wal
 public/vyneural.apk
+*.aab
+build-output.log

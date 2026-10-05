@@ -49,14 +49,17 @@
         "isPartOf": { "@type": "WebSite", "name": "Vyneural", "url": "https://www.vyneural.cl/" }
       }
     </script>
-    <script type="module" src="./assets/cuenta-CPrykT0j.js"></script>
-    <link rel="modulepreload" href="./assets/support-ws-client-DZt-oWPu.js">
-    <link rel="modulepreload" href="./assets/site-Dw1OEh2Y.js">
-    <link rel="modulepreload" href="./assets/preload-helper-Dp1pzeXC.js">
-    <link rel="modulepreload" href="./assets/alarms-ByJ4udGn.js">
-    <link rel="modulepreload" href="./assets/celebrate-B8c98TgR.js">
+    <script type="module" src="./assets/cuenta-Pybed6IL.js"></script>
+    <link rel="modulepreload" href="./assets/client-C7BbacUb.js">
+    <link rel="modulepreload" href="./assets/billing-C96w2Tln.js">
+    <link rel="modulepreload" href="./assets/site-CifDMkpr.js">
+    <link rel="modulepreload" href="./assets/alarms-CNCC43wR.js">
+    <link rel="modulepreload" href="./assets/celebrate-Dw8MmEic.js">
+    <link rel="modulepreload" href="./assets/_commonjsHelpers-_d1bhYXs.js">
     <link rel="modulepreload" href="./assets/confirm-modal-eBx4xGlb.js">
-    <link rel="stylesheet" href="./assets/support-ws-client-eAojujyp.css">
+    <link rel="modulepreload" href="./assets/marketing-ui-BS9QwP_A.js">
+    <link rel="stylesheet" href="./assets/client-ByIavQAV.css">
+    <link rel="stylesheet" href="./assets/cuenta-D4wJIZn8.css">
   </head>
   <body>
     <header class="site-nav">
@@ -162,6 +165,92 @@
             </form>
           </div>
 
+          <section class="page-card" id="cuenta-marketing-card" aria-labelledby="marketing-title">
+            <div class="rutina-head">
+              <h3 id="marketing-title">Tus preferencias y opinión</h3>
+              <span class="roadmap-status rs-warn" id="marketing-consent-status">Consultando…</span>
+            </div>
+            <p class="rutina-hint">Cuéntanos qué buscas para adaptar el contenido. Estas respuestas no son información clínica ni de uso. Tus preferencias se guardan en Vyneural.</p>
+            <form class="cuenta-form" id="marketing-profile-form">
+              <label for="marketing-goal">¿Qué te gustaría lograr?
+                <select id="marketing-goal" name="goal">
+                  <option value="">Elige una opción</option>
+                  <option value="relaxation">Relajarme</option>
+                  <option value="sleep_routine">Crear una rutina de sueño</option>
+                  <option value="focus_study_work">Concentrarme, estudiar o trabajar</option>
+                  <option value="meditation">Meditar</option>
+                  <option value="explore_audio">Explorar audio y frecuencias</option>
+                </select>
+              </label>
+              <fieldset class="marketing-preference-set">
+                <legend>¿Qué contenido prefieres? Puedes elegir varios temas.</legend>
+                <div class="marketing-topic-grid">
+                  <label><input type="checkbox" name="marketing-content" value="guides_exercises"> Guías y ejercicios</label>
+                  <label><input type="checkbox" name="marketing-content" value="product_updates"> Novedades del producto</label>
+                  <label><input type="checkbox" name="marketing-content" value="educational_content"> Contenido educativo</label>
+                  <label><input type="checkbox" name="marketing-content" value="offers"> Ofertas</label>
+                  <label><input type="checkbox" name="marketing-content" value="community"> Comunidad</label>
+                </div>
+              </fieldset>
+              <div class="marketing-stage-readonly">
+                <h4>Etapa de tu recorrido</h4>
+                <p id="marketing-stage" class="rutina-hint" aria-live="polite">Calculando…</p>
+                <small>Se calcula automáticamente según el estado de tu cuenta y tus compras. No es un dato que tengas que completar.</small>
+              </div>
+              <div class="auth-error hidden" id="marketing-profile-error" role="alert"></div>
+              <p class="roadmap-status hidden" id="marketing-profile-message" role="status"></p>
+              <div class="cuenta-form-row">
+                <button type="submit" class="cuenta-btn" id="marketing-profile-save">Guardar preferencias</button>
+              </div>
+            </form>
+
+            <div class="marketing-consent-box">
+              <h4>Correos de Vyneural</h4>
+              <p class="rutina-hint" id="marketing-consent-copy">La suscripción es opcional. Te enviaremos un correo para que la confirmes; solo después recibirás novedades y contenido. Puedes darte de baja aquí cuando quieras.</p>
+              <button type="button" class="cuenta-btn" id="marketing-consent-action" hidden></button>
+              <p class="auth-error hidden" id="marketing-consent-error" role="alert"></p>
+            </div>
+
+            <div class="marketing-surveys">
+              <h4>Encuesta de satisfacción</h4>
+              <p class="rutina-hint">¿Cómo ha sido tu experiencia? Tu respuesta nos ayuda a mejorar el producto y no activa correos promocionales.</p>
+              <form class="cuenta-form" id="marketing-satisfaction-form">
+                <label for="marketing-rating">¿Qué tan satisfecho estás? (1 = poco, 5 = mucho)
+                  <select id="marketing-rating" required>
+                    <option value="">Elige una calificación</option>
+                    <option value="1">1 — Poco satisfecho</option>
+                    <option value="2">2 — Algo insatisfecho</option>
+                    <option value="3">3 — Ni satisfecho ni insatisfecho</option>
+                    <option value="4">4 — Satisfecho</option>
+                    <option value="5">5 — Muy satisfecho</option>
+                  </select>
+                </label>
+                <div class="auth-error hidden" id="marketing-survey-error" role="alert"></div>
+                <p class="roadmap-status hidden" id="marketing-survey-message" role="status"></p>
+                <div class="cuenta-form-row"><button type="submit" class="cuenta-btn">Enviar opinión</button></div>
+              </form>
+            </div>
+
+            <div class="marketing-surveys">
+              <h4>¿Qué te interesa encontrar?</h4>
+              <p class="rutina-hint">Marca los temas que te servirían. No escribimos respuestas libres ni inferimos esta información.</p>
+              <form class="cuenta-form" id="marketing-discovery-form">
+                <div class="marketing-topic-grid">
+                  <label><input type="checkbox" name="topic" value="premium"> Planes y funciones Premium</label>
+                  <label><input type="checkbox" name="topic" value="alarms"> Alarmas y recordatorios</label>
+                  <label><input type="checkbox" name="topic" value="itineraries"> Rutinas e itinerarios</label>
+                  <label><input type="checkbox" name="topic" value="new_content"> Contenido nuevo</label>
+                  <label><input type="checkbox" name="topic" value="pricing"> Precios y formas de pago</label>
+                  <label><input type="checkbox" name="topic" value="onboarding"> Ayuda para comenzar</label>
+                  <label><input type="checkbox" name="topic" value="other"> Otros temas del producto</label>
+                </div>
+                <div class="auth-error hidden" id="marketing-discovery-error" role="alert"></div>
+                <p class="roadmap-status hidden" id="marketing-discovery-message" role="status"></p>
+                <div class="cuenta-form-row"><button type="submit" class="cuenta-btn">Enviar preferencias</button></div>
+              </form>
+            </div>
+          </section>
+
           <div class="page-card" id="cuenta-premium-card">
             <div class="rutina-head">
               <h3>💎 Premium</h3>
@@ -204,6 +293,8 @@
                 <span id="cuenta-coupon-switch-label">Activar</span>
               </label>
             </div>
+            <p class="rutina-hint hidden" id="cuenta-coupon-gp-hint" role="alert"></p>
+            <button type="button" class="cuenta-btn hidden" id="cuenta-coupon-verify-now">Ya canjeé el código, verificar ahora</button>
             <p class="cuenta-empty hidden" id="cuenta-coupon-status"></p>
           </div>
 
@@ -297,6 +388,142 @@
               <div class="auth-error hidden" id="pw-error" role="alert"></div>
               <button type="submit" class="cuenta-btn" id="pw-submit">Actualizar contraseña</button>
             </form>
+          </div>
+
+          <!-- Verificación en dos pasos (2FA / TOTP). Va acá, entre "Cambiar
+               contraseña" y "Tus datos", porque es seguridad de la cuenta:
+               el usuario que viene a cambiar la clave es el mismo que viene a
+               endurecer el acceso. Backend: app/routers/totp.py. -->
+          <div class="page-card" id="cuenta-2fa-card">
+            <div class="rutina-head">
+              <h3>🛡️ Verificación en dos pasos</h3>
+              <span class="roadmap-status rs-warn" id="cuenta-2fa-status">Consultando…</span>
+            </div>
+            <p class="rutina-hint" id="cuenta-2fa-text">Consultando el estado de tu cuenta…</p>
+
+            <!-- Estado: desactivado → botón para arrancar el enrolamiento -->
+            <div id="cuenta-2fa-off" hidden>
+              <p class="rutina-hint">
+                Sumá un segundo paso al iniciar sesión: además de tu contraseña, un
+                código de 6 dígitos que genera una app de autenticación en tu teléfono
+                (Google Authenticator, Authy, 1Password, Aegis y cualquier otra compatible
+                con TOTP). Si alguien llega a tener tu contraseña, no le alcanza.
+              </p>
+              <button type="button" class="cuenta-btn" id="cuenta-2fa-start">Activar verificación en dos pasos</button>
+            </div>
+
+            <!-- Estado: enrolando (paso 1 hecho, falta confirmar) -->
+            <div id="cuenta-2fa-enroll" hidden>
+              <div class="cuenta-2fa-qr-wrap">
+                <canvas id="cuenta-2fa-qr" class="cuenta-2fa-qr" width="200" height="200"></canvas>
+              </div>
+              <ol class="cuenta-2fa-steps">
+                <li>
+                  Escaneá el código QR de arriba con tu app de autenticación, o
+                  abrí tu app y agregá una cuenta nueva con
+                  <a href="#" id="cuenta-2fa-uri" class="cuenta-2fa-uri" rel="noopener">este enlace</a>
+                  (en el teléfono, el enlace la abre directo).
+                </li>
+                <li>
+                  Si tenés que ingresarla a mano, usá esta clave:
+                  <code class="cuenta-2fa-secret" id="cuenta-2fa-secret">—</code>
+                  <button type="button" class="cuenta-item-btn cuenta-item-btn-ghost" id="cuenta-2fa-copy">Copiar</button>
+                  <br />
+                  <small class="auth-hint">Tipo: basada en tiempo (TOTP) · 6 dígitos · 30 segundos.</small>
+                </li>
+                <li>Ingresá el código que te muestra la app para confirmar.</li>
+              </ol>
+              <form id="cuenta-2fa-confirm-form" class="cuenta-form">
+                <label>Código de la app
+                  <input id="cuenta-2fa-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                         placeholder="000000" aria-describedby="cuenta-2fa-enroll-error" aria-invalid="false" required />
+                </label>
+                <div class="auth-error hidden" id="cuenta-2fa-enroll-error" role="alert"></div>
+                <div class="cuenta-2fa-actions">
+                  <button type="submit" class="cuenta-btn" id="cuenta-2fa-confirm">Confirmar y activar</button>
+                  <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-cancel">Cancelar</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Estado: activado → regenerar códigos o desactivar -->
+            <div id="cuenta-2fa-on" hidden>
+              <p class="rutina-hint">
+                Cada vez que inicies sesión te vamos a pedir el código de tu app. Si perdés
+                el teléfono, usá uno de tus códigos de recuperación.
+              </p>
+              <div class="cuenta-2fa-actions">
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-regen">Regenerar códigos de recuperación</button>
+                <button type="button" class="cuenta-btn cuenta-btn-danger" id="cuenta-2fa-disable-open">Desactivar</button>
+              </div>
+            </div>
+
+            <!-- Códigos de recuperación recién generados: se ven UNA vez -->
+            <div id="cuenta-2fa-codes" class="cuenta-2fa-codes" hidden>
+              <p class="cuenta-2fa-codes-warn">
+                ⚠️ Guardá estos códigos ahora. <strong>No los vas a poder volver a ver.</strong>
+                Cada uno te deja entrar una sola vez si perdés el acceso a tu app de
+                autenticación.
+              </p>
+              <ul class="cuenta-2fa-codes-list" id="cuenta-2fa-codes-list"></ul>
+              <div class="cuenta-2fa-actions">
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-codes-copy">Copiar todos</button>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-codes-download">Descargar .txt</button>
+                <button type="button" class="cuenta-btn" id="cuenta-2fa-codes-done">Ya los guardé</button>
+              </div>
+            </div>
+
+            <!-- Desactivar: pide contraseña + segundo factor -->
+            <form id="cuenta-2fa-disable-form" class="cuenta-form" hidden>
+              <p class="rutina-hint">
+                Para desactivarla te pedimos tu contraseña y un código: el de tu app, o uno
+                de recuperación sin usar si ya no tenés el teléfono.
+              </p>
+              <label>Contraseña actual
+                <input id="cuenta-2fa-disable-pw" type="password" autocomplete="current-password" maxlength="128" required />
+              </label>
+              <label id="cuenta-2fa-disable-code-wrap">Código de la app
+                <input id="cuenta-2fa-disable-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                       placeholder="000000" aria-describedby="cuenta-2fa-disable-error" aria-invalid="false" />
+              </label>
+              <label id="cuenta-2fa-disable-recovery-wrap" hidden>Código de recuperación
+                <input id="cuenta-2fa-disable-recovery" type="text" autocomplete="off" maxlength="32"
+                       placeholder="ABCDE-FGHJK-LMNPQ-RSTUV" />
+              </label>
+              <button type="button" class="cuenta-item-btn cuenta-item-btn-ghost" id="cuenta-2fa-disable-toggle">Usar un código de recuperación</button>
+              <div class="auth-error hidden" id="cuenta-2fa-disable-error" role="alert"></div>
+              <div class="cuenta-2fa-actions">
+                <button type="submit" class="cuenta-btn cuenta-btn-danger" id="cuenta-2fa-disable-submit">Desactivar</button>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-disable-cancel">Cancelar</button>
+              </div>
+            </form>
+
+            <!-- Regenerar: pide contraseña -->
+            <form id="cuenta-2fa-regen-form" class="cuenta-form" hidden>
+              <p class="rutina-hint">
+                Genera un set nuevo de 10 códigos. Los anteriores dejan de servir de
+                inmediato.
+              </p>
+              <label>Contraseña actual
+                <input id="cuenta-2fa-regen-pw" type="password" autocomplete="current-password" maxlength="128" required />
+              </label>
+              <div class="auth-error hidden" id="cuenta-2fa-regen-error" role="alert"></div>
+              <div class="cuenta-2fa-actions">
+                <button type="submit" class="cuenta-btn" id="cuenta-2fa-regen-submit">Generar códigos nuevos</button>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-2fa-regen-cancel">Cancelar</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="page-card">
+            <h3>📦 Tus datos</h3>
+            <p class="rutina-hint">
+              Descargá un archivo JSON con todos los datos que Vyneural tiene de tu cuenta
+              (perfil, preferencias, frecuencias favoritas, alarmas, itinerarios, historial de
+              pagos, tarjeta guardada, dispositivos, suscripciones de notificaciones,
+              conversaciones de soporte y cupones).
+            </p>
+            <button type="button" class="cuenta-btn" id="cuenta-export-data">Exportar mis datos</button>
           </div>
 
           <div class="page-card cuenta-danger-zone">

@@ -1,4 +1,9 @@
 User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /oneclick-retorno
+Disallow: /pago-retorno
+Disallow: /restablecer
+Disallow: /verificar
 
 Sitemap: https://www.vyneural.cl/sitemap.xml
