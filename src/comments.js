@@ -108,7 +108,7 @@ function renderList(items) {
       <div class="comment-head">
         <span class="comment-avatar" aria-hidden="true">${escapeHtml((c.author || '?').slice(0, 1).toUpperCase())}</span>
         <span class="comment-author">${escapeHtml(c.author || 'Anónimo')}</span>
-        <span class="comment-stars-mini" aria-label="${c.rating} de 5">${starsHTML(c.rating)}</span>
+        <span class="comment-stars-mini" role="img" aria-label="${c.rating} de 5">${starsHTML(c.rating)}</span>
         <span class="comment-date">${escapeHtml(fmtDate(c.created_at))}</span>
       </div>
       <p class="comment-text">${escapeHtml(c.content)}</p>`;

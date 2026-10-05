@@ -17,7 +17,25 @@ export function initStarfield() {
   let fireworks = [];
   let speed = 0.35;
   let scrollBoost = 0;
-  let lastY = window.scrollY;
+  // Posición de scroll cacheada. FIX (reflow, auditoría Lighthouse móvil
+  // 2026-10-03): frame() leía `window.scrollY` en CADA frame para girar las
+  // nebulosas. Esa propiedad es una lectura geométrica: Chrome tiene que
+  // recalcular estilo+layout de toda la página antes de responderla, así que
+  // cada vez que otro código ya había escrito en el DOM (la barra del loader
+  // pinta su `style.width` cada 33 ms, el scroll-reveal agrega clases…) el
+  // rAF del fondo forzaba un reflow sincrónico completo — 89 ms acumulados,
+  // la llamada más costosa de todo el perfil. El scroll solo cambia cuando
+  // llega un evento `scroll`, así que se mide ahí (donde el layout ya está
+  // limpio) y el bucle de dibujo reusa el valor.
+  // Arranca en 0 y se mide tras el primer pintado (ver el bloque de arranque
+  // al final de esta función): medirlo acá era la PRIMERA lectura geométrica
+  // de toda la página — main.js llama initStarfield() en su top-level, así
+  // que el `window.scrollY` de esta línea forzaba el primer layout completo
+  // del documento dentro de la tarea que evalúa el módulo (210 ms medidos
+  // con 4× de throttling de CPU). Al arrancar, el scroll real es 0 salvo que
+  // el navegador restaure una posición previa, y eso lo resuelve la medición
+  // diferida de abajo antes de que el usuario vea un solo frame del fondo.
+  let scrollPos = 0;
   let resizeT = null;
 
   // Nebulosas místicas: nubes de color que respiran y giran; el scroll las
@@ -56,8 +74,10 @@ export function initStarfield() {
   // impulso era tan fuerte que al hacer scroll las estrellas hacían estelas
   // por todas partes (se veía como un glitch). Ahora es un leve desplazamiento.
   function onScroll() {
-    const delta = window.scrollY - lastY;
-    lastY = window.scrollY;
+    // Una sola lectura de scrollY por evento (antes eran dos).
+    const y = window.scrollY;
+    const delta = y - scrollPos;
+    scrollPos = y;
     scrollBoost = Math.max(-0.9, Math.min(0.9, delta * 0.012));
     clearTimeout(onScroll._t);
     onScroll._t = setTimeout(() => (scrollBoost = 0), 250);
@@ -112,7 +132,9 @@ export function initStarfield() {
     }
     ctx.clearRect(0, 0, w, h);
     const sp = speed + scrollBoost;
-    const rot = window.scrollY * 0.00035;
+    // scrollPos (cacheado en onScroll), NO window.scrollY: leerlo acá forzaba
+    // un reflow sincrónico por frame (ver comentario arriba).
+    const rot = scrollPos * 0.00035;
 
     // Nebulosas: giran con el scroll y respiran lentamente.
     for (const n of nebulae) {
@@ -229,7 +251,25 @@ export function initStarfield() {
   // simulación de la placa; al volver al modo gotas se reanuda.
   let paused = false;
 
-  resize();
+  // Primera medición del viewport DESPUÉS del primer pintado, no durante la
+  // evaluación del módulo: resize() lee innerWidth/innerHeight y scrollPos
+  // necesita scrollY, las dos lecturas geométricas que forzaban el primer
+  // layout completo dentro de la long task de arranque (ver el comentario de
+  // `scrollPos` arriba). Con doble rAF el layout ya está calculado por el
+  // navegador y las lecturas salen de su caché, gratis. El lienzo queda en
+  // 0×0 un par de frames — frame() dibuja en vacío sin romperse (clearRect
+  // de 0×0 y `stars` vacío) y es un fondo oscuro sobre una página oscura.
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        resize();
+        scrollPos = window.scrollY;
+      }),
+    );
+  } else {
+    resize();
+    scrollPos = window.scrollY;
+  }
   // Con retardo: en móvil la barra del navegador redimensiona la ventana
   // varias veces seguidas al hacer scroll y repoblar las estrellas a cada
   // frame las hace "saltar" (glitch).

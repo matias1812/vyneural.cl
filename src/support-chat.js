@@ -41,12 +41,23 @@
 // la única señal disponible para el banner mientras el chat está cerrado.
 // ════════════════════════════════════════════════════════════════════════════
 
+// CARGA DIFERIDA (auditoría Lighthouse 2026-10-03): este módulo ya NO se
+// importa estáticamente desde site.js. Lo carga src/support-chat-boot.js con
+// import() dinámico recién cuando el usuario interactúa con la burbuja (o, si
+// dejó una conversación abierta, en tiempo de inactividad). El CSS del modal
+// viaja con él, en su propio chunk, en vez de ir en la hoja global del sitio.
+import './support-chat.css';
+
 import { getOrCreateConversation, sendMessage, getMessages, rateConversation, reportBug } from './api/support.js';
 import { ApiError } from './api/client.js';
 import { openSupportSocket } from './api/support-ws-client.js';
 import { isPremiumUser } from './ui/premium-gate.js';
+import { ensureSupportFab } from './support-fab.js';
+// LS_CONV_ID vive en el boot: él tiene que leer la clave ANTES de cargar este
+// módulo (para decidir si retoma el polling de fondo), así que es la única
+// definición posible sin duplicar el literal en dos archivos.
+import { LS_CONV_ID } from './support-chat-boot.js';
 
-const LS_CONV_ID = 'vyneural_support_conversation_id';
 const LS_LAST_SEEN = 'vyneural_support_last_seen_at';
 
 // 4-6 respuestas rápidas sugeridas para cerrar sin escribir (tal cual pedido).
@@ -123,17 +134,11 @@ function fmtChatDaySeparator(iso) {
 
 // ─────────────────────────────────────────────────────────── Construcción UI
 function build() {
-  const fab = document.createElement('button');
-  fab.type = 'button';
-  fab.id = 'support-fab';
-  fab.className = 'support-fab';
-  fab.setAttribute('aria-label', 'Chat de soporte');
-  fab.setAttribute('title', 'Chat de soporte');
-  fab.innerHTML = `
-    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-    <span class="support-fab-pulse" aria-hidden="true"></span>
-    <span class="support-fab-label">Chat de soporte</span>
-  `;
+  // La burbuja ya la montó support-chat-boot.js al cargar la página (es el
+  // punto de entrada que dispara este módulo). ensureSupportFab() es
+  // idempotente: devuelve la que ya está en el DOM en vez de crear otra, y
+  // solo la crea si por algún motivo este módulo se inicializara sin boot.
+  const fab = ensureSupportFab();
 
   const modal = document.createElement('div');
   modal.id = 'support-modal';

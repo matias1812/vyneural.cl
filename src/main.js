@@ -40,7 +40,6 @@ import { mergePlatformCapabilities } from './platform/platform-capabilities.js';
 import { detectNotificationCapabilities, capabilitySummary } from './core/notification-capabilities.js';
 import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js';
 
-import { runBineuralDiagnostics } from './validation/diagnostics.js';
 import {
   evaluatePermissions,
   notifStateText,
@@ -97,8 +96,48 @@ import { assertSingleAudioProvider, providerLabel } from './core/audio-provider.
 // Initialize Vercel Analytics (no-op in development)
 inject();
 
+// ──────────────────────────── Medición diferida del viewport ────────────────
+// FIX (long task de ~970 ms, auditoría Lighthouse móvil 2026-10-03):
+// leer una propiedad GEOMÉTRICA (`window.innerWidth/innerHeight/scrollY`,
+// `getBoundingClientRect()`…) obliga a Chrome a calcular estilo+layout de
+// TODA la página de forma sincrónica, antes de poder responderla. Cuando esa
+// lectura ocurre durante la evaluación del módulo, ese layout completo se
+// cobra DENTRO de la misma tarea del hilo principal que ya está evaluando
+// ~400 KB de JS (index.html carga un único entry que importa site.js,
+// main.js y comments.js), y la tarea se vuelve imposible de interrumpir.
+//
+// Medido con CDP (4× de throttling de CPU, instrumentando los getters):
+// cuatro lecturas de arranque sumaban 919 ms de reflow forzado dentro de una
+// sola long task de ~1,8 s — exactamente el patrón que deja el "Max
+// Potential First Input Delay" en 0 puntos.
+//
+// Cachear el valor en una variable NO alcanza: se probó y la factura
+// simplemente pasa a la siguiente lectura, porque el costo no es la lectura
+// sino el PRIMER layout de la página. La única forma de sacarlo del camino
+// crítico es no medir hasta DESPUÉS del primer pintado: con doble
+// requestAnimationFrame el navegador ya hizo ese layout en su propia fase de
+// render (fuera de toda tarea de script) y la lectura sale de la caché.
+//
+// Nada de lo que se difiere acá es crítico para el primer pintado: son
+// fondos decorativos (estrellas), el aviso de girar el teléfono (solo
+// aparece en modo inmersivo, que requiere un gesto del usuario) y la cascada
+// de aparición al deslizar (el contenido está tapado por el loader todavía).
+function afterFirstPaint(fn) {
+  if (typeof requestAnimationFrame !== 'function') {
+    setTimeout(fn, 0);
+    return;
+  }
+  requestAnimationFrame(() => requestAnimationFrame(fn));
+}
+
 // Expose diagnostics to console
-window.runBineuralDiagnostics = runBineuralDiagnostics;
+// Las comprobaciones forenses son una herramienta de desarrollo y no se
+// ejecutan durante el uso normal. Mantener diagnostics.js en un chunk
+// dinámico evita descargar/parsear sus dependencias con el bundle inicial.
+window.runBineuralDiagnostics = async (...args) => {
+  const { runBineuralDiagnostics } = await import('./validation/diagnostics.js');
+  return runBineuralDiagnostics(...args);
+};
 
 // Controlador del fondo espacial (fondo decorativo de estrellas).
 const starfield = initStarfield();
@@ -2638,8 +2677,13 @@ document.addEventListener('fullscreenchange', () => {
   if (on) lockPortrait();
   updateRotateOverlay();
   // El canvas se re-mide al entrar/salir del modo (el layout cambia). Se
-  // espera un frame para que el CSS ya haya aplicado el nuevo tamaño.
-  requestAnimationFrame(resizeCanvas);
+  // espera un frame para que el CSS ya haya aplicado el nuevo tamaño. En ese
+  // mismo frame se re-mide la orientación: dentro de un rAF el layout ya está
+  // recalculado, así que la lectura es gratis (fuera de él forzaría reflow).
+  requestAnimationFrame(() => {
+    resizeCanvas();
+    refreshRotateOverlay();
+  });
   // Al entrar o salir de pantalla completa algunos navegadores (Android/iOS)
   // suspenden el AudioContext: se reanuda para que la sesión no quede muda
   // con el botón en play.
@@ -2654,15 +2698,40 @@ document.addEventListener('fullscreenchange', () => {
 // y usa solo el aviso). En escritorio o en vertical nunca aparece.
 const rotateOverlay = document.getElementById('rotate-overlay');
 
-function isTouchDevice() {
-  return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
-}
+// Capacidad táctil: no cambia en caliente, así que se mide una sola vez
+// (mismo criterio que IS_TOUCH más abajo, que no se puede reusar acá porque
+// se declara después y en el arranque todavía está en zona muerta).
+const ROTATE_IS_TOUCH = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+
+// Orientación cacheada. FIX (reflow, auditoría Lighthouse móvil 2026-10-03):
+// updateRotateOverlay() se llama SIEMPRE justo después de escribir en el DOM
+// (`body.classList` con 'immersive' + el innerHTML del botón de pantalla
+// completa), y leer `window.innerWidth/innerHeight` ahí obliga a Chrome a
+// recalcular estilo+layout de toda la página de forma sincrónica — 59 ms
+// medidos. La orientación solo cambia con resize/orientationchange, que ya
+// refrescan el aviso: se mide ahí (con el layout limpio) y las llamadas
+// disparadas por un cambio de clase reusan el valor.
+//
+// Arranca en `false` (NO se mide acá) a propósito: medirlo en el top-level
+// del módulo era la lectura más cara de todo el arranque — 506 ms de layout
+// forzado dentro de la long task de evaluación del módulo (ver
+// afterFirstPaint() arriba). La primera medición real se hace tras el primer
+// pintado, más abajo. Mientras tanto el aviso queda oculto, que es el estado
+// correcto: solo se muestra en modo inmersivo, y entrar en inmersivo exige
+// un gesto del usuario (pantalla completa) muy posterior al primer pintado.
+let isLandscape = false;
 
 function updateRotateOverlay() {
   if (!rotateOverlay) return;
   const immersive = document.body.classList.contains('immersive');
-  const landscape = window.innerWidth > window.innerHeight;
-  rotateOverlay.classList.toggle('hidden', !(immersive && isTouchDevice() && landscape));
+  rotateOverlay.classList.toggle('hidden', !(immersive && ROTATE_IS_TOUCH && isLandscape));
+}
+
+// Vuelve a medir y luego actualiza: solo para eventos del viewport, donde la
+// lectura no cae inmediatamente después de una escritura propia.
+function refreshRotateOverlay() {
+  isLandscape = window.innerWidth > window.innerHeight;
+  updateRotateOverlay();
 }
 
 async function lockPortrait() {
@@ -2685,9 +2754,11 @@ function unlockOrientation() {
   }
 }
 
-window.addEventListener('resize', updateRotateOverlay);
-window.addEventListener('orientationchange', updateRotateOverlay);
+window.addEventListener('resize', refreshRotateOverlay);
+window.addEventListener('orientationchange', refreshRotateOverlay);
 updateRotateOverlay();
+// Primera medición real de la orientación, ya fuera del camino crítico.
+afterFirstPaint(refreshRotateOverlay);
 
 // ---------------------------------------------------------------- Primer plano / segundo plano
 // El audio NO se enmudece al pasar a segundo plano: la sesión sigue sonando
@@ -3659,11 +3730,23 @@ function resizeCanvas() {
   // En táctil el dpr se topa en 2: a dpr 3 el canvas pinta 2,25× más píxeles
   // por el mismo tamaño visual (el suavizado es imperceptible a esa escala).
   const dpr = IS_TOUCH ? Math.min(devicePixelRatio || 1, 2) : devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.round(canvas.clientWidth * dpr));
-  canvas.height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+  // Primero TODAS las lecturas, después TODAS las escrituras: escribir
+  // `canvas.width` invalida el layout, así que leer `clientHeight` justo
+  // después obligaba a recalcularlo de forma sincrónica (reflow forzado).
+  const cw = canvas.clientWidth;
+  const ch = canvas.clientHeight;
+  canvas.width = Math.max(1, Math.round(cw * dpr));
+  canvas.height = Math.max(1, Math.round(ch * dpr));
 }
 window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
+// Diferido al primer pintado (ver afterFirstPaint()): `canvas.clientWidth`
+// es una lectura geométrica, y en el top-level del módulo era la que acababa
+// pagando el primer layout completo de la página — 728 ms medidos con 4× de
+// throttling de CPU una vez diferidas las otras cuatro. Diferirlo no cambia
+// nada visible: drawVisual() vuelve a leer `canvas.width` en CADA frame, así
+// que el visualizador se dibuja al tamaño por defecto un par de frames (con
+// el loader todavía encima) y se corrige solo en cuanto esto corre.
+afterFirstPaint(resizeCanvas);
 
 function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);
@@ -5301,8 +5384,13 @@ if (loaderStars) {
   let lsh = 0;
   const lstars = [];
   function lsResize() {
-    lsw = loaderStars.width = window.innerWidth;
-    lsh = loaderStars.height = window.innerHeight;
+    // Lecturas primero, escrituras después: `loaderStars.width = …` invalida
+    // el layout, así que leer `window.innerHeight` a continuación forzaba un
+    // reflow sincrónico (11,4 ms en el audit de Lighthouse móvil).
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    lsw = loaderStars.width = vw;
+    lsh = loaderStars.height = vh;
     lstars.length = 0;
     for (let i = 0; i < 110; i++) {
       lstars.push({
@@ -5315,7 +5403,12 @@ if (loaderStars) {
       });
     }
   }
-  lsResize();
+  // Diferido al primer pintado (ver afterFirstPaint()): lsResize() lee
+  // innerWidth/innerHeight, y hacerlo durante la evaluación del módulo
+  // forzaba 166 ms de layout completo dentro de la long task de arranque.
+  // El lienzo queda en 0×0 un par de frames; es el fondo del loader (que ya
+  // se dibuja por rAF en lsFrame), así que no hay nada visible que perder.
+  afterFirstPaint(lsResize);
   window.addEventListener('resize', lsResize);
   function lsFrame() {
     if (!document.getElementById('loader')) return;
@@ -5471,19 +5564,40 @@ revealables.forEach((el, i) => {
   el.classList.add('reveal');
   el.dataset.rev = String(i % 6); // posición en la cascada
 });
+// FIX (reflow, auditoría Lighthouse móvil 2026-10-03): antes este bucle
+// alternaba lectura y escritura elemento por elemento (getBoundingClientRect
+// → style.transitionDelay + classList.add → getBoundingClientRect del
+// siguiente…), el patrón clásico de layout thrashing: cada escritura
+// invalidaba el layout y la lectura siguiente lo recalculaba de forma
+// sincrónica, una vez por elemento revelado. Ahora va en dos fases: primero
+// se leen todos los rects, después se escribe sobre los que correspondan.
+// El resultado es idéntico: `.reveal`/`.revealed` solo animan `opacity` y
+// `transform` (style.css:504-513), propiedades de composición que NO mueven
+// a los elementos vecinos, así que revelar uno nunca cambiaba el rect de
+// otro — el orden de lecturas y escrituras no altera a quién le toca.
 function checkReveal() {
-  const vh = window.innerHeight;
-  revealables.forEach((el) => {
-    if (!el.classList.contains('revealed') && el.getBoundingClientRect().top < vh * 0.94) {
-      // Cascada: los componentes del mismo grupo entran con un pequeño retardo.
-      el.style.transitionDelay = `${Number(el.dataset.rev) * 70}ms`;
-      el.classList.add('revealed');
-    }
-  });
+  const limit = window.innerHeight * 0.94;
+  // Fase 1 — solo lecturas.
+  const pending = [];
+  for (const el of revealables) {
+    if (el.classList.contains('revealed')) continue;
+    if (el.getBoundingClientRect().top < limit) pending.push(el);
+  }
+  if (!pending.length) return;
+  // Fase 2 — solo escrituras.
+  for (const el of pending) {
+    // Cascada: los componentes del mismo grupo entran con un pequeño retardo.
+    el.style.transitionDelay = `${Number(el.dataset.rev) * 70}ms`;
+    el.classList.add('revealed');
+  }
 }
 window.addEventListener('scroll', checkReveal, { passive: true });
 window.addEventListener('resize', checkReveal);
-checkReveal();
+// Diferido al primer pintado (ver afterFirstPaint()): checkReveal() lee
+// innerHeight + getBoundingClientRect() de cada elemento, y en el top-level
+// del módulo eso sumaba ~36 ms de layout forzado a la long task de arranque.
+// No retrasa nada visible: en este punto el loader todavía tapa la página.
+afterFirstPaint(checkReveal);
 // Fallback: si algo falla, nunca dejar el contenido oculto.
 setTimeout(() => {
   revealables.forEach((el) => el.classList.add('revealed'));
