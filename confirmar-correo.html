@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Confirmar suscripción · Vyneural</title>
+    <meta name="description" content="Confirma tu decisión de recibir comunicaciones de Vyneural." />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#0b0d1a" />
+    <link rel="canonical" href="https://www.vyneural.cl/confirmar-correo.html" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  </head>
+  <body>
+    <header class="site-nav">
+      <a class="site-brand" href="/">
+        <span class="brand-ico" aria-hidden="true">◉</span>
+        Vyneural
+      </a>
+    </header>
+    <main>
+      <header class="page-hero">
+        <span class="page-kicker">Preferencias de correo</span>
+        <h1>Confirma tu suscripción</h1>
+        <p class="page-lead">Este paso es voluntario. Solo confirmaremos tu decisión cuando pulses el botón.</p>
+      </header>
+      <div class="page-body">
+        <section class="page-card verify-card" aria-labelledby="doi-title">
+          <p class="rm-emoji" aria-hidden="true" id="doi-icon">✉️</p>
+          <h2 id="doi-title">Revisa la solicitud</h2>
+          <p id="doi-copy">Preparando el enlace de confirmación…</p>
+          <p id="doi-status" role="status" aria-live="polite"></p>
+          <div class="cuenta-gate-actions">
+            <button type="button" class="hero-cta" id="doi-confirm" hidden>Confirmar suscripción</button>
+            <a class="hero-cta hero-cta-ghost" href="/">Volver a Vyneural</a>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/src/marketing-doi.js"></script>
+  </body>
+</html>

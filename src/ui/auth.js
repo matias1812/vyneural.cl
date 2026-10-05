@@ -23,6 +23,7 @@ import { getAccessToken, clearSession } from '../api/client.js';
 import { subscribeToPush, pushStatus } from '../api/push.js';
 import { initBackendIfConfigured } from '../api/integration.js';
 import { pullCloudFavoritesToLocal } from '../api/fav-sync.js';
+import { enhanceOtpSlots, refreshOtpSlots, setOtpSlotsInvalid } from './otp-slots.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,64}$/;
@@ -342,6 +343,10 @@ function modalHTML() {
               <input id="auth-age-18" type="checkbox" required />
               <span>Declaro que soy mayor de 18 años.</span>
             </label>
+            <label class="auth-check">
+              <input id="auth-marketing-consent" type="checkbox" />
+              <span>Quiero recibir novedades y contenido de Vyneural por correo. Es opcional; confirmaré mi suscripción desde un correo de doble confirmación y podré darme de baja cuando quiera.</span>
+            </label>
           </div>
 
           <div class="auth-error hidden" id="auth-error" role="alert"></div>
@@ -389,7 +394,7 @@ function modalHTML() {
           <div class="auth-field" id="totp-code-field">
             <label for="totp-code">Código de verificación</label>
             <input id="totp-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code"
-                   maxlength="6" pattern="[0-9]*" placeholder="000000" />
+                   placeholder="000000" aria-describedby="totp-error" aria-invalid="false" />
           </div>
           <div class="auth-field" id="totp-recovery-field" hidden>
             <label for="totp-recovery">Código de recuperación</label>
@@ -473,6 +478,8 @@ function wireModal() {
   modal.querySelector('#auth-form').addEventListener('submit', onSubmitAuth);
   modal.querySelector('#forgot-form').addEventListener('submit', onSubmitForgot);
   modal.querySelector('#totp-form').addEventListener('submit', onSubmitTotp);
+  const totpInput = modal.querySelector('#totp-code');
+  enhanceOtpSlots(totpInput, { errorId: 'totp-error' });
 
   modal.querySelector('#totp-toggle-recovery').addEventListener('click', () => {
     totpUseRecovery = !totpUseRecovery;
@@ -567,6 +574,7 @@ function setTotpError(msg) {
   if (!err) return;
   err.textContent = msg || '';
   err.classList.toggle('hidden', !msg);
+  setOtpSlotsInvalid(modal.querySelector('#totp-code'), !!msg && !totpUseRecovery);
 }
 
 // Alterna entre "código de la app" y "código de recuperación". Se limpia el
@@ -581,7 +589,10 @@ function renderTotpMode() {
   const intro = modal.querySelector('#totp-intro');
   codeField.hidden = totpUseRecovery;
   recoveryField.hidden = !totpUseRecovery;
-  if (totpUseRecovery) modal.querySelector('#totp-code').value = '';
+  if (totpUseRecovery) {
+    modal.querySelector('#totp-code').value = '';
+    refreshOtpSlots(modal.querySelector('#totp-code'));
+  }
   else modal.querySelector('#totp-recovery').value = '';
   toggle.textContent = totpUseRecovery
     ? 'Usar el código de mi app de autenticación'
@@ -604,6 +615,7 @@ function showTotpStep(challengeToken) {
   const modal = document.getElementById('auth-modal');
   if (modal) {
     modal.querySelector('#totp-code').value = '';
+    refreshOtpSlots(modal.querySelector('#totp-code'));
     modal.querySelector('#totp-recovery').value = '';
     modal.classList.remove('hidden');
   }
@@ -739,7 +751,10 @@ async function onSubmitAuth(e) {
       const username = modal.querySelector('#auth-username').value.trim() || undefined;
       const displayName = modal.querySelector('#auth-display').value.trim() || undefined;
       const couponCode = modal.querySelector('#auth-coupon').value.trim() || undefined;
-      await register({ email, password, username, display_name: displayName, coupon_code: couponCode });
+      await register({
+        email, password, username, display_name: displayName, coupon_code: couponCode,
+        marketing_consent: modal.querySelector('#auth-marketing-consent')?.checked === true,
+      });
       // Sesión creada: mostrar "revisá tu correo" con reenvío.
       await refreshProfile();
       renderNav();

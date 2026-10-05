@@ -63,6 +63,7 @@ export default defineConfig({
         cuenta: resolve(__dirname, 'cuenta.html'),
         admin: resolve(__dirname, 'admin.html'),
         verificar: resolve(__dirname, 'verificar.html'),
+        'confirmar-correo': resolve(__dirname, 'confirmar-correo.html'),
         restablecer: resolve(__dirname, 'restablecer.html'),
         'preguntas-frecuentes': resolve(__dirname, 'preguntas-frecuentes.html'),
         premium: resolve(__dirname, 'premium.html'),

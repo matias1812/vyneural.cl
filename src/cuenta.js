@@ -26,13 +26,28 @@ import { listItineraries } from './api/itineraries.js';
 import QRCode from 'qrcode';
 import { pushStatus, subscribeToPush, unsubscribeFromPush } from './api/push.js';
 import { premiumStatus, inscribeOneclick, oneclickStatus, cancelOneclick, lookupCoupon, redeemCoupon, cancelCoupon, GOOGLE_PLAY_PRODUCT_IDS, ANDROID_PACKAGE_ID } from './api/billing.js';
-import { noteBackendPendingCouponStatus, checkForRedeemedGooglePlayCode } from './platform/google-play-redeem.js';
+import {
+  noteBackendPendingCouponStatus,
+  checkForRedeemedGooglePlayCode,
+  hasGooglePlayRedeemAttempt,
+} from './platform/google-play-redeem.js';
 import { getStatus, onStatusChange, STATUS } from './api/status.js';
 import { freqCoverSVG } from './ui/freq-cover.js';
 import { requestPermission } from './notifications.js';
 import { listDevices, forgetDevice, reportDevice } from './api/devices.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
 import { celebrateBurst } from './ui/celebrate.js';
+import { enhanceOtpSlots, refreshOtpSlots, setOtpSlotsInvalid } from './ui/otp-slots.js';
+import './marketing.css';
+import {
+  MARKETING_GOALS, MARKETING_CONTENT_PREFERENCES,
+  marketingConsentPresentation, marketingFunnelStageLabel, marketingGoalLabel,
+  marketingProfileUpdatePayload,
+} from './marketing-ui.js';
+import {
+  getMarketingProfile, updateMarketingProfile, requestMarketingConsent,
+  revokeMarketingConsent, submitMarketingSurvey,
+} from './api/marketing.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -594,6 +609,7 @@ function resetCouponCard() {
   const verifyBtn = $('cuenta-coupon-verify-now');
   const gpHint = $('cuenta-coupon-gp-hint');
   couponLookupCode = null;
+  if (verifyBtn) verifyBtn.dataset.couponPending = 'false';
   if (input) {
     input.disabled = false;
     input.value = '';
@@ -629,6 +645,7 @@ function renderCoupon(premium) {
     result.classList.add('hidden');
     if (errorEl) errorEl.classList.add('hidden');
     if (verifyBtn) verifyBtn.classList.add('hidden');
+    if (verifyBtn) verifyBtn.dataset.couponPending = 'false';
     if (gpHint) gpHint.classList.add('hidden');
     status.textContent = 'Ya usaste un código de referido — solo se puede activar uno por cuenta.';
     status.classList.remove('hidden');
@@ -650,17 +667,21 @@ function renderCoupon(premium) {
     if (switchLabel) switchLabel.textContent = 'Activado';
     switchEl.checked = true;
     result.classList.remove('hidden');
-    // El canje real de un código de Google Play ocurre fuera de la SPA (ver
-    // platform/google-play-redeem.js) — este botón es la red de seguridad
-    // manual para cuando el chequeo automático en background todavía no
-    // encontró el canje (lag de la caché de Play Billing, o el usuario
-    // volvió acá en vez de a /premium). Solo tiene sentido dentro de la APK.
-    if (verifyBtn) verifyBtn.classList.toggle('hidden', !isApk());
+    // El canje de Play es externo. Mostrar el botón manual solo en la APK y
+    // después de que esta sesión inició la navegación a la pantalla de canje;
+    // tener un cupón pendiente por sí solo no significa que ya se intentó.
+    if (verifyBtn) {
+      verifyBtn.dataset.couponPending = 'true';
+      verifyBtn.classList.toggle('hidden', !isApk() || !hasGooglePlayRedeemAttempt());
+    }
     if (gpHint) gpHint.classList.add('hidden');
     return;
   }
 
-  if (verifyBtn) verifyBtn.classList.add('hidden');
+  if (verifyBtn) {
+    verifyBtn.dataset.couponPending = 'false';
+    verifyBtn.classList.add('hidden');
+  }
   if (gpHint) gpHint.classList.add('hidden');
   input.disabled = false;
   lookupBtn.disabled = false;
@@ -782,6 +803,9 @@ function wireManualGooglePlayVerify() {
   const btn = $('cuenta-coupon-verify-now');
   const hint = $('cuenta-coupon-gp-hint');
   if (!btn) return;
+  document.addEventListener('vyneural:google-play-redeem-attempted', () => {
+    if (isApk() && btn.dataset.couponPending === 'true') btn.classList.remove('hidden');
+  });
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     const original = btn.textContent;
@@ -981,6 +1005,7 @@ async function loadAll() {
     premiumStatus(),
     oneclickStatus(),
   ]);
+  loadMarketingProfile();
   if (seq !== loadSeq) return;
 
   const [profile, favs, freqs, alarms, its, push, devices, premium, oneclick] = results.map((r) =>
@@ -1056,6 +1081,175 @@ async function loadAll() {
   // pena reintentar todo el lote — casi seguro fallaron todos por la MISMA
   // razón (el backend estaba dormido), no por 7 causas distintas.
   return results.some((r) => r.status === 'rejected' && r.reason && (r.reason.status === 0 || r.reason.status >= 500));
+}
+
+// ── Perfil comercial, consentimiento y encuestas ───────────────────────────
+
+let marketingProfile = null;
+
+function showMarketingMessage(id, text, isError = false) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove('hidden', 'rs-live', 'rs-warn');
+  el.classList.add(isError ? 'rs-warn' : 'rs-live');
+}
+
+function showMarketingError(id, text) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove('hidden');
+}
+
+function renderMarketingProfile(profile) {
+  marketingProfile = profile;
+  const goal = $('marketing-goal');
+  const stage = $('marketing-stage');
+  if (goal) {
+    goal.querySelector('[data-marketing-legacy]')?.remove();
+    const savedGoal = profile?.goal || '';
+    if (savedGoal && !MARKETING_GOALS.includes(savedGoal)) {
+      const option = document.createElement('option');
+      option.value = savedGoal;
+      option.textContent = `Preferencia anterior conservada: ${marketingGoalLabel(savedGoal) || 'otra'}`;
+      option.dataset.marketingLegacy = 'true';
+      goal.insertBefore(option, goal.options[1] || null);
+    }
+    goal.value = savedGoal;
+  }
+  if (stage) stage.textContent = marketingFunnelStageLabel(profile?.funnel_stage);
+  const savedContent = new Set(Array.isArray(profile?.content_preferences) ? profile.content_preferences : []);
+  document.querySelectorAll('input[name="marketing-content"]').forEach((input) => {
+    input.checked = MARKETING_CONTENT_PREFERENCES.includes(input.value) && savedContent.has(input.value);
+  });
+
+  const badge = $('marketing-consent-status');
+  const copy = $('marketing-consent-copy');
+  const action = $('marketing-consent-action');
+  if (!badge || !copy || !action) return;
+  const view = marketingConsentPresentation(profile);
+  badge.textContent = view.label;
+  badge.classList.toggle('rs-live', view.status === 'confirmed');
+  badge.classList.toggle('rs-warn', view.status !== 'confirmed');
+  copy.textContent = view.description;
+  action.hidden = !view.visible;
+  action.disabled = false;
+  action.classList.remove('hidden');
+  if (view.action === 'none') {
+    action.hidden = true;
+    action.dataset.action = '';
+  } else if (view.action === 'revoke') {
+    action.textContent = 'Darme de baja';
+    action.dataset.action = 'revoke';
+  } else if (view.action === 'resend') {
+    action.textContent = 'Reenviar confirmación';
+    action.dataset.action = 'request';
+  } else {
+    action.textContent = 'Quiero recibir novedades';
+    action.dataset.action = 'request';
+  }
+  action.disabled = view.disabled;
+}
+
+async function loadMarketingProfile() {
+  const card = $('cuenta-marketing-card');
+  if (!card || !getAccessToken()) return;
+  try {
+    renderMarketingProfile(await getMarketingProfile());
+  } catch (err) {
+    const status = $('marketing-consent-status');
+    if (status) {
+      status.textContent = 'No pudimos cargar estas preferencias';
+      status.classList.add('rs-warn');
+    }
+    showMarketingError('marketing-profile-error', err?.detail || 'No se pudo conectar con el servicio de preferencias.');
+  }
+}
+
+function wireMarketing() {
+  const profileForm = $('marketing-profile-form');
+  if (profileForm) profileForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = $('marketing-profile-save');
+    const error = $('marketing-profile-error');
+    if (error) error.classList.add('hidden');
+    if (button) button.disabled = true;
+    try {
+      const selectedContent = [...document.querySelectorAll('input[name="marketing-content"]:checked')]
+        .map((input) => input.value);
+      const updated = await updateMarketingProfile(marketingProfileUpdatePayload($('marketing-goal')?.value || null, selectedContent));
+      renderMarketingProfile({ ...marketingProfile, ...updated });
+      showMarketingMessage('marketing-profile-message', 'Preferencias guardadas.');
+    } catch (err) {
+      showMarketingError('marketing-profile-error', err?.detail || 'No se pudieron guardar las preferencias. Inténtalo otra vez.');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+
+  const consentButton = $('marketing-consent-action');
+  if (consentButton) consentButton.addEventListener('click', async () => {
+    const error = $('marketing-consent-error');
+    if (error) error.classList.add('hidden');
+    consentButton.disabled = true;
+    try {
+      const result = consentButton.dataset.action === 'revoke'
+        ? await revokeMarketingConsent()
+        : await requestMarketingConsent('account');
+      renderMarketingProfile({ ...marketingProfile, consent_status: result?.consent_status || (consentButton.dataset.action === 'revoke' ? 'revoked' : 'pending') });
+    } catch (err) {
+      showMarketingError('marketing-consent-error', err?.detail || 'No pudimos actualizar tu suscripción. Puedes volver a intentarlo.');
+    } finally {
+      consentButton.disabled = false;
+    }
+  });
+
+  const satisfaction = $('marketing-satisfaction-form');
+  if (satisfaction) satisfaction.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const error = $('marketing-survey-error');
+    if (error) error.classList.add('hidden');
+    const rating = Number($('marketing-rating')?.value);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      showMarketingError('marketing-survey-error', 'Elige una calificación del 1 al 5.');
+      return;
+    }
+    const button = satisfaction.querySelector('button[type="submit"]');
+    if (button) button.disabled = true;
+    try {
+      await submitMarketingSurvey({ survey_type: 'satisfaction', rating, source: 'account' });
+      satisfaction.reset();
+      showMarketingMessage('marketing-survey-message', 'Gracias. Guardamos tu opinión para mejorar Vyneural.');
+    } catch (err) {
+      showMarketingError('marketing-survey-error', err?.detail || 'No se pudo enviar la encuesta. Inténtalo otra vez.');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+
+  const discovery = $('marketing-discovery-form');
+  if (discovery) discovery.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const error = $('marketing-discovery-error');
+    if (error) error.classList.add('hidden');
+    const selected_topics = [...discovery.querySelectorAll('input[name="topic"]:checked')].map((input) => input.value);
+    if (!selected_topics.length) {
+      showMarketingError('marketing-discovery-error', 'Selecciona al menos un tema.');
+      return;
+    }
+    const button = discovery.querySelector('button[type="submit"]');
+    if (button) button.disabled = true;
+    try {
+      await submitMarketingSurvey({ survey_type: 'discovery', selected_topics, source: 'account' });
+      discovery.reset();
+      showMarketingMessage('marketing-discovery-message', 'Gracias. Registramos los temas que te interesan.');
+    } catch (err) {
+      showMarketingError('marketing-discovery-error', err?.detail || 'No se pudieron enviar tus preferencias. Inténtalo otra vez.');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
 }
 
 // Solo para el arranque (init()): un cold start de Render (20-50s) hacía
@@ -1469,6 +1663,11 @@ function set2faError(id, msg) {
   if (!el) return;
   el.textContent = msg || '';
   el.classList.toggle('hidden', !msg);
+  if (id === 'cuenta-2fa-enroll-error') {
+    setOtpSlotsInvalid($('cuenta-2fa-code'), !!msg);
+  } else if (id === 'cuenta-2fa-disable-error') {
+    setOtpSlotsInvalid($('cuenta-2fa-disable-code'), !!msg && !disableUseRecovery);
+  }
 }
 
 function totpCodeProblem(code) {
@@ -1478,6 +1677,8 @@ function totpCodeProblem(code) {
 function wire2fa() {
   const card = $('cuenta-2fa-card');
   if (!card) return;
+  enhanceOtpSlots($('cuenta-2fa-code'), { errorId: 'cuenta-2fa-enroll-error' });
+  enhanceOtpSlots($('cuenta-2fa-disable-code'), { errorId: 'cuenta-2fa-disable-error' });
 
   // ── Paso 1: pedir el secreto ──
   const startBtn = $('cuenta-2fa-start');
@@ -1569,6 +1770,7 @@ function wire2fa() {
         paint2fa();
         show2faCodes(data.recovery_codes);
         $('cuenta-2fa-code').value = '';
+        refreshOtpSlots($('cuenta-2fa-code'));
         // El chip de la nav lee el perfil por su cuenta: mantenerlo al día.
         if (window.__vyneuralAuth && typeof window.__vyneuralAuth.refresh === 'function') {
           window.__vyneuralAuth.refresh();
@@ -1637,7 +1839,10 @@ function wire2fa() {
     recWrap.hidden = !disableUseRecovery;
     // Se limpia el campo oculto: mandar los dos a la vez haría que el backend
     // use el TOTP y el usuario crea que gastó un código de recuperación.
-    if (disableUseRecovery) $('cuenta-2fa-disable-code').value = '';
+    if (disableUseRecovery) {
+      $('cuenta-2fa-disable-code').value = '';
+      refreshOtpSlots($('cuenta-2fa-disable-code'));
+    }
     else $('cuenta-2fa-disable-recovery').value = '';
     disableToggle.textContent = disableUseRecovery
       ? 'Usar el código de mi app'
@@ -1648,6 +1853,7 @@ function wire2fa() {
       hide2faCodes();
       disableUseRecovery = false;
       disableForm.reset();
+      refreshOtpSlots($('cuenta-2fa-disable-code'));
       set2faError('cuenta-2fa-disable-error', '');
       paintDisableMode();
       disableForm.hidden = false;
@@ -1665,6 +1871,7 @@ function wire2fa() {
   if (disableCancel && disableForm) {
     disableCancel.addEventListener('click', () => {
       disableForm.reset();
+      refreshOtpSlots($('cuenta-2fa-disable-code'));
       disableForm.hidden = true;
       set2faError('cuenta-2fa-disable-error', '');
     });
@@ -1693,6 +1900,7 @@ function wire2fa() {
             : { password, code },
         );
         disableForm.reset();
+        refreshOtpSlots($('cuenta-2fa-disable-code'));
         disableForm.hidden = true;
         twoFaEnabled = false;
         twoFaKnown = true;
@@ -1916,6 +2124,7 @@ function init() {
   wire2fa();
   wireExportData();
   wireDeleteAccount();
+  wireMarketing();
 
   // Estado de sincronización en vivo.
   const syncEl = $('cuenta-sync-status');

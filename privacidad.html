@@ -100,6 +100,7 @@
         <ul>
           <li><strong>Datos de la cuenta:</strong> correo electrónico, nombre visible, hash de tu contraseña (nunca la contraseña en texto plano), si verificaste tu correo, la fecha y hora en que aceptaste los <a href="/terminos">Términos</a> y esta política al registrarte, y —si activás la verificación en dos pasos— lo necesario para validarla. Sirven para iniciar sesión, recuperar la cuenta y mantenerla segura.</li>
           <li><strong>Preferencias:</strong> tema, idioma, zona horaria y volumen predeterminado, para que la app se vea y suene como la dejaste.</li>
+          <li><strong>Perfil comercial opcional:</strong> el objetivo que declares y los temas de contenido que elijas para adaptar futuras comunicaciones. La etapa de tu recorrido se calcula desde el estado de tu suscripción y pagos; no es un dato que completes. También guardamos tus respuestas estructuradas a encuestas voluntarias (por ejemplo, una calificación y temas de interés), sin respuestas de texto libre.</li>
           <li><strong>Tu contenido:</strong> frecuencias guardadas, favoritos, recordatorios/alarmas e itinerarios (con sus pasos). Es tuyo: podés editarlo o eliminarlo desde <a href="/cuenta">Mi cuenta</a>.</li>
           <li><strong>Sesiones:</strong> guardamos un <em>hash</em> de tus tokens de sesión (nunca el token en sí), el navegador/dispositivo aproximado y la IP del último acceso, con su fecha de expiración. Sirve para mantener la sesión abierta, cerrarla de forma remota y detectar accesos sospechosos.</li>
           <li><strong>Suscripciones de notificaciones:</strong> en la web, el endpoint y las claves de push de cada dispositivo donde activás las notificaciones. En la app Android, el <em>token</em> de Firebase Cloud Messaging (FCM) de tu dispositivo. En ambos casos, solo se usan para enviarte los avisos de tus recordatorios — nunca para identificarte fuera de Vyneural.</li>
@@ -122,16 +123,24 @@
 
         <h2><span class="h2-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></span>Correos electrónicos</h2>
         <p>
-          Solo enviamos correos <strong>transaccionales</strong>: verificación de tu correo al
-          registrarte y recuperación de contraseña. Se envían únicamente a la dirección que
-          registraste y no hacemos envíos promocionales ni boletines.
+          Los correos <strong>transaccionales</strong> incluyen la verificación de tu cuenta y
+          recuperación de contraseña. También puedes elegir recibir comunicaciones
+          de marketing: son opcionales, requieren una confirmación por correo separada y puedes
+          darte de baja desde Mi cuenta. Las encuestas son voluntarias y no te suscriben a correos.
         </p>
         <p>
-          El envío lo hace <strong>Brevo</strong>, un proveedor externo de correo transaccional, a
-          través de su API por HTTPS. Para poder entregarte el mensaje, Brevo procesa tu dirección
-          de correo y el contenido de ese correo (un enlace de verificación o de restablecimiento):
-          no recibe tu contraseña, tus frecuencias ni el resto de tu contenido, y no usamos su
-          plataforma para marketing. Más detalles en la
+          Usamos <strong>Brevo</strong> como proveedor externo de correo transaccional y, si confirmas
+          voluntariamente el doble opt-in, para organizar comunicaciones de marketing mediante su API
+          por HTTPS. En ese caso puede procesar tu dirección, el objetivo y temas de contenido que
+          elijas, la etapa de tu recorrido comercial derivada del estado de tu cuenta, y eventos
+          confirmados como registro verificado, uso o vencimiento de un cupón promocional, inicio o
+          renovación/cancelación de una suscripción, pagos confirmados y respuestas estructuradas de
+          encuestas. Estos eventos distinguen el canal web/Android y el proveedor Webpay/Google Play
+          cuando corresponde. No enviamos códigos de cupón, tokens o identificadores de compra,
+          montos, datos de tarjeta, respuestas de texto libre, contraseña, frecuencias, historial de
+          reproducción ni información de salud. Las encuestas son voluntarias y no te suscriben a
+          marketing; puedes editar tus preferencias o retirar el consentimiento desde Mi cuenta.
+          Puedes editar preferencias o retirar el consentimiento desde Mi cuenta. Más detalles en la
           <a href="https://www.brevo.com/legal/privacypolicy/" rel="noopener noreferrer" target="_blank">política de privacidad de Brevo</a>.
         </p>
 
@@ -220,7 +229,7 @@
           <li><strong>Qué no entra en la exportación:</strong> por seguridad quedan afuera los secretos que no deben salir de nuestro lado ni viajar en un archivo: el hash de tu contraseña, el secreto de la verificación en dos pasos, las claves criptográficas crudas de las notificaciones push y las respuestas en bruto de Transbank. No son datos tuyos que te estemos ocultando: son credenciales cuyo valor está justamente en no copiarse.</li>
           <li><strong>Supresión:</strong> en <a href="/cuenta">Mi cuenta</a>, en la «Zona de peligro», el botón <strong>«Eliminar mi cuenta y mis datos»</strong> borra todo en el momento: perfil, frecuencias, favoritos, alarmas, itinerarios, historial de pagos, suscripciones de notificaciones, dispositivos, sesiones y comentarios. La tarjeta guardada para la auto-renovación también se da de baja del lado de Transbank, así que no queda ningún cobro pendiente. Te pedimos tu contraseña de nuevo para confirmar que sos vos; no hay plazos de espera, ni revisión manual nuestra, ni forma de deshacerlo. Si querés quedarte con una copia, exportá tus datos <em>antes</em> de borrar. Después del borrado solo subsiste la auditoría mínima, sin datos personales, por seguridad del servicio.</li>
           <li><strong>Retención:</strong> tus datos se conservan mientras exista tu cuenta; las sesiones expiran solas y podés cerrarlas en cualquier momento.</li>
-          <li><strong>Oposición y limitación:</strong> no hacemos perfilado, publicidad ni decisiones automatizadas sobre tu persona, así que no hay un tratamiento de ese tipo al que oponerse. Las notificaciones son opt-in y las desactivás por dispositivo cuando quieras.</li>
+          <li><strong>Oposición y limitación:</strong> si confirmás voluntariamente el doble opt-in, usamos el objetivo, los temas de contenido que elegiste y la etapa derivada de tu cuenta para organizar comunicaciones de marketing. Estos datos no determinan tu acceso, tus cobros ni las condiciones del servicio. Podés retirar el consentimiento y editar tus preferencias desde <a href="/cuenta">Mi cuenta</a>. Las notificaciones son opt-in y las desactivás por dispositivo cuando quieras.</li>
           <li><strong>Marco legal:</strong> en Chile, la <strong>Ley 21.719</strong> de protección de datos personales entra en plena vigencia el <strong>1 de diciembre de 2026</strong> y hoy todavía rige la Ley 19.628. Sin esperar esa fecha, nos preparamos voluntariamente para cumplir los estándares de la Ley 21.719: consentimiento explícito y registrado, derechos de acceso, rectificación, supresión, portabilidad y oposición ejercibles por vos mismo, y reconocemos la futura Agencia de Protección de Datos Personales que esa ley crea como la autoridad ante la que podés reclamar una vez vigente. Si estás en la Unión Europea, reconocemos los mismos derechos bajo el RGPD.</li>
           <li><strong>Cómo ejercerlos:</strong> lo más rápido es hacerlo vos desde <a href="/cuenta">Mi cuenta</a> — acceso, corrección, exportación y borrado están ahí, sin intermediarios ni esperas. Si algo no se resuelve desde ahí, escribinos al contacto del final de esta página.</li>
           <li><strong>Edad mínima:</strong> las cuentas de Vyneural son solo para personas mayores de 18 años. El detalle está en los <a href="/terminos#edad-minima">Términos y condiciones</a>.</li>
