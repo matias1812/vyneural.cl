@@ -32,14 +32,42 @@ import { detectNativeBridge, checkPlayPurchases } from './native-bridge.js';
 // Play Store y no volver a abrir la app hasta el día siguiente — el rastro
 // de "hay algo pendiente de confirmar" tiene que seguir ahí.
 const PENDING_KEY = 'vyneural_google_play_redeem_code_pending';
+// El backend es el respaldo tras reinstalar, borrar datos o usar otro
+// dispositivo. premiumStatus() solo marca pendiente mientras haya algo que
+// recuperar; localStorage sigue siendo útil durante el canje externo.
+let backendPendingCoupon = false;
 
 export function markGooglePlayRedeemCodeIssued(plan) {
   try {
-    localStorage.setItem(PENDING_KEY, JSON.stringify({ plan, issuedAt: Date.now() }));
+    // Durable recovery marker: code issued and navigation to Play is about
+    // to start. This alone does not make the manual verification button
+    // visible; that requires observing a return from the external surface.
+    localStorage.setItem(PENDING_KEY, JSON.stringify({ plan, launchedAt: Date.now() }));
   } catch (_) {
     /* sin localStorage: no hay dónde guardar el rastro — el chequeo con
        force:true desde /cuenta sigue funcionando igual, solo se pierde el
        chequeo automático en background */
+  }
+}
+
+export function hasGooglePlayRedeemAttempt() {
+  try {
+    const state = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null');
+    return !!(state && state.attemptedAt);
+  } catch (_) {
+    return false;
+  }
+}
+
+function noteReturnFromPlayRedeem() {
+  try {
+    const state = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null');
+    if (!state || !state.launchedAt || state.attemptedAt) return;
+    state.attemptedAt = Date.now();
+    localStorage.setItem(PENDING_KEY, JSON.stringify(state));
+    document.dispatchEvent(new CustomEvent('vyneural:google-play-redeem-attempted'));
+  } catch (_) {
+    // Recuperación automática puede continuar; no hay estado local que pintar.
   }
 }
 
@@ -69,8 +97,11 @@ function hasPendingRedeemLocally() {
  * reintentos de background eternos por algo que ya se resolvió solo.
  */
 export function noteBackendPendingCouponStatus(hasPendingCoupon) {
+  backendPendingCoupon = !!hasPendingCoupon;
   if (!hasPendingCoupon && hasPendingRedeemLocally()) {
     clearGooglePlayRedeemCodePending();
+  } else if (hasPendingCoupon) {
+    checkForRedeemedGooglePlayCode().then(announce);
   }
 }
 
@@ -150,7 +181,7 @@ export async function checkForRedeemedGooglePlayCode({ force = false } = {}) {
   if (!getAccessToken()) return { skipped: 'no_session' };
   // Gate de costo cero ANTES de tocar el bridge nativo: sin force y sin
   // nada pendiente localmente, no hay nada que confirmar.
-  if (!force && !hasPendingRedeemLocally()) return { skipped: 'nothing_pending' };
+  if (!force && !hasPendingRedeemLocally() && !backendPendingCoupon) return { skipped: 'nothing_pending' };
   if (checkInFlight) return { skipped: 'in_flight' };
   if (!force && Date.now() - lastCheckAt < COOLDOWN_MS) return { skipped: 'cooldown' };
   checkInFlight = true;
@@ -199,13 +230,17 @@ export function initGooglePlayRedeemWatch() {
   wired = true;
   checkForRedeemedGooglePlayCode().then(announce);
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) checkForRedeemedGooglePlayCode().then(announce);
+    if (!document.hidden) {
+      noteReturnFromPlayRedeem();
+      checkForRedeemedGooglePlayCode().then(announce);
+    }
   });
   // Señal nativa explícita (MainActivity.onResume()): visibilitychange no
   // dispara de forma confiable en esta WebView con launchMode="singleTask"
   // (reabrir desde el ícono trae la Activity ya existente a onResume() sin
   // recargar la página).
   document.addEventListener('vyneural:resumed', () => {
+    noteReturnFromPlayRedeem();
     checkForRedeemedGooglePlayCode().then(announce);
   });
 }
