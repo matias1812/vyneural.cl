@@ -4,6 +4,7 @@ import './ui/auth.js';
 import { initPermissionsModal, openPermissions } from './ui/permissions-modal.js';
 import { initDegradedAlarmBanner } from './ui/degraded-alarm-banner.js';
 import { initGooglePlayRedeemWatch } from './platform/google-play-redeem.js';
+import { initOnboardingFlow } from './onboarding-flow.js';
 import { unsubscribeFromPush } from './api/push.js';
 import { inject } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
@@ -199,6 +200,13 @@ initDegradedAlarmBanner();
 // canjeado en Play Store sin importar a qué página haya vuelto el usuario
 // (antes solo corría en /premium, el cupón se activa desde /cuenta).
 initGooglePlayRedeemWatch();
+
+// ---------------------------------------------------------------- Onboarding progresivo
+// Mismo criterio que los dos avisos de arriba: sin gate de página, cableado
+// en TODAS (ver src/onboarding-flow.js) — así el hito correspondiente se
+// evalúa sin importar en qué página esté el usuario cuando se cumple
+// (login, sesión grabada, o vuelta a foreground en la APK).
+initOnboardingFlow();
 
 // ---------------------------------------------------------------- Permisos de la web
 // El reproductor ("/") ya trae su propia copia más rica del modal (main.js —

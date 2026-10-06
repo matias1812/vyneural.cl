@@ -154,92 +154,6 @@
             </form>
           </div>
 
-          <section class="page-card" id="cuenta-marketing-card" aria-labelledby="marketing-title">
-            <div class="rutina-head">
-              <h3 id="marketing-title">Tus preferencias y opinión</h3>
-              <span class="roadmap-status rs-warn" id="marketing-consent-status">Consultando…</span>
-            </div>
-            <p class="rutina-hint">Cuéntanos qué buscas para adaptar el contenido. Estas respuestas no son información clínica ni de uso. Tus preferencias se guardan en Vyneural.</p>
-            <form class="cuenta-form" id="marketing-profile-form">
-              <label for="marketing-goal">¿Qué te gustaría lograr?
-                <select id="marketing-goal" name="goal">
-                  <option value="">Elige una opción</option>
-                  <option value="relaxation">Relajarme</option>
-                  <option value="sleep_routine">Crear una rutina de sueño</option>
-                  <option value="focus_study_work">Concentrarme, estudiar o trabajar</option>
-                  <option value="meditation">Meditar</option>
-                  <option value="explore_audio">Explorar audio y frecuencias</option>
-                </select>
-              </label>
-              <fieldset class="marketing-preference-set">
-                <legend>¿Qué contenido prefieres? Puedes elegir varios temas.</legend>
-                <div class="marketing-topic-grid">
-                  <label><input type="checkbox" name="marketing-content" value="guides_exercises"> Guías y ejercicios</label>
-                  <label><input type="checkbox" name="marketing-content" value="product_updates"> Novedades del producto</label>
-                  <label><input type="checkbox" name="marketing-content" value="educational_content"> Contenido educativo</label>
-                  <label><input type="checkbox" name="marketing-content" value="offers"> Ofertas</label>
-                  <label><input type="checkbox" name="marketing-content" value="community"> Comunidad</label>
-                </div>
-              </fieldset>
-              <div class="marketing-stage-readonly">
-                <h4>Etapa de tu recorrido</h4>
-                <p id="marketing-stage" class="rutina-hint" aria-live="polite">Calculando…</p>
-                <small>Se calcula automáticamente según el estado de tu cuenta y tus compras. No es un dato que tengas que completar.</small>
-              </div>
-              <div class="auth-error hidden" id="marketing-profile-error" role="alert"></div>
-              <p class="roadmap-status hidden" id="marketing-profile-message" role="status"></p>
-              <div class="cuenta-form-row">
-                <button type="submit" class="cuenta-btn" id="marketing-profile-save">Guardar preferencias</button>
-              </div>
-            </form>
-
-            <div class="marketing-consent-box">
-              <h4>Correos de Vyneural</h4>
-              <p class="rutina-hint" id="marketing-consent-copy">La suscripción es opcional. Te enviaremos un correo para que la confirmes; solo después recibirás novedades y contenido. Puedes darte de baja aquí cuando quieras.</p>
-              <button type="button" class="cuenta-btn" id="marketing-consent-action" hidden></button>
-              <p class="auth-error hidden" id="marketing-consent-error" role="alert"></p>
-            </div>
-
-            <div class="marketing-surveys">
-              <h4>Encuesta de satisfacción</h4>
-              <p class="rutina-hint">¿Cómo ha sido tu experiencia? Tu respuesta nos ayuda a mejorar el producto y no activa correos promocionales.</p>
-              <form class="cuenta-form" id="marketing-satisfaction-form">
-                <label for="marketing-rating">¿Qué tan satisfecho estás? (1 = poco, 5 = mucho)
-                  <select id="marketing-rating" required>
-                    <option value="">Elige una calificación</option>
-                    <option value="1">1 — Poco satisfecho</option>
-                    <option value="2">2 — Algo insatisfecho</option>
-                    <option value="3">3 — Ni satisfecho ni insatisfecho</option>
-                    <option value="4">4 — Satisfecho</option>
-                    <option value="5">5 — Muy satisfecho</option>
-                  </select>
-                </label>
-                <div class="auth-error hidden" id="marketing-survey-error" role="alert"></div>
-                <p class="roadmap-status hidden" id="marketing-survey-message" role="status"></p>
-                <div class="cuenta-form-row"><button type="submit" class="cuenta-btn">Enviar opinión</button></div>
-              </form>
-            </div>
-
-            <div class="marketing-surveys">
-              <h4>¿Qué te interesa encontrar?</h4>
-              <p class="rutina-hint">Marca los temas que te servirían. No escribimos respuestas libres ni inferimos esta información.</p>
-              <form class="cuenta-form" id="marketing-discovery-form">
-                <div class="marketing-topic-grid">
-                  <label><input type="checkbox" name="topic" value="premium"> Planes y funciones Premium</label>
-                  <label><input type="checkbox" name="topic" value="alarms"> Alarmas y recordatorios</label>
-                  <label><input type="checkbox" name="topic" value="itineraries"> Rutinas e itinerarios</label>
-                  <label><input type="checkbox" name="topic" value="new_content"> Contenido nuevo</label>
-                  <label><input type="checkbox" name="topic" value="pricing"> Precios y formas de pago</label>
-                  <label><input type="checkbox" name="topic" value="onboarding"> Ayuda para comenzar</label>
-                  <label><input type="checkbox" name="topic" value="other"> Otros temas del producto</label>
-                </div>
-                <div class="auth-error hidden" id="marketing-discovery-error" role="alert"></div>
-                <p class="roadmap-status hidden" id="marketing-discovery-message" role="status"></p>
-                <div class="cuenta-form-row"><button type="submit" class="cuenta-btn">Enviar preferencias</button></div>
-              </form>
-            </div>
-          </section>
-
           <div class="page-card" id="cuenta-premium-card">
             <div class="rutina-head">
               <h3>💎 Premium</h3>
@@ -341,6 +255,16 @@
             <div class="cuenta-push-actions">
               <button type="button" class="cuenta-btn" id="cuenta-push-subscribe">Activar notificaciones</button>
               <button type="button" class="cuenta-btn cuenta-btn-ghost" id="cuenta-push-unsubscribe">Desactivar</button>
+            </div>
+
+            <div class="marketing-consent-box">
+              <div class="rutina-head">
+                <h4>Correos de Vyneural</h4>
+                <span class="roadmap-status rs-warn" id="marketing-consent-status">Consultando…</span>
+              </div>
+              <p class="rutina-hint" id="marketing-consent-copy">La suscripción es opcional. Te enviaremos un correo para que la confirmes; solo después recibirás novedades y contenido. Puedes darte de baja aquí cuando quieras.</p>
+              <button type="button" class="cuenta-btn" id="marketing-consent-action" hidden></button>
+              <p class="auth-error hidden" id="marketing-consent-error" role="alert"></p>
             </div>
           </div>
 

@@ -39,14 +39,9 @@ import { confirmModal, notifyModal } from './ui/confirm-modal.js';
 import { celebrateBurst } from './ui/celebrate.js';
 import { enhanceOtpSlots, refreshOtpSlots, setOtpSlotsInvalid } from './ui/otp-slots.js';
 import './marketing.css';
+import { marketingConsentPresentation } from './marketing-ui.js';
 import {
-  MARKETING_GOALS, MARKETING_CONTENT_PREFERENCES,
-  marketingConsentPresentation, marketingFunnelStageLabel, marketingGoalLabel,
-  marketingProfileUpdatePayload,
-} from './marketing-ui.js';
-import {
-  getMarketingProfile, updateMarketingProfile, requestMarketingConsent,
-  revokeMarketingConsent, submitMarketingSurvey,
+  getMarketingProfile, requestMarketingConsent, revokeMarketingConsent,
 } from './api/marketing.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1087,14 +1082,6 @@ async function loadAll() {
 
 let marketingProfile = null;
 
-function showMarketingMessage(id, text, isError = false) {
-  const el = $(id);
-  if (!el) return;
-  el.textContent = text;
-  el.classList.remove('hidden', 'rs-live', 'rs-warn');
-  el.classList.add(isError ? 'rs-warn' : 'rs-live');
-}
-
 function showMarketingError(id, text) {
   const el = $(id);
   if (!el) return;
@@ -1104,25 +1091,6 @@ function showMarketingError(id, text) {
 
 function renderMarketingProfile(profile) {
   marketingProfile = profile;
-  const goal = $('marketing-goal');
-  const stage = $('marketing-stage');
-  if (goal) {
-    goal.querySelector('[data-marketing-legacy]')?.remove();
-    const savedGoal = profile?.goal || '';
-    if (savedGoal && !MARKETING_GOALS.includes(savedGoal)) {
-      const option = document.createElement('option');
-      option.value = savedGoal;
-      option.textContent = `Preferencia anterior conservada: ${marketingGoalLabel(savedGoal) || 'otra'}`;
-      option.dataset.marketingLegacy = 'true';
-      goal.insertBefore(option, goal.options[1] || null);
-    }
-    goal.value = savedGoal;
-  }
-  if (stage) stage.textContent = marketingFunnelStageLabel(profile?.funnel_stage);
-  const savedContent = new Set(Array.isArray(profile?.content_preferences) ? profile.content_preferences : []);
-  document.querySelectorAll('input[name="marketing-content"]').forEach((input) => {
-    input.checked = MARKETING_CONTENT_PREFERENCES.includes(input.value) && savedContent.has(input.value);
-  });
 
   const badge = $('marketing-consent-status');
   const copy = $('marketing-consent-copy');
@@ -1153,8 +1121,12 @@ function renderMarketingProfile(profile) {
 }
 
 async function loadMarketingProfile() {
-  const card = $('cuenta-marketing-card');
-  if (!card || !getAccessToken()) return;
+  // Antes el guard miraba #cuenta-marketing-card (la sección de preferencias,
+  // ya retirada); ahora lo único que vive en el DOM es el control de
+  // suscripción a correos dentro de la tarjeta de notificaciones push, así
+  // que el guard se fija en ese elemento.
+  const box = $('marketing-consent-action');
+  if (!box || !getAccessToken()) return;
   try {
     renderMarketingProfile(await getMarketingProfile());
   } catch (err) {
@@ -1163,31 +1135,16 @@ async function loadMarketingProfile() {
       status.textContent = 'No pudimos cargar estas preferencias';
       status.classList.add('rs-warn');
     }
-    showMarketingError('marketing-profile-error', err?.detail || 'No se pudo conectar con el servicio de preferencias.');
+    showMarketingError('marketing-consent-error', err?.detail || 'No se pudo conectar con el servicio de preferencias.');
   }
 }
 
 function wireMarketing() {
-  const profileForm = $('marketing-profile-form');
-  if (profileForm) profileForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const button = $('marketing-profile-save');
-    const error = $('marketing-profile-error');
-    if (error) error.classList.add('hidden');
-    if (button) button.disabled = true;
-    try {
-      const selectedContent = [...document.querySelectorAll('input[name="marketing-content"]:checked')]
-        .map((input) => input.value);
-      const updated = await updateMarketingProfile(marketingProfileUpdatePayload($('marketing-goal')?.value || null, selectedContent));
-      renderMarketingProfile({ ...marketingProfile, ...updated });
-      showMarketingMessage('marketing-profile-message', 'Preferencias guardadas.');
-    } catch (err) {
-      showMarketingError('marketing-profile-error', err?.detail || 'No se pudieron guardar las preferencias. Inténtalo otra vez.');
-    } finally {
-      if (button) button.disabled = false;
-    }
-  });
-
+  // Las 4 preguntas de marketing (goal/content_preferences/discovery/
+  // satisfaction) se responden únicamente en el stepper progresivo de
+  // onboarding (ui/onboarding-modal.js, showEditFlow()), disparado durante
+  // el uso de la app — no hay botón de edición manual en /cuenta. Acá solo
+  // queda el control de suscripción a correos (consentimiento DOI).
   const consentButton = $('marketing-consent-action');
   if (consentButton) consentButton.addEventListener('click', async () => {
     const error = $('marketing-consent-error');
@@ -1202,52 +1159,6 @@ function wireMarketing() {
       showMarketingError('marketing-consent-error', err?.detail || 'No pudimos actualizar tu suscripción. Puedes volver a intentarlo.');
     } finally {
       consentButton.disabled = false;
-    }
-  });
-
-  const satisfaction = $('marketing-satisfaction-form');
-  if (satisfaction) satisfaction.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const error = $('marketing-survey-error');
-    if (error) error.classList.add('hidden');
-    const rating = Number($('marketing-rating')?.value);
-    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-      showMarketingError('marketing-survey-error', 'Elige una calificación del 1 al 5.');
-      return;
-    }
-    const button = satisfaction.querySelector('button[type="submit"]');
-    if (button) button.disabled = true;
-    try {
-      await submitMarketingSurvey({ survey_type: 'satisfaction', rating, source: 'account' });
-      satisfaction.reset();
-      showMarketingMessage('marketing-survey-message', 'Gracias. Guardamos tu opinión para mejorar Vyneural.');
-    } catch (err) {
-      showMarketingError('marketing-survey-error', err?.detail || 'No se pudo enviar la encuesta. Inténtalo otra vez.');
-    } finally {
-      if (button) button.disabled = false;
-    }
-  });
-
-  const discovery = $('marketing-discovery-form');
-  if (discovery) discovery.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const error = $('marketing-discovery-error');
-    if (error) error.classList.add('hidden');
-    const selected_topics = [...discovery.querySelectorAll('input[name="topic"]:checked')].map((input) => input.value);
-    if (!selected_topics.length) {
-      showMarketingError('marketing-discovery-error', 'Selecciona al menos un tema.');
-      return;
-    }
-    const button = discovery.querySelector('button[type="submit"]');
-    if (button) button.disabled = true;
-    try {
-      await submitMarketingSurvey({ survey_type: 'discovery', selected_topics, source: 'account' });
-      discovery.reset();
-      showMarketingMessage('marketing-discovery-message', 'Gracias. Registramos los temas que te interesan.');
-    } catch (err) {
-      showMarketingError('marketing-discovery-error', err?.detail || 'No se pudieron enviar tus preferencias. Inténtalo otra vez.');
-    } finally {
-      if (button) button.disabled = false;
     }
   });
 }

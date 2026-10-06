@@ -1397,6 +1397,7 @@ function recordHistory() {
   lsSet(LS_HISTORY, h.slice(-50));
   sessionStartTime = 0;
   updateHistory();
+  document.dispatchEvent(new CustomEvent('vyneural:session-recorded'));
 }
 
 // El historial vive en el botón con forma de reloj (esquina superior

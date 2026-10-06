@@ -1,0 +1,263 @@
+/* src/onboarding.css
+   Onboarding progresivo — solo lo específico de los pasos. El contenedor, la
+   tarjeta, el encabezado, el botón de cerrar, la caja de error y los botones
+   ya vienen de site.css (.page-modal / .page-modal-card / .page-modal-head /
+   .page-modal-close / .auth-error / .cuenta-btn[-ghost] / .rutina-hint), y la
+   grilla de checkboxes de marketing.css (.marketing-topic-grid). Acá no se
+   duplica ninguna de esas reglas.
+
+   Se importa ÚNICAMENTE desde src/ui/onboarding-modal.js, que a su vez se
+   carga con import() dinámico: este archivo viaja en el chunk perezoso del
+   modal, no en el CSS de ninguna página. */
+
+.ob-card {
+  max-width: 480px;
+}
+
+/* ---------------------------------------------------------------- Stepper */
+.ob-steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -6px 0 14px;
+}
+
+.ob-steps-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+
+.ob-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ob-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background 0.2s ease, transform 0.2s ease, width 0.2s ease;
+}
+
+.ob-dot.is-done {
+  background: rgba(167, 139, 250, 0.55);
+}
+
+.ob-dot.is-active {
+  width: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* ---------------------------------------------------------------- Cuerpo del paso */
+.ob-body {
+  min-height: 132px;
+}
+
+.ob-step {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ob-hint {
+  margin: 0;
+}
+
+.ob-hint-warn {
+  color: var(--accent);
+}
+
+/* Entrada del paso: `fadeUp` ya existe en site.css (se reutiliza tal cual
+   para el avance); solo el retroceso necesita su propio sentido, para que
+   "Atrás" no se sienta igual que "Siguiente". Son transiciones funcionales
+   breves, del mismo orden que el authFade con que abre .page-modal, así que
+   se mantienen también con prefers-reduced-motion. */
+.ob-enter {
+  animation: fadeUp 0.26s ease both;
+}
+
+.ob-enter-back {
+  animation: obFadeDown 0.26s ease both;
+}
+
+@keyframes obFadeDown {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Aparición escalonada de las opciones: puro adorno. La clase la pone el JS
+   solo si prefersReducedMotion() es false (ver onboarding-modal.js::
+   applyStagger); el bloque de abajo es la red de seguridad en CSS. */
+.ob-stagger > * {
+  animation: fadeUp 0.3s ease both;
+  animation-delay: calc(var(--ob-i, 0) * 45ms);
+}
+
+/* ---------------------------------------------------------------- goal (pills) */
+.ob-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ob-pill {
+  position: relative;
+  display: block;
+}
+
+/* El radio real sigue en el árbol (foco y flechas del teclado funcionan),
+   solo deja de dibujarse: la pill es su etiqueta. */
+.ob-pill input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ob-pill span {
+  display: block;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.ob-pill span:hover {
+  border-color: rgba(167, 139, 250, 0.45);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.ob-pill input:checked + span {
+  border-color: rgba(167, 139, 250, 0.7);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.ob-pill input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- Checkboxes */
+/* .marketing-topic-grid ya define la grilla, el gap y el estilo de cada
+   label/input; acá solo el estado "deshabilitado por tope" (máximo 5 temas,
+   límite del backend) necesita una pista visual. */
+.ob-grid label:has(input:disabled) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- satisfaction */
+.ob-rating {
+  display: flex;
+  gap: 6px;
+}
+
+.ob-rating-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  font-size: 30px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  border-radius: 10px;
+  transition: color 0.18s ease, transform 0.18s ease;
+}
+
+.ob-rating-btn:hover {
+  transform: translateY(-2px) scale(1.04);
+  color: rgba(167, 139, 250, 0.55);
+}
+
+.ob-rating-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ob-rating-btn.is-on {
+  color: #fbbf24;
+  animation: obPop 0.26s ease;
+}
+
+@keyframes obPop {
+  0% {
+    transform: scale(0.82);
+  }
+  60% {
+    transform: scale(1.14);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+.ob-rating-caption {
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------- Botonera */
+.ob-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.ob-actions .cuenta-btn {
+  align-self: auto;
+}
+
+/* ---------------------------------------------------------------- Variantes */
+@media (max-width: 420px) {
+  .ob-actions {
+    flex-direction: column-reverse;
+  }
+
+  .ob-actions .cuenta-btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  .ob-rating-btn {
+    font-size: 26px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-stagger > * {
+    animation: none;
+  }
+
+  .ob-rating-btn.is-on {
+    animation: none;
+  }
+
+  .ob-rating-btn:hover,
+  .ob-pill span:hover {
+    transform: none;
+  }
+}

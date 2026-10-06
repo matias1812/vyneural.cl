@@ -39,6 +39,9 @@ import { AlarmManager, inMemoryAlarmStore, alarmStateOnTick, alarmOwnerForPlatfo
 import { focusPolicy, shouldRequestFocus, FOCUS_STATES } from '../core/audio-focus-policy.js';
 // P3 — sanitización de datos persistidos (crash recovery / corrupción).
 import { sanitizeSession, sanitizeFavorites, sanitizeHistory } from '../core/session-store.js';
+// Onboarding progresivo — módulo de lógica pura (sin DOM) para decidir el
+// siguiente hito a mostrar según sesiones completadas y estado de respuestas.
+import { getCompletedSessionCount, nextDueStep, ONBOARDING_MILESTONES, SKIP_COOLDOWN_SESSIONS } from '../core/session-milestones.js';
 import { detectNotificationCapabilities, capabilitySummary } from '../core/notification-capabilities.js';
 // P4 — contrato de plataforma: parseo del bridge (string crudo vs wrapper) y
 // dueño único por perfil (Web/PWA = runtime web · APK = runtime Android).
@@ -3228,6 +3231,65 @@ export async function runBineuralDiagnostics() {
     }
     const garbage = from24h('no-es-una-hora');
     if (garbage.h12 !== 12 || garbage.ampm !== 'PM') throw new Error('valor basura debe caer al mismo default seguro');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // SESSION MILESTONES — onboarding progresivo (lógica pura, sin DOM)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  runTest('SessionMilestones: nextDueStep devuelve "goal" al llegar a 1 sesión, sin estado previo', () => {
+    if (nextDueStep(1, undefined) !== 'goal') throw new Error('count=1 sin estado debe deber "goal"');
+    if (nextDueStep(1, {}) !== 'goal') throw new Error('count=1 con estado vacío debe deber "goal"');
+  });
+
+  runTest('SessionMilestones: nextDueStep devuelve null antes de alcanzar el primer hito', () => {
+    if (nextDueStep(0, undefined) !== null) throw new Error('count=0 no debe deber ningún hito todavía');
+  });
+
+  runTest('SessionMilestones: nextDueStep salta un hito ya respondido y no adelanta el siguiente antes de tiempo', () => {
+    const state = { answered: { goal: true } };
+    if (nextDueStep(1, state) !== null) {
+      throw new Error('goal respondido y content_preferences aún no debido a count=1 → null');
+    }
+  });
+
+  runTest('SessionMilestones: nextDueStep respeta el cooldown de skip (2 sesiones)', () => {
+    const state = { skippedAt: { goal: { count: 1 } } };
+    if (nextDueStep(2, state) !== null) {
+      throw new Error('saltado en count=1, cooldown=2 → no debe volver a deber en count=2');
+    }
+    if (nextDueStep(3, state) !== 'goal') {
+      throw new Error('en count=3 (1 + cooldown) "goal" debe volver a deberse');
+    }
+  });
+
+  runTest('SessionMilestones: getCompletedSessionCount tolera storage nulo/corrupto y cuenta bien el válido', () => {
+    const nullStorage = { getItem: () => null };
+    if (getCompletedSessionCount(nullStorage) !== 0) throw new Error('getItem→null debe dar 0');
+
+    const malformedStorage = { getItem: () => '{not json' };
+    if (getCompletedSessionCount(malformedStorage) !== 0) throw new Error('JSON inválido debe dar 0, no lanzar');
+
+    const entries = [
+      { id: 'alpha', min: 10, ts: 1 },
+      { id: 'beta', min: 20, ts: 2 },
+      { id: 'gamma', min: 5, ts: 3 },
+    ];
+    const validStorage = { getItem: () => JSON.stringify(entries) };
+    if (getCompletedSessionCount(validStorage) !== 3) {
+      throw new Error('3 entradas válidas en el historial deben contar como 3, got ' + getCompletedSessionCount(validStorage));
+    }
+
+    if (getCompletedSessionCount(null) !== 0) throw new Error('sin storage disponible → 0');
+  });
+
+  runTest('SessionMilestones: ONBOARDING_MILESTONES y SKIP_COOLDOWN_SESSIONS tienen la forma esperada', () => {
+    if (!Object.isFrozen(ONBOARDING_MILESTONES)) throw new Error('ONBOARDING_MILESTONES debe estar congelado');
+    const steps = ONBOARDING_MILESTONES.map((m) => m.step);
+    if (steps.join(',') !== 'goal,content_preferences,discovery,satisfaction') {
+      throw new Error('orden/steps inesperados: ' + steps.join(','));
+    }
+    if (SKIP_COOLDOWN_SESSIONS !== 2) throw new Error('cooldown esperado 2, got ' + SKIP_COOLDOWN_SESSIONS);
   });
 
   // ──────────────────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@
 const EMOJIS = ['🎉', '✨', '⭐', '🎊'];
 const COUNT = 8;
 
-function prefersReducedMotion() {
+export function prefersReducedMotion() {
   return (
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&

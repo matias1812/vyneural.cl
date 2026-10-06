@@ -1,4 +1,4 @@
-#cuenta-marketing-card h4 {
+.marketing-consent-box h4 {
   margin: 18px 0 6px;
   color: var(--text);
   font-size: 15px;
@@ -63,8 +63,3 @@
   max-width: 72ch;
 }
 
-@media (max-width: 520px) {
-  #cuenta-marketing-card .cuenta-form-row {
-    grid-template-columns: 1fr;
-  }
-}
