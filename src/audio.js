@@ -68,6 +68,9 @@ export class BinauralEngine {
   ensure() {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) {
+        throw new Error('AUDIO_UNSUPPORTED: Web Audio API no disponible en este navegador.');
+      }
       try {
         // 48kHz + 'playback' (en vez del 'interactive' por defecto, pensado
         // para UI de baja latencia): más estable para sesiones binaurales

@@ -1124,6 +1124,10 @@ function applyAmbient() {
 // pared ni el log experimental (el play posterior a una pausa de lock screen
 // retoma la MISMA sesión, como YouTube — no empieza una nueva).
 function start({ resume = false, source = 'ui-play' } = {}) {
+  if (!(window.AudioContext || window.webkitAudioContext)) {
+    showToast('Tu navegador no soporta reproducción de audio. Probá actualizarlo o usar otro navegador.');
+    return;
+  }
   // La condición experimental elegida se aplica a la sesión nueva (el motor
   // la lee al construir sus fuentes; en vivo setExpCondition la reconstruye).
   if (simulation && simulation.audio) simulation.audio.setCondition(expCondition);

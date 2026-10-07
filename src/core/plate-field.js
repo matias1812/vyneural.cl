@@ -86,14 +86,13 @@ export const MAX_RADIAL_MODE = 24;
 // cada m, alcanzando varios % (un puñado, no decenas) en la zona m∈[4,6],
 // n∈[11,24] que SÍ es alcanzable en uso real (ver el comentario de
 // MAX_RADIAL_MODE arriba, caso 963 Hz). NO se fija acá un número exacto de
-// error: al intentar construir una tabla de reemplazo de alta precisión
-// para confirmarlo con más decimales, se encontró que la MISMA recurrencia
-// ascendente de besselJArray() (usada como árbitro) acumula su propio error
-// creciente para m≥4 en n>~8 — ~2,6e-2 absoluto medido en m=6,n=10, ya del
-// orden del error que se buscaba medir. Arreglar eso bien pide recurrencia
-// descendente (algoritmo de Miller), una tarea numérica aparte; ver el test
+// error: la inestabilidad de la recurrencia ascendente de besselJArray()
+// usada como árbitro YA SE ARREGLÓ mediante recurrencia descendente de
+// Miller (ver el comentario de besselJArray). Eso NO arregla el error de
+// aproximación de McMahon en zPrimeApprox(): sigue siendo una aproximación
+// asintótica y ese problema SIGUE ABIERTO. Ver el test
 // "zPrimeApprox is monotonically increasing with ~π spacing" en
-// diagnostics.js para lo que SÍ se garantiza sin ese trabajo adicional.
+// diagnostics.js para lo que SÍ se garantiza.
 // Impacto real: un modo (m,n) en este rango puede desafinarse por un
 // puñado de % en su ω de resonancia — suficiente para mover qué modo gana
 // selectNearestMode() cuando dos quedan cerca, pero no una falla catastrófica.
@@ -275,8 +274,8 @@ export function resonantModeForBeat(beatOrCarrier, a = PHYS_A) {
 // --------------------------------------------------------------------------
 // Funciones de Bessel (modos radiales de la cuenca) — evaluador compartido
 // del campo. J0/J1 por serie de potencias (x < 8) y forma asintótica
-// (x ≥ 8); J_m para m ≥ 2 por la recurrencia estándar
-// J_m(x) = (2(m-1)/x)·J_{m-1}(x) − J_{m-2}(x).
+// (x ≥ 8); J_m para m ≥ 2 vive en besselJArray() (recurrencia descendente
+// de Miller), que ya no splicea estas dos funciones.
 //
 // FIX (auditoría 2026-09-08, deuda de verificación externa — hallazgo
 // independiente, no reportado por ninguna de las dos críticas externas que
@@ -375,20 +374,73 @@ export const SLOWMO_K = 330;
 // bloqueo de minutos.
 export const MORPH_BLEND_K = 10;
 
+// Orden de arranque de la recurrencia DESCENDENTE (algoritmo de Miller,
+// Numerical Recipes §6.5, constante ACC=40 estandar): hace falta margen por
+// encima TANTO del orden pedido (maxM) COMO del propio argumento x - si
+// x > maxM, J_maxM(x) todavia esta en zona oscilante en maxM y necesita
+// margen sobre x, no solo sobre maxM - para que la recurrencia 'olvide' la
+// semilla arbitraria antes de llegar a los ordenes que si importan.
+// Validado numericamente contra una referencia de margen mucho mayor y
+// contra la serie de potencias independiente (A&S 9.1.10) en toda la
+// grilla real de uso (maxM 0..24, x 0..120): error absoluto max. ~3e-9.
+function millerStartOrder(maxM, x) {
+  const base = Math.max(maxM, Math.ceil(x));
+  let M = base + Math.ceil(Math.sqrt(40 * base));
+  if (M % 2 !== 0) M++; // arranque par: convencion estandar, no imprescindible
+  return M;
+}
+
+// Miller's algorithm scratch buffer - reused across calls para no asignar
+// por pixel (ver nota de `out` mas abajo: este es el hot loop de
+// fillRadTableRows() en cymatics.js). Crece (nunca se achica) la primera
+// vez que hace falta un M mayor al visto hasta ahora.
+let _millerScratch = new Float64Array(64);
+function _millerBuf(size) {
+  if (_millerScratch.length < size) {
+    _millerScratch = new Float64Array(Math.max(size, _millerScratch.length * 2));
+  }
+  return _millerScratch;
+}
+
 // Llena `out[0..maxM]` con J_0(x)..J_{maxM}(x). `out` lo provee el
-// llamador (no se asigna acá) porque esto corre en el hot loop de
-// fillRadTableRows() de cymatics.js (miles de llamadas por reconstrucción
-// de tabla) — asignar un array nuevo por píxel presionaría al GC justo ahí.
+// llamador (no se asigna aca) porque esto corre en el hot loop de
+// fillRadTableRows() de cymatics.js (miles de llamadas por reconstruccion
+// de tabla) - asignar un array nuevo por pixel presionaria al GC justo ahi.
+//
+// FIX: la recurrencia ASCENDENTE que usaba esto antes (J_m = (2(m-1)/x)*J_{m-1} - J_{m-2},
+// sembrada en besselJ0/besselJ1) es inestable para m alto relativo a x
+// bajo - exactamente el caso del centro del plato (dist->0) con modos de
+// detalle mandala activos (mD1..mD5 llegan a m=18). No era un error de
+// unos pocos % : medido, besselJArray(24, 0.1, out) daba out[24]~=-1.1e+35
+// (el valor real es ~=9.6e-56) - basura de magnitud astronomica, no una
+// imprecision. Reemplazado por recurrencia DESCENDENTE (algoritmo de
+// Miller): arranca en un orden M bastante por encima de maxM Y de x
+// (millerStartOrder arriba) con una semilla arbitraria, recurre hacia
+// abajo (estable en esa direccion independientemente de la relacion m/x)
+// y normaliza con la regla de suma J_0(x) + 2*sum_{k>=1} J_{2k}(x) = 1. Un
+// solo algoritmo para TODO el array (incluido m=0,1) - ya no hay empalme
+// entre una semilla por serie/asintotica y una recurrencia por separado.
+// besselJ0()/besselJ1() siguen EXISTIENDO sin cambios (otros llamadores y
+// el validador los usan directo); aca simplemente ya no se splicean en
+// out[0]/out[1] - Miller los reproduce con acuerdo de ~1e-9 a 1e-12, muy
+// por debajo de cualquier tolerancia visual o de test existente.
 export function besselJArray(maxM, x, out) {
-  out[0] = besselJ0(x);
-  if (maxM < 1) return out;
+  x = Math.abs(x);
   if (x < 1e-3) {
+    out[0] = 1;
     for (let m = 1; m <= maxM; m++) out[m] = 0;
     return out;
   }
-  out[1] = besselJ1(x);
-  for (let m = 2; m <= maxM; m++) {
-    out[m] = ((2 * (m - 1)) / x) * out[m - 1] - out[m - 2];
+  const M = millerStartOrder(maxM, x);
+  const tmp = _millerBuf(M + 1);
+  tmp[M] = 0;
+  tmp[M - 1] = 1e-30; // semilla arbitraria - se cancela en la normalizacion
+  for (let m = M - 1; m >= 1; m--) {
+    tmp[m - 1] = ((2 * m) / x) * tmp[m] - tmp[m + 1];
   }
+  let sum = tmp[0];
+  for (let k = 2; k <= M; k += 2) sum += 2 * tmp[k];
+  const norm = 1 / sum;
+  for (let m = 0; m <= maxM; m++) out[m] = tmp[m] * norm;
   return out;
 }

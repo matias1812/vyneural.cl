@@ -18,7 +18,7 @@ import { WaveField } from '../wavefield.js';
 // esa física ya no vive ahí — se extrajo a core/plate-field.js (fuente
 // única compartida por la vista 2D, la vista 3D y este validador). Mismos
 // nombres, mismos valores; solo cambió de dónde vienen.
-import { ZP_BY_M, modeOmega, gammaAt, PHYS_A, GAMMA_MIN, GAMMA_MAX, besselJ0, besselJ1, zPrimeApprox, MORPH_BLEND_K, SLOWMO_K, selectModeWithFallback } from '../core/plate-field.js';
+import { ZP_BY_M, modeOmega, gammaAt, PHYS_A, GAMMA_MIN, GAMMA_MAX, besselJ0, besselJ1, besselJArray, zPrimeApprox, MORPH_BLEND_K, SLOWMO_K, selectModeWithFallback } from '../core/plate-field.js';
 import { G as WAVE_G, SIGMA_RHO as WAVE_SIGMA_RHO } from '../core/wave-physics.js';
 import { buildSilentWav, ANCHOR_SECONDS } from '../core/media-anchor.js';
 import {
@@ -467,6 +467,80 @@ export async function runBineuralDiagnostics() {
     }
     if (Math.abs(j1Above - j1Below) > TOL) {
       throw new Error(`besselJ1 discontinuous at x=8: J1(8-h)=${j1Below}, J1(8+h)=${j1Above}, Δ=${Math.abs(j1Above - j1Below).toExponential(2)}`);
+    }
+  });
+
+  runTest('Cymatics: besselJArray stays bounded for high order at low x (regression: upward-recurrence blow-up)', () => {
+    const maxM = 24;
+    const out = new Array(maxM + 1);
+    besselJArray(maxM, 0.1, out);
+    for (let m = 0; m <= maxM; m++) {
+      if (!isFinite(out[m])) {
+        throw new Error(`besselJArray(${maxM}, 0.1) produced non-finite out[${m}]=${out[m]}`);
+      }
+      if (Math.abs(out[m]) > 1) {
+        throw new Error(`besselJArray(${maxM}, 0.1)[${m}] = ${out[m]}, exceeds the physical bound |J_m(x)|<=1`);
+      }
+    }
+    if (Math.abs(out[24]) > 1e-20) {
+      throw new Error(`besselJArray(24, 0.1)[24] = ${out[24]}, expected a vanishingly small value (true J_24(0.1)~9.6e-56)`);
+    }
+  });
+
+  function jSeriesReference(m, x, terms = 60) {
+    const halfX = x / 2;
+    let sum = 0;
+    let k0fact = 1;
+    let mkFact = (() => { let r = 1; for (let i = 2; i <= m; i++) r *= i; return r; })();
+    for (let k = 0; k < terms; k++) {
+      const sign = k % 2 === 0 ? 1 : -1;
+      sum += (sign * Math.pow(halfX, 2 * k + m)) / (k0fact * mkFact);
+      k0fact *= k + 1;
+      mkFact *= m + k + 1;
+    }
+    return sum;
+  }
+  runTest('Cymatics: besselJArray matches an independent power-series reference for m up to 6 at moderate x', () => {
+    const CASES = [
+      [0, 10], [1, 10], [2, 10], [4, 10], [6, 10], [6, 15],
+    ];
+    for (const [m, x] of CASES) {
+      const maxM = Math.max(m, 2);
+      const out = new Array(maxM + 1);
+      besselJArray(maxM, x, out);
+      const want = jSeriesReference(m, x);
+      const got = out[m];
+      if (Math.abs(got - want) > 1e-8) {
+        throw new Error(`besselJArray(${maxM}, ${x})[${m}] = ${got}, independent series reference = ${want}, delta=${Math.abs(got - want).toExponential(2)}`);
+      }
+    }
+  });
+
+  runTest('Cymatics: besselJArray output satisfies the adjacent-order recurrence identity across the real operating range', () => {
+    const maxM = 24;
+    const out = new Array(maxM + 1);
+    const xs = [0.05, 0.5, 1, 3, 7.9, 8.1, 10, 20, 35.7, 60, 80, 112.8];
+    for (const x of xs) {
+      besselJArray(maxM, x, out);
+      for (let m = 1; m < maxM; m++) {
+        const lhs = out[m - 1] + out[m + 1];
+        const rhs = (2 * m) / x * out[m];
+        if (Math.abs(lhs - rhs) > 1e-6) {
+          throw new Error(`Recurrence identity fails at x=${x}, m=${m}: J${m - 1}+J${m + 1}=${lhs}, (2m/x)J${m}=${rhs}, delta=${Math.abs(lhs - rhs).toExponential(2)}`);
+        }
+      }
+    }
+  });
+
+  runTest('Cymatics: besselJArray[0]/[1] still match besselJ0/besselJ1 directly after the Miller rewrite', () => {
+    const xs = [0.01, 3, 7.9999, 8.0001, 10, 50, 112];
+    for (const x of xs) {
+      const out = new Array(3);
+      besselJArray(2, x, out);
+      const dJ0 = Math.abs(out[0] - besselJ0(x));
+      const dJ1 = Math.abs(out[1] - besselJ1(x));
+      if (dJ0 > 1e-4) throw new Error(`besselJArray[0](${x})=${out[0]} vs besselJ0(${x})=${besselJ0(x)}, delta=${dJ0.toExponential(2)}`);
+      if (dJ1 > 1e-4) throw new Error(`besselJArray[1](${x})=${out[1]} vs besselJ1(${x})=${besselJ1(x)}, delta=${dJ1.toExponential(2)}`);
     }
   });
 
@@ -2454,6 +2528,31 @@ export async function runBineuralDiagnostics() {
       globalThis.window.AudioContext = saved;
     }
   };
+
+  runTest('Audio: ensure() reports AUDIO_UNSUPPORTED without partially initializing the engine', () =>
+    withFakeWindow(() => {
+      const savedAudioContext = window.AudioContext;
+      const savedWebkitAudioContext = window.webkitAudioContext;
+      try {
+        window.AudioContext = undefined;
+        window.webkitAudioContext = undefined;
+        const engine = new BinauralEngine();
+        let error;
+        try {
+          engine.ensure();
+        } catch (caught) {
+          error = caught;
+        }
+        if (!error || !error.message.includes('AUDIO_UNSUPPORTED')) {
+          throw new Error(`ensure() must throw AUDIO_UNSUPPORTED, got ${error}`);
+        }
+        if (engine.ctx !== null) throw new Error('ensure() must leave engine.ctx null when audio is unsupported');
+      } finally {
+        window.AudioContext = savedAudioContext;
+        window.webkitAudioContext = savedWebkitAudioContext;
+      }
+    }),
+  );
 
   runTest('P1: start() duplicado → 1 pipeline, 1 set de fuentes (doble start §3)', () =>
     withFakeWindow(() => {
