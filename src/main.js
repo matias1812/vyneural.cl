@@ -821,7 +821,7 @@ const GOALS = [
   { id: 'relajarse', label: 'Relajarse', emoji: '🌿', stateIds: ['relajacion', 'calma', 'armonia', 'despertar'], tagline: 'Suelta el estrés' },
   { id: 'concentrarse', label: 'Concentrarse', emoji: '🧠', stateIds: ['concentracion', 'energia', 'creatividad', 'lucidez', 'alerta', 'foco', 'vitalidad', 'estudio'], tagline: 'Foco y productividad' },
   { id: 'aprender', label: 'Aprender', emoji: '📚', stateIds: ['aprendizaje', 'memoria', 'vision', 'gamma-60', 'gamma-100'], tagline: 'Memoria y retención' },
-  { id: 'especiales', label: 'Especiales', emoji: '✨', stateIds: ['schumann', 'schumann-armonico', 'solfeggio963', 'personalizado'], tagline: 'Resonancias únicas y a tu medida' },
+  { id: 'especiales', label: 'Especiales', emoji: '✨', stateIds: ['schumann', 'schumann-armonico', 'solfeggio396', 'solfeggio417', 'solfeggio528', 'solfeggio639', 'solfeggio741', 'solfeggio852', 'solfeggio963', 'personalizado'], tagline: 'Resonancias únicas y a tu medida' },
 ];
 const goalOf = (s) => GOALS.find((g) => g.stateIds.includes(s.id)) || GOALS[1];
 
