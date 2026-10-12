@@ -97,5 +97,4 @@ export function initOnboardingFlow() {
   // src/platform/google-play-redeem.js. Acá cubre volver del task switcher
   // tras completar sesiones mientras la app estaba en segundo plano.
   document.addEventListener('vyneural:resumed', evaluateOnboarding);
-  if (getAccessToken()) evaluateOnboarding();
 }
