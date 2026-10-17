@@ -4125,14 +4125,21 @@ function refreshAlarmPerm() {
     }
     if (np === 'GRANTED') {
       const ch = info ? info.alarmChannel : null;
-      const importanceDegraded = !!(ch && ch.exists && typeof ch.importance === 'number' && ch.importance < 4);
+      const usedAlarmsBefore = !!(ch && ch.exists); // mismo proxy que degraded-alarm-banner.js: el canal se crea al usar la primera alarma
+      const importanceDegraded = !!(usedAlarmsBefore && typeof ch.importance === 'number' && ch.importance < 4);
+      // Bug real (2026-10-17): exact alarms es un permiso de SISTEMA
+      // (requiere concesión manual desde Android 13+, no se pide solo), no
+      // depende de si esta persona usó alarmas antes — sin este gate daba
+      // "!" en la campana para CUALQUIER instalación nueva apenas se
+      // concedía el permiso de notificaciones, sin ninguna alarma creada.
+      const exactMissing = usedAlarmsBefore && exact === false;
       if (importanceDegraded) {
         alarmPerm.textContent =
           '⚠️ Las alarmas están silenciadas: Android bajó el aviso de este canal sin avisarte (pasa si se descartan notificaciones sin abrirlas). Arreglalo desde Permisos de la web.';
       } else {
         alarmPerm.textContent = '✅ Notificaciones de Android activadas: la alarma avisa aunque la app esté cerrada.';
       }
-      setAlarmTroubleshootIssue(exact === false || importanceDegraded);
+      setAlarmTroubleshootIssue(exactMissing || importanceDegraded);
       return;
     }
     alarmPerm.textContent = '🔔 Al guardar, te pediremos permiso de notificaciones en Android.';
