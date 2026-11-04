@@ -17,9 +17,9 @@ class AlarmReceiver : BroadcastReceiver() {
         if (!action.startsWith(ACTION_PREFIX)) return
         val id = action.removePrefix(ACTION_PREFIX)
         val prefs = context.getSharedPreferences("bineural_alarms", Context.MODE_PRIVATE)
-        val record = runCatching {
-            JSONObject(prefs.getString(id, "{}") ?: "{}")
-        }.getOrNull() ?: return
+        val raw = prefs.getString(id, null) ?: return
+        val record = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        if (record.optLong("at") > System.currentTimeMillis()) return
         NotificationHelper.showAlarm(
             context,
             record.optString("title", "Vyneural"),
@@ -40,9 +40,6 @@ class AlarmReceiver : BroadcastReceiver() {
             snoozeEnabled = record.optBoolean("snoozeEnabled", false),
             snoozeMinutes = record.optInt("snoozeMinutes", 5),
         )
-        // Límite de sonido sin respuesta: si nadie toca/descarta la alarma, se
-        // silencia sola a los AlarmScheduler.ALARM_RING_LIMIT_MS (AlarmSilenceReceiver).
-        AlarmScheduler(context).scheduleSilence(id)
         // P5 — rutina: si la alarma tiene días de repetición, se reprograma a la
         // PRÓXIMA ocurrencia (misma hora, próximo día del patrón). Si no, se
         // consume (una sola vez).

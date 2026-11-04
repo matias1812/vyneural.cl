@@ -218,7 +218,7 @@ export class BinauralEngine {
       this._wave === wave &&
       this._condition === cond
     ) {
-      this._volume = volume;
+      if (this._volume !== volume) this.setVolume(volume);
       // P5.6 — en APK (platformMuted) un start duplicado jamás re-produce el
       // elemento web: el SO ya ve la reproducción del servicio nativo.
       if (!this._platformMuted && this.transport && this.transport.element && this.transport.element.paused) {
@@ -679,7 +679,6 @@ export class BinauralEngine {
   stop(fade = true) {
     if (!this.ctx || !this._playing) return;
     const nodes = [this.leftOsc, this.rightOsc, this.amLfo, this.amGain];
-    if (this.transport) this.transport.pause();
     const now = this.ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
     this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
@@ -697,8 +696,13 @@ export class BinauralEngine {
     // antes de matar las fuentes: cortarlas al instante cortaría el fade), pero
     // los nodos se REGISTRAN: un start() posterior ejecuta _flushPendingTeardown()
     // de forma síncrona y no existe ventana de doble pipeline.
-    this._pendingTeardown = nodes.filter(Boolean);
-    setTimeout(() => this._flushPendingTeardown(), fade ? 1100 : 80);
+    const pendingTeardown = nodes.filter(Boolean);
+    this._pendingTeardown = pendingTeardown;
+    setTimeout(() => {
+      if (this._pendingTeardown !== pendingTeardown) return;
+      this.transport?.pause();
+      this._flushPendingTeardown();
+    }, fade ? 1100 : 80);
   }
 
   stopInstant() {

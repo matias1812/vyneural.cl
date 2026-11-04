@@ -22,21 +22,17 @@ import kotlin.math.sin
 class BinauralToneEngine {
     private val sampleRate = 44100
     private val blockSamples = 2048
-    private val base = AtomicReference(220.0)
-    private val beat = AtomicReference(6.0)
-    private val targetBase = AtomicReference(220.0)
-    private val targetBeat = AtomicReference(6.0)
+    private val targetFrequencies = AtomicReference(220.0 to 6.0)
     private val gain = AtomicReference(0.0)
     private val targetGain = AtomicReference(0.6)
     private val volume = AtomicReference(0.6)
     private val wave = AtomicReference(0) // 0 sine · 1 triangle · 2 sawtooth · 3 square
     private val playing = AtomicBoolean(false)
-    private val trackStarted = AtomicBoolean(false)
-    private var phaseL = 0.0
-    private var phaseR = 0.0
     @Volatile private var track: AudioTrack? = null
-    private var thread: Thread? = null
+    private var paused = false
+    private var ducked = false
 
+    @Synchronized
     fun start() {
         // Bug real reportado en vivo: "el botón play no funciona" (solo
         // pausa). Causa: pause() SOLO baja targetGain a 0 — nunca pone
@@ -50,32 +46,46 @@ class BinauralToneEngine {
         // porque SIEMPRE llama resume() después — start() ahora hace lo
         // mismo para cualquier llamador, así deja de depender de que cada
         // caller recuerde encadenar resume().
-        if (playing.getAndSet(true)) {
-            targetGain.set(volume.get())
+        if (playing.get()) {
+            resume()
             return
         }
-        if (track == null) track = createTrack()
-        trackStarted.set(false)
-        thread = Thread({ runLoop() }, "bineural-audio").apply { start() }
+        val newTrack = createTrack()
+        gain.set(0.0)
+        paused = false
+        ducked = false
+        updateTargetGain()
+        track = newTrack
+        playing.set(true)
+        Thread({ runLoop(newTrack) }, "bineural-audio").start()
     }
 
+    @Synchronized
     fun pause() {
-        targetGain.set(0.0)
+        paused = true
+        updateTargetGain()
     }
 
+    @Synchronized
     fun resume() {
-        if (playing.get()) targetGain.set(volume.get())
+        if (!playing.get()) return
+        paused = false
+        updateTargetGain()
     }
 
     /** Nivel de volumen de la sesión (0..1); se aplica al reanudar/retomar. */
+    @Synchronized
     fun setVolume(level: Double) {
+        if (!level.isFinite()) return
         volume.set(level.coerceIn(0.0, 1.0))
-        if (playing.get()) targetGain.set(level.coerceIn(0.0, 1.0))
+        updateTargetGain()
     }
 
     fun retune(newBase: Double, newBeat: Double) {
-        targetBase.set(newBase)
-        targetBeat.set(newBeat)
+        if (!newBase.isFinite() || !newBeat.isFinite() ||
+            newBase <= 0.0 || newBeat < 0.0 || newBase + newBeat >= sampleRate / 2.0
+        ) return
+        targetFrequencies.set(newBase to newBeat)
     }
 
     /** Forma de onda: sine / triangle / sawtooth / square (mismo set que la web). */
@@ -89,39 +99,67 @@ class BinauralToneEngine {
         wave.set(w)
     }
 
-    private fun waveform(phase: Double, type: Int): Double {
+    // Suaviza el borde discontinuo en el intervalo de una muestra a cada
+    // lado del salto. Así se reduce el aliasing de cuadrada y diente de sierra.
+    private fun polyBlep(phase: Double, step: Double): Double {
+        if (phase < step) {
+            val x = phase / step
+            return 2 * x - x * x - 1
+        }
+        if (phase > 1 - step) {
+            val x = (phase - 1) / step
+            return x * x + 2 * x + 1
+        }
+        return 0.0
+    }
+
+    private fun waveform(phase: Double, step: Double, type: Int): Double {
         return when (type) {
             1 -> { // triangle
-                val p = phase / (2 * PI)
-                2.0 * kotlin.math.abs(2.0 * (p - kotlin.math.floor(p + 0.5))) - 1.0
+                2.0 * kotlin.math.abs(2.0 * (phase - kotlin.math.floor(phase + 0.5))) - 1.0
             }
             2 -> { // sawtooth
-                val p = phase / (2 * PI)
-                2.0 * (p - kotlin.math.floor(p + 0.5))
+                val shifted = if (phase < 0.5) phase + 0.5 else phase - 0.5
+                2.0 * shifted - 1.0 - polyBlep(shifted, step)
             }
-            3 -> if (phase % (2 * PI) < PI) 1.0 else -1.0 // square
-            else -> sin(phase) // sine
+            3 -> {
+                val shifted = if (phase < 0.5) phase + 0.5 else phase - 0.5
+                val square = if (phase < 0.5) 1.0 else -1.0
+                square + polyBlep(phase, step) - polyBlep(shifted, step)
+            }
+            else -> sin(2 * PI * phase)
         }
     }
 
     /** Audio focus: duck baja el volumen sin cortar; restore lo recupera. */
+    @Synchronized
     fun duck(down: Boolean) {
-        targetGain.set(if (down) 0.12 else volume.get())
+        ducked = down
+        updateTargetGain()
     }
 
+    private fun updateTargetGain() {
+        targetGain.set(when {
+            paused -> 0.0
+            ducked -> minOf(volume.get(), 0.12)
+            else -> volume.get()
+        })
+    }
+
+    @Synchronized
     fun stop() {
         if (!playing.getAndSet(false)) return
         targetGain.set(0.0)
-        trackStarted.set(false)
-        try {
-            track?.stop()
-        } catch (_: Exception) {
-        }
-        try {
-            track?.release()
-        } catch (_: Exception) {
-        }
+        val stoppedTrack = track
         track = null
+        try {
+            stoppedTrack?.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            stoppedTrack?.release()
+        } catch (_: Exception) {
+        }
     }
 
     fun isPlaying(): Boolean = playing.get() && gain.get() > 0.01
@@ -150,57 +188,57 @@ class BinauralToneEngine {
             .build()
     }
 
-    private fun runLoop() {
+    private fun runLoop(tr: AudioTrack) {
         val samples = ShortArray(blockSamples * 2)
         val dt = 1.0 / sampleRate
-        while (playing.get()) {
-            val tr = track ?: break
-            // P2 — bug real encontrado en emulador: en MODE_STREAM el AudioTrack
-            // queda idle y write() bloquea para siempre si nunca se llama a
-            // play(). Sin esto el motor nativo compilaba pero JAMÁS sonaba.
-            if (!trackStarted.getAndSet(true)) {
-                try {
-                    tr.play()
-                } catch (_: Exception) {
-                    /* emulador/dispositivo sin salida de audio */
+        var phaseL = 0.0
+        var phaseR = 0.0
+        var (f1, bt) = targetFrequencies.get()
+        var currentGain = 0.0
+        var previousWave = wave.get()
+        try {
+            if (track !== tr) return
+            tr.play()
+            while (track === tr) {
+                val (targetBase, targetBeat) = targetFrequencies.get()
+                f1 += (targetBase - f1) * 0.05
+                bt += (targetBeat - bt) * 0.05
+                val f2 = f1 + bt
+                val stepL = f1 * dt
+                val stepR = f2 * dt
+                val previousGain = currentGain
+                currentGain += (targetGain.get() - previousGain) * 0.05
+                val wv = wave.get()
+                for (i in samples.indices step 2) {
+                    val blend = (i + 2).toDouble() / samples.size
+                    val amp = (previousGain + (currentGain - previousGain) * blend) * 32767 * 0.6
+                    phaseL += stepL
+                    phaseR += stepR
+                    if (phaseL >= 1.0) phaseL -= 1.0
+                    if (phaseR >= 1.0) phaseR -= 1.0
+                    val left = waveform(phaseL, stepL, wv)
+                    val right = waveform(phaseR, stepR, wv)
+                    val leftSample = if (previousWave == wv) left else waveform(phaseL, stepL, previousWave) * (1 - blend) + left * blend
+                    val rightSample = if (previousWave == wv) right else waveform(phaseR, stepR, previousWave) * (1 - blend) + right * blend
+                    samples[i] = (leftSample * amp).toInt().toShort()
+                    samples[i + 1] = (rightSample * amp).toInt().toShort()
                 }
-            }
-            val f1 = base.get() + (targetBase.get() - base.get()) * 0.05
-            val bt = beat.get() + (targetBeat.get() - beat.get()) * 0.05
-            base.set(f1)
-            beat.set(bt)
-            val f2 = f1 + bt
-            val g = gain.get() + (targetGain.get() - gain.get()) * 0.05
-            gain.set(g)
-            val amp = (g * 32767 * 0.6).toInt()
-            val wv = wave.get()
-            for (i in samples.indices step 2) {
-                phaseL += 2 * PI * f1 * dt
-                phaseR += 2 * PI * f2 * dt
-                if (phaseL > 2 * PI) phaseL -= 2 * PI
-                if (phaseR > 2 * PI) phaseR -= 2 * PI
-                samples[i] = (waveform(phaseL, wv) * amp).toInt().toShort()
-                samples[i + 1] = (waveform(phaseR, wv) * amp).toInt().toShort()
-            }
-            try {
+                previousWave = wv
                 var off = 0
-                while (off < samples.size) {
+                while (track === tr && off < samples.size) {
                     val w = tr.write(samples, off, samples.size - off)
-                    if (w <= 0) {
-                        // Sin espacio/salida: dormir un poco en vez de girar en vacío.
-                        Thread.sleep(2)
-                        break
-                    }
+                    if (w < 0) return
+                    if (w == 0) Thread.sleep(2)
                     off += w
                 }
-            } catch (_: Exception) {
-                break
+                if (track === tr) gain.set(currentGain)
+            }
+        } catch (_: Exception) {
+            // El sistema puede cerrar la salida mientras hay un write activo.
+        } finally {
+            synchronized(this) {
+                if (track === tr) stop()
             }
         }
-        try {
-            track?.stop()
-        } catch (_: Exception) {
-        }
-        trackStarted.set(false)
     }
 }

@@ -12,11 +12,7 @@ import android.content.Intent
 class AlarmSyncReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == AlarmSync.ACTION_SYNC) {
-            val result = goAsync()
             AlarmSync.run(context)
-            // El ciclo es asíncrono (Thread en AlarmSync); el resultado del
-            // broadcast no cambia nada crítico, así que se libera de inmediato.
-            result.finish()
         }
     }
 }

@@ -95,7 +95,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-function mergedCapabilities() {
+function mergedCapabilities(native = nativeBridge.getState()) {
   return mergePlatformCapabilities({
     web: probeCapabilities({
       notificationSupported: notificationSupported(),
@@ -108,7 +108,7 @@ function mergedCapabilities() {
       pushConfigured: !!(getCachedPushStatus() && getCachedPushStatus().configured),
       iosNeedsInstall: iosNeedsInstall(),
     }),
-    native: nativeBridge.getState(),
+    native,
     env: { ua: navigator.userAgent, bridgePresent: nativeBridge.present },
   });
 }
@@ -188,7 +188,8 @@ function renderPermissionState() {
   const permEnabled = document.getElementById('perm-enabled');
   const permNote = document.getElementById('perm-note');
   if (!permNotif) return;
-  const caps = mergedCapabilities();
+  const native = nativeBridge.getState();
+  const caps = mergedCapabilities(native);
   const notifPerm = caps.notifications.permission;
   const isNative = caps.native;
   permNotif.textContent = caps.notifications.label;
@@ -244,11 +245,12 @@ function renderPermissionState() {
         : dndNeedsSetup
           ? 'Permitir alarma en No Molestar'
           : importanceDegraded
-            ? '⚠️ Las alarmas están silenciadas — tocá para arreglarlo'
+            ? 'Revisar prioridad del canal de alarmas'
             : 'Revisar sonido/vibración de alarma';
     btnNotifSettings.classList.toggle(
       'perm-test-urgent',
-      notifPerm === 'granted' && !dndNeedsSetup && importanceDegraded,
+      notifPerm === 'granted' && !dndNeedsSetup && importanceDegraded &&
+        (native.info?.defaultAlarmCount ?? native.info?.alarmCount ?? 0) > 0,
     );
     btnNotifSettings.dataset.notifGranted = notifPerm === 'granted' ? '1' : '0';
     btnNotifSettings.dataset.dndNeedsSetup = notifPerm === 'granted' && dndNeedsSetup ? '1' : '0';

@@ -531,10 +531,12 @@ class MainActivity : ComponentActivity() {
             // (Samsung/Xiaomi/Huawei, ver docs/HARDWARE_TEST_PLAN.md H5) el
             // banner es la única red si este diálogo no alcanza a mostrarse.
             webView.postDelayed({
-                if (NotificationHelper.channelDegraded(this)) {
+                if (AlarmScheduler(this).pendingCount(defaultChannelOnly = true) > 0 &&
+                    NotificationHelper.channelDegraded(this)
+                ) {
                     AlertDialog.Builder(this)
-                        .setTitle("Las alarmas están silenciadas")
-                        .setMessage("Android bajó el aviso de las alarmas de Vyneural sin que lo pidieras. Tocá \"Revisar\" para subirlo a Alta en un toque.")
+                        .setTitle("Prioridad de las alarmas")
+                        .setMessage("El canal de alarmas de Vyneural tiene prioridad reducida. Tocá \"Revisar\" para ajustar cómo te avisa Android.")
                         .setPositiveButton("Revisar") { _, _ -> NotificationHelper.openAlarmChannelSettings(this) }
                         .setNegativeButton("Ahora no", null)
                         .show()

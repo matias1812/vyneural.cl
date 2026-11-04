@@ -95,7 +95,8 @@ class AndroidBridge(
         info.put("alarmScheduler", true)
         // P5 — conteo REAL de alarmas pendientes (las programadas en
         // AlarmManager y aún no disparadas); 0 no significa "sin función".
-        info.put("alarmCount", runCatching { scheduler.list().size }.getOrDefault(0))
+        info.put("alarmCount", scheduler.pendingCount())
+        info.put("defaultAlarmCount", scheduler.pendingCount(defaultChannelOnly = true))
         info.put("exactAlarms", scheduler.canScheduleExact())
         info.put("exactAlarmsGranted", scheduler.canScheduleExact())
         // Sin esta excepción, el ciclo de sincronización en 2.º plano
@@ -434,19 +435,17 @@ class AndroidBridge(
                     // sincronización en segundo plano (alarmas del servidor +
                     // reporte de dispositivo). Al iniciar sesión se sincroniza
                     // de inmediato, sin esperar el ciclo periódico.
-                    AuthStore.save(
+                    AlarmSync.storeAuth(
                         context,
                         payload?.optString("access_token", null),
                         payload?.optString("refresh_token", null),
                         payload?.optString("user_id", null),
                         payload?.optString("email", null),
                     )
-                    AlarmSync.run(context)
                     respond("OK", command, null)
                 }
                 "CLEAR_AUTH" -> {
-                    AuthStore.clear(context)
-                    AlarmSync.clearSynced(context)
+                    AlarmSync.clearAuth(context)
                     respond("OK", command, null)
                 }
                 "SYNC_ALARMS" -> {

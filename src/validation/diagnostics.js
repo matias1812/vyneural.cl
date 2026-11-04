@@ -10,6 +10,7 @@ import { EegInterface } from '../core/eeg.js';
 import { NeuralToVisualMapper } from '../core/visual.js';
 import { evaluateAudioHealth } from '../core/audio-health.js';
 import { ExperimentRunner, conditionProfile } from '../core/experiments.js';
+import { SimulationEngine } from '../core/simulation.js';
 import { assertValidState, assertValidNeuralState, assertValidCognitiveState, assertPhysicalFrequency } from './assert.js';
 import { getProfileById, PROFILES } from '../models/profiles.js';
 import { SimulationConfig, SimulationSeed, buildExperimentRecord, MODEL_VERSION, mulberry32 } from '../core/reproducibility.js';
@@ -1241,11 +1242,27 @@ export async function runBineuralDiagnostics() {
 
   runTest('SimulationConfig: rejects out-of-range parameters', () => {
     let threw = false;
-    try { new SimulationConfig({ beat: 0.05 }); } catch { threw = true; }
-    if (!threw) throw new Error('beat=0.05 should be rejected');
+    try { new SimulationConfig({ beat: -0.05 }); } catch { threw = true; }
+    if (!threw) throw new Error('a negative beat should be rejected');
     threw = false;
     try { new SimulationConfig({ waveform: 'superharsh' }); } catch { threw = true; }
     if (!threw) throw new Error('unknown waveform should be rejected');
+  });
+
+  runTest('SimulationEngine: conserva el estímulo efectivo desde el primer bloque', () => {
+    let started;
+    const simulation = {
+      currentProfile: PROFILES[0],
+      audio: { start: (params) => { started = params; } },
+    };
+    SimulationEngine.prototype.start.call(simulation, 210.125, { beat: 0, wave: 'triangle', volume: 0 });
+    if (started.base !== 210.125 || started.beat !== 0 || started.wave !== 'triangle' || started.volume !== 0) {
+      throw new Error('el motor recibió parámetros distintos a los de la sesión');
+    }
+    const saved = simulation.lastConfig;
+    if (saved.carrier !== started.base || saved.beat !== started.beat || saved.waveform !== started.wave) {
+      throw new Error('el registro experimental difiere de lo que reproduce el motor');
+    }
   });
 
   runTest('SimulationConfig: canonical JSON is stable regardless of key order', () => {
@@ -2654,6 +2671,34 @@ export async function runBineuralDiagnostics() {
           }, 150);
         }),
     ),
+  );
+
+  runTest('P1: un timer de parada viejo no corta el fundido de una parada nueva', () =>
+    withFakeWindow(() => {
+      const originalTimeout = globalThis.setTimeout;
+      const teardowns = [];
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        if (delay === 80 || delay === 1100) {
+          teardowns.push(callback);
+          return 0;
+        }
+        return originalTimeout(callback, delay, ...args);
+      };
+      const engine = new BinauralEngine();
+      try {
+        engine.start({ base: 200, beat: 6 });
+        engine.stop(false);
+        engine.start({ base: 240, beat: 8 });
+        const newerSource = engine.leftOsc;
+        engine.stop(true);
+        teardowns[0]();
+        if (newerSource.stopped) throw new Error('el timer anterior cortó el nuevo fundido');
+        teardowns[1]();
+        if (!newerSource.stopped) throw new Error('el nuevo timer debe liberar su propia fuente');
+      } finally {
+        globalThis.setTimeout = originalTimeout;
+      }
+    }),
   );
 
   runTest('P1: start() con parámetros distintos reconstruye SIN solape (§3)', () =>

@@ -40,6 +40,7 @@ object NotificationHelper {
     //   MainActivity.onRequestPermissionsResult que ofrece el arreglo de un
     //   toque apenas se concede el permiso.
     const val CHANNEL_ALARMS = "bineural_alarms_v12"
+    private const val CHANNEL_REMINDERS = "bineural_reminders"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
     // no mezclarse con el reproductor ni con las alarmas.
@@ -55,6 +56,9 @@ object NotificationHelper {
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_REMINDERS, "Recordatorios Vyneural", NotificationManager.IMPORTANCE_DEFAULT),
+        )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_PLAYER, "Reproductor Vyneural", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Control de la sesión en curso"
@@ -214,9 +218,12 @@ object NotificationHelper {
      *  tonos del sistema (ACTION_RINGTONE_PICKER, TYPE_ALARM) — no un
      *  catálogo fijo nuestro, así el usuario elige entre lo que YA tiene en
      *  su teléfono, sin depender de archivos de audio propios. */
+    fun usesDefaultAlarmChannel(soundUri: String?, vibrationId: String): Boolean =
+        soundUri.isNullOrBlank() && (vibrationId == "default" || vibrationId !in VIBRATIONS)
+
     fun channelFor(context: Context, soundUri: String?, vibrationId: String): String {
         val vibKey = if (VIBRATIONS.containsKey(vibrationId)) vibrationId else "default"
-        if (soundUri.isNullOrBlank() && vibKey == "default") return CHANNEL_ALARMS
+        if (usesDefaultAlarmChannel(soundUri, vibrationId)) return CHANNEL_ALARMS
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CHANNEL_ALARMS
         // Deriva del mismo CHANNEL_ALARMS de arriba (no un literal aparte) —
         // antes este prefijo estaba hardcodeado como "bineural_alarms_v9_",
@@ -341,17 +348,19 @@ object NotificationHelper {
         vibrationId: String = "default",
         snoozeEnabled: Boolean = false,
         snoozeMinutes: Int = 5,
+        notifyOnly: Boolean = false,
     ): Notification {
         ensureChannels(context)
-        val channelId = channelFor(context, soundUri, vibrationId)
+        val channelId = if (notifyOnly) CHANNEL_REMINDERS else channelFor(context, soundUri, vibrationId)
         val openIntent = Intent(context, MainActivity::class.java)
+        if (alarmId != null) openIntent.action = "com.vyneural.bineural.OPEN_ALARM.$alarmId"
         // Deep link (paridad con el Web Push, ver reminders.py:_deep_link): al
         // tocar la notificación, MainActivity abre la web en esta frecuencia
         // exacta en vez de la pantalla por defecto. Sin freq (alarma legado sin
         // config), se abre la app tal cual — comportamiento anterior intacto.
-        if (freq != null) {
+        if (freq != null && freq.isFinite() && freq > 0) {
             openIntent.putExtra(MainActivity.EXTRA_FREQ, freq)
-            if (beat != null) openIntent.putExtra(MainActivity.EXTRA_BEAT, beat)
+            if (beat != null && beat.isFinite() && beat >= 0) openIntent.putExtra(MainActivity.EXTRA_BEAT, beat)
             if (wave != null) openIntent.putExtra(MainActivity.EXTRA_WAVE, wave)
             openIntent.putExtra(MainActivity.EXTRA_AUTOSTART, true)
         }
@@ -367,7 +376,7 @@ object NotificationHelper {
             .setAutoCancel(true)
             // CATEGORY_ALARM (no REMINDER): el sistema la trata como alarma real
             // (prioridad en No molestar según la política del usuario).
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setCategory(if (notifyOnly) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_ALARM)
             // El sonido/vibración los lleva el canal (channelFor arriba,
             // inmutable al crearse): la notificación no necesita repetirlos.
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -376,7 +385,7 @@ object NotificationHelper {
         // record en SharedPreferences siga existiendo (una alarma de una
         // sola vez ya se borró de ahí en AlarmReceiver antes de que el
         // usuario llegue a tocar el botón).
-        if (snoozeEnabled && alarmId != null) {
+        if (!notifyOnly && snoozeEnabled && alarmId != null) {
             val snoozeIntent = Intent(context, AlarmSnoozeReceiver::class.java).apply {
                 putExtra("alarmId", alarmId)
                 putExtra("title", title)
@@ -396,6 +405,7 @@ object NotificationHelper {
             )
             builder.addAction(0, "Posponer $snoozeMinutes min", snoozePi)
         }
+        if (!notifyOnly && alarmId != null) builder.setTimeoutAfter(AlarmScheduler.ALARM_RING_LIMIT_MS)
         return builder.build()
     }
 
@@ -434,6 +444,7 @@ object NotificationHelper {
      *  `alarmId`: si se pasa (AlarmReceiver / VyneuralMessagingService, NO el
      *  botón de diagnóstico "Probar notificación"), deduplica contra el otro
      *  camino de entrega — ver comentario arriba. */
+    @Synchronized
     fun showAlarm(
         context: Context,
         title: String,
@@ -446,6 +457,7 @@ object NotificationHelper {
         vibrationId: String = "default",
         snoozeEnabled: Boolean = false,
         snoozeMinutes: Int = 5,
+        notifyOnly: Boolean = false,
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -460,21 +472,21 @@ object NotificationHelper {
         if (alarmId != null) markShown(context, alarmId)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         logChannelState(nm)
-        nm.notify(
-            NOTIF_ALARM,
-            alarmNotification(context, title, body, freq, beat, wave, alarmId, soundUri, vibrationId, snoozeEnabled, snoozeMinutes),
+        val notification = alarmNotification(
+            context, title, body, freq, beat, wave, alarmId, soundUri, vibrationId,
+            snoozeEnabled, snoozeMinutes, notifyOnly,
         )
+        if (alarmId != null) {
+            nm.notify(alarmId, NOTIF_ALARM, notification)
+        } else {
+            nm.notify(NOTIF_ALARM, notification)
+        }
     }
 
-    /**
-     * Cancela la notificación de alarma. La usa AlarmSilenceReceiver al vencer
-     * el límite de sonido sin respuesta (AlarmScheduler.ALARM_RING_LIMIT_MS):
-     * corta el sonido/vibración si aún suenan y limpia el sombreado. Es un
-     * no-op si el usuario ya la tocó o descartó.
-     */
-    fun cancelAlarm(context: Context) {
+    /** Cancela un aviso específico o la notificación sin etiqueta de diagnóstico. */
+    fun cancelAlarm(context: Context, alarmId: String? = null) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.cancel(NOTIF_ALARM)
+        nm.cancel(alarmId, NOTIF_ALARM)
     }
 
     /**

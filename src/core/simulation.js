@@ -53,7 +53,7 @@ export class SimulationEngine {
     this.loop();
   }
 
-  setProfile(profile, baseFreq) {
+  setProfile(profile, baseFreq, beatFreq) {
     this.currentProfile = profile;
     // Route parameters to appropriate domains
     this.neural.setProfile(profile.modelParams);
@@ -64,7 +64,7 @@ export class SimulationEngine {
     if (this.isPlaying) {
       this.audio.retune({
         base: baseFreq || profile.stimulus.carrierBase,
-        beat: profile.stimulus.beat
+        beat: beatFreq ?? profile.stimulus.beat
       });
     }
   }
@@ -93,29 +93,30 @@ export class SimulationEngine {
     console.log(`[SimulationEngine] Switched render mode to ${newMode}`);
   }
 
-  start(baseFreq) {
+  start(baseFreq, { beat, wave, volume } = {}) {
     if (!this.currentProfile) return;
     
     const params = {
       base: baseFreq || this.currentProfile.stimulus.carrierBase,
-      beat: this.currentProfile.stimulus.beat,
-      wave: this.currentProfile.stimulus.modulation,
-      volume: 0.6, // Controlled from UI elsewhere
+      beat: beat ?? this.currentProfile.stimulus.beat,
+      wave: wave ?? this.currentProfile.stimulus.modulation,
+      volume: volume ?? 0.6,
       condition: this.audio._condition || 'binaural', // condición experimental real
     };
     
-    this.audio.start(params);
-    this.isPlaying = true;
-
     // Phase 12: record the canonical config of this run (for experiment export)
-    this.lastConfig = new SimulationConfig({
+    const config = new SimulationConfig({
       carrier: params.base,
       beat: params.beat,
       waveform: params.wave,
+      condition: params.condition,
       durationSec: 0,
       volume: params.volume,
       modelParams: this.currentProfile?.modelParams ?? null,
     });
+    this.audio.start(params);
+    this.lastConfig = config;
+    this.isPlaying = true;
     
     // Link audio beat pulse to cymatics energy (perturbation model)
     this.audio.onBeatPulse = () => {
@@ -177,7 +178,7 @@ export class SimulationEngine {
 
     // 1. STIMULUS LAYER (Implicit in audio engine)
     const currentBase = this.audio._base || (this.currentProfile ? this.currentProfile.stimulus.carrierBase : 220);
-    const currentBeat = this.audio.beat || (this.currentProfile ? this.currentProfile.stimulus.beat : 0);
+    const currentBeat = this.audio.beat ?? this.currentProfile?.stimulus.beat ?? 0;
     
     // Get master volumes (assume max 1.0)
     // If we have an ambient reference, grab its master volume. Otherwise use 0.

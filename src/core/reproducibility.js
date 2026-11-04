@@ -48,8 +48,8 @@ export class SimulationSeed {
 export class SimulationConfig {
   /**
    * @param {object} p
-   * @param {number} [p.carrier=220]      Carrier frequency (Hz), 20–20000.
-   * @param {number} [p.beat=10]          Binaural beat (Δf, Hz), 0.1–40.
+   * @param {number} [p.carrier=220]      Carrier frequency (Hz), 1–20000.
+   * @param {number} [p.beat=10]          Binaural beat (Δf, Hz), 0–500.
    * @param {string} [p.waveform='sine']  Oscillator waveform.
    * @param {string} [p.condition='binaural']  Experimental condition label.
    * @param {number} [p.durationSec=300]  Planned session duration (seconds), >= 0.
@@ -65,8 +65,8 @@ export class SimulationConfig {
     volume = 0.6,
     modelParams = null,
   } = {}) {
-    this.carrier = SimulationConfig._validateNum('carrier', carrier, 20, 20000);
-    this.beat = SimulationConfig._validateNum('beat', beat, 0.1, 40);
+    this.carrier = SimulationConfig._validateNum('carrier', carrier, 1, 20000);
+    this.beat = SimulationConfig._validateNum('beat', beat, 0, 500);
     if (!WAVEFORMS.includes(waveform)) {
       throw new Error(`[CONFIG] waveform "${waveform}" not in ${WAVEFORMS.join(', ')}`);
     }

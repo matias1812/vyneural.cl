@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">Vyneural</string>
+    <!-- Meta Android SDK (App Events): habilita el evento de instalación/
+         activación que necesita Ads Manager para atribuir instalaciones a
+         la campaña de lanzamiento. App ID y client token son públicos por
+         diseño (vienen embebidos en cualquier cliente), nunca la app secret. -->
+    <string name="facebook_app_id">2316571252476586</string>
+    <string name="facebook_client_token">369a846a1a69efd86c53ca3ac0061bbe</string>
 </resources>

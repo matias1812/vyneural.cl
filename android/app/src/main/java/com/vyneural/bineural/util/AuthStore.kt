@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.util.Base64
+import java.util.UUID
+import org.json.JSONObject
 
 /**
  * Sesión guardada por el WebView vía bridge (STORE_AUTH/CLEAR_AUTH) para que
@@ -73,7 +76,17 @@ object AuthStore {
     fun refreshToken(context: Context): String? =
         prefs(context)?.getString("refresh_token", null)?.takeIf { it.isNotBlank() }
 
-    fun userId(context: Context): String? = prefs(context)?.getString("user_id", null)
+    // TokenPair does not include user_id on older web builds. Read the
+    // subject of the stored access token for local notification routing.
+    // The backend still validates the token for every authenticated request.
+    fun accountId(accessToken: String?): String? = runCatching {
+        val payload = accessToken?.split('.')?.getOrNull(1) ?: return null
+        val claims = JSONObject(String(Base64.getUrlDecoder().decode(payload), Charsets.UTF_8))
+        UUID.fromString(claims.getString("sub")).toString()
+    }.getOrNull()
+
+    fun userId(context: Context): String? =
+        accountId(token(context)) ?: prefs(context)?.getString("user_id", null)
 
     fun email(context: Context): String? = prefs(context)?.getString("email", null)
 

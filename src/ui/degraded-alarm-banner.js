@@ -9,16 +9,11 @@
 // de alarmas del reproductor, nunca se entera de que sus alarmas quedaron
 // mudas — este banner se muestra solo con abrir cualquier página de la app.
 //
-// Ampliado para cubrir TODAS las causas reales ya diagnosticadas en
-// permissions-modal.js (misma cascada de prioridad, no reimplementada a
-// mano): permiso de notificaciones revocado, sin bypass de No Molestar,
-// canal degradado, alarmas exactas revocadas, optimización de batería activa.
+// Detecta permiso de notificaciones revocado, prioridad reducida del
+// canal predeterminado y falta de autorización para alarmas exactas.
 //
-// Gate: solo se evalúa si el canal de alarma ya existe (caps.alarmChannel.
-// supported) — se crea recién al usar la primera alarma, así que esto es
-// proxy de "esta persona ya configuró alarmas antes" y evita mostrar un
-// aviso de "algo se rompió" a quien todavía no usó la función (para eso ya
-// está el onboarding normal de permisos, no un banner de alarma).
+// El canal se crea al iniciar la app. Solo las alarmas futuras del
+// programador nativo justifican un aviso proactivo.
 
 import { probeCapabilities } from '../core/capabilities.js';
 import { mergePlatformCapabilities } from '../platform/platform-capabilities.js';
@@ -55,21 +50,20 @@ function nativeAudio() {
   return null;
 }
 
-function mergedCaps() {
+function mergedCaps(native) {
   return mergePlatformCapabilities({
     web: probeCapabilities({}),
-    native: nativeBridge.getState(),
+    native,
     env: { ua: navigator.userAgent, bridgePresent: nativeBridge.present },
   });
 }
 
-// MISMA cascada de prioridad que permissions-modal.js (línea ~229-252): no
-// reimplementada, solo se traduce a un único aviso proactivo con su acción.
 function detectIssue() {
   const b = nativeAudio();
   if (!b) return null;
-  const caps = mergedCaps();
-  if (!caps.alarmChannel.supported) return null; // nunca usó alarmas — nada que degradar
+  const native = b.getState();
+  if (!(native.info?.alarmCount > 0)) return null;
+  const caps = mergedCaps(native);
 
   const notifPerm = caps.notifications.permission;
   if (notifPerm && notifPerm !== 'granted' && notifPerm !== 'not_requested') {
@@ -78,25 +72,19 @@ function detectIssue() {
       fix: () => b.openNotificationSettings && b.openNotificationSettings(),
     };
   }
-  const dndNeedsSetup = caps.alarmChannel.supported && !caps.alarmChannel.dndBypassGranted;
-  if (dndNeedsSetup) {
-    return {
-      text: '⚠️ Tus alarmas pueden no sonar en modo No Molestar.',
-      fix: () => b.openDndAccessSettings && b.openDndAccessSettings(),
-    };
-  }
   // MainActivity.onRequestPermissionsResult (Kotlin) también reacciona a esta
   // MISMA señal con un diálogo nativo, a propósito y sin coordinarse con este
   // banner: ese diálogo cubre solo el instante justo tras conceder el
   // permiso; este banner cubre cualquier degradación posterior (por eso el
   // re-chequeo en visibilitychange abajo). Ver docs/NOTIFICATION_CHANNEL_HISTORY.md.
   const importanceDegraded =
+    (native.info.defaultAlarmCount ?? native.info.alarmCount) > 0 &&
     caps.alarmChannel.supported &&
     typeof caps.alarmChannel.importance === 'number' &&
     caps.alarmChannel.importance < 4;
   if (importanceDegraded) {
     return {
-      text: '⚠️ Las alarmas de Vyneural están silenciadas en este teléfono.',
+      text: '⚠️ El canal de alarmas de Vyneural tiene prioridad reducida.',
       fix: () => b.openAlarmChannelSettings && b.openAlarmChannelSettings(),
     };
   }
@@ -104,12 +92,6 @@ function detectIssue() {
     return {
       text: '⚠️ Las alarmas exactas fueron desautorizadas — pueden llegar tarde o no llegar.',
       fix: () => b.requestExactAlarmPermission && b.requestExactAlarmPermission(),
-    };
-  }
-  if (caps.batteryUnrestricted.supported && !caps.batteryUnrestricted.granted) {
-    return {
-      text: '⚠️ La optimización de batería puede impedir que tus alarmas suenen.',
-      fix: () => b.requestIgnoreBatteryOptimizations && b.requestIgnoreBatteryOptimizations(),
     };
   }
   // NO agregar una rama para caps.autostartGuidance acá — se probó y se
@@ -181,4 +163,5 @@ export function initDegradedAlarmBanner() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) refreshDegradedAlarmBanner();
   });
+  window.addEventListener('vyneural:resumed', refreshDegradedAlarmBanner);
 }

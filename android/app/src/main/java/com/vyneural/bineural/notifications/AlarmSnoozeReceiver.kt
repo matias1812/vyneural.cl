@@ -25,9 +25,9 @@ class AlarmSnoozeReceiver : BroadcastReceiver() {
         val soundUri = intent.getStringExtra("soundUri")
         val vibrationId = intent.getStringExtra("vibrationId") ?: "default"
 
-        NotificationHelper.cancelAlarm(context)
+        NotificationHelper.cancelAlarm(context, alarmId)
         AlarmScheduler(context).schedule(
-            alarmId,
+            "snooze-${java.util.UUID.randomUUID()}",
             title,
             body,
             System.currentTimeMillis() + snoozeMinutes * 60_000L,

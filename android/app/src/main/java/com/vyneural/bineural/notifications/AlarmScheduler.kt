@@ -5,7 +5,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import java.util.Calendar
+import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneId
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -57,6 +59,8 @@ class AlarmScheduler(private val context: Context) {
         snoozeEnabled: Boolean = false,
         snoozeMinutes: Int = 5,
         localId: String? = null,
+        timezone: String? = null,
+        localTime: String? = null,
     ) {
         val record = JSONObject()
             .put("title", title)
@@ -81,16 +85,19 @@ class AlarmScheduler(private val context: Context) {
         // frecuencia exacta en vez de la pantalla por defecto (ver AlarmReceiver
         // + NotificationHelper). Opcional: alarmas sin config (legado) siguen
         // funcionando, solo sin deep link.
-        if (freq != null) record.put("freq", freq)
-        if (beat != null) record.put("beat", beat)
+        if (freq != null && freq.isFinite() && freq > 0) record.put("freq", freq)
+        if (beat != null && beat.isFinite() && beat >= 0) record.put("beat", beat)
         if (wave != null) record.put("wave", wave)
         if (days != null && days.isNotEmpty()) {
             record.put("days", JSONArray(days))
             // Se guarda la hora del día (local) para recalcular la próxima
             // ocurrencia cuando la alarma se dispare o tras un reinicio.
-            val cal = Calendar.getInstance().apply { timeInMillis = atMs }
-            record.put("hh", cal.get(Calendar.HOUR_OF_DAY))
-            record.put("mm", cal.get(Calendar.MINUTE))
+            val zone = alarmZone(timezone)
+            val time = localTime?.let { runCatching { LocalTime.parse(it) }.getOrNull() }
+                ?: Instant.ofEpochMilli(atMs).atZone(zone).toLocalTime()
+            record.put("hh", time.hour)
+            record.put("mm", time.minute)
+            if (timezone != null) record.put("timezone", zone.id)
         }
         prefs.edit().putString(alarmId, record.toString()).apply()
 
@@ -103,10 +110,14 @@ class AlarmScheduler(private val context: Context) {
 
         val pi = pendingIntent(alarmId)
         if (canScheduleExact()) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, pi)
-        } else {
-            am.setWindow(AlarmManager.RTC_WAKEUP, atMs, 60_000L, pi)
+            try {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMs, pi)
+                return
+            } catch (_: SecurityException) {
+                // El permiso puede cambiar entre la lectura y la programación.
+            }
         }
+        am.setWindow(AlarmManager.RTC_WAKEUP, atMs, 60_000L, pi)
     }
 
     fun cancel(alarmId: String) {
@@ -115,20 +126,8 @@ class AlarmScheduler(private val context: Context) {
         cancelSilence(alarmId)
     }
 
-    /**
-     * Programa el SILENCIO automático de la alarma en ALARM_RING_LIMIT_MS:
-     * lo llama AlarmReceiver al disparar. El PendingIntent es por alarma
-     * (acción SILENCE_ALARM_<id>) y se reemplaza en cada disparo (un nuevo
-     * disparo resetea el plazo). Se usa RTC sin wake: el sonido ya ocurrió;
-     * si el equipo duerme, la notificación se limpia al despertar.
-     */
-    fun scheduleSilence(alarmId: String) {
-        val at = System.currentTimeMillis() + ALARM_RING_LIMIT_MS
-        am.set(AlarmManager.RTC, at, silencePendingIntent(alarmId))
-    }
-
-    /** Cancela un silencio pendiente (p. ej. al cancelar la alarma). */
-    fun cancelSilence(alarmId: String) {
+    /** Cancela un silencio programado por una versión anterior de la app. */
+    private fun cancelSilence(alarmId: String) {
         am.cancel(silencePendingIntent(alarmId))
     }
 
@@ -144,6 +143,19 @@ class AlarmScheduler(private val context: Context) {
     }
 
     fun list(): List<String> = prefs.all.keys.toList()
+
+    fun pendingCount(defaultChannelOnly: Boolean = false): Int {
+        val now = System.currentTimeMillis()
+        return prefs.all.values.count { raw ->
+            runCatching {
+                val record = JSONObject(raw as String)
+                record.optLong("at") > now && (!defaultChannelOnly || NotificationHelper.usesDefaultAlarmChannel(
+                    record.optString("soundUri"),
+                    record.optString("vibrationId", "default"),
+                ))
+            }.getOrDefault(false)
+        }
+    }
 
     fun nextAt(): Long? =
         prefs.all.values.mapNotNull { raw ->
@@ -163,7 +175,8 @@ class AlarmScheduler(private val context: Context) {
         val mm = j.optInt("mm", -1)
         if (days != null && days.length() > 0 && hh >= 0 && mm >= 0) {
             val dayList = (0 until days.length()).map { days.optInt(it) }
-            val next = nextOccurrence(hh, mm, dayList, System.currentTimeMillis() + 60_000)
+            val timezone = j.optString("timezone").ifBlank { null }
+            val next = nextOccurrence(hh, mm, dayList, System.currentTimeMillis() + 60_000, timezone)
             if (next != null) {
                 schedule(
                     alarmId,
@@ -179,6 +192,8 @@ class AlarmScheduler(private val context: Context) {
                     j.optBoolean("snoozeEnabled", false),
                     j.optInt("snoozeMinutes", 5),
                     j.optString("localId").takeIf { it.isNotBlank() },
+                    timezone,
+                    LocalTime.of(hh, mm).toString(),
                 )
             } else {
                 prefs.edit().remove(alarmId).apply()
@@ -189,19 +204,19 @@ class AlarmScheduler(private val context: Context) {
     }
 
     /** Próxima fecha ≥ fromMs cuyo día de la semana esté en [days] a las hh:mm. */
-    fun nextOccurrence(hh: Int, mm: Int, days: List<Int>, fromMs: Long): Long? {
-        if (days.isEmpty()) return null
-        val cal = Calendar.getInstance().apply { timeInMillis = fromMs }
+    private fun alarmZone(timezone: String?): ZoneId =
+        timezone?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.systemDefault()
+
+    private fun nextOccurrence(hh: Int, mm: Int, days: List<Int>, fromMs: Long, timezone: String?): Long? {
+        if (days.isEmpty() || hh !in 0..23 || mm !in 0..59) return null
+        val zone = alarmZone(timezone)
+        val from = Instant.ofEpochMilli(fromMs)
+        val startDate = from.atZone(zone).toLocalDate()
         for (i in 0..8) {
-            // Calendar.DAY_OF_WEEK: 1=domingo … 7=sábado → jsDay = dow - 1 (0=domingo).
-            if (days.contains(cal.get(Calendar.DAY_OF_WEEK) - 1)) {
-                val cand = Calendar.getInstance().apply {
-                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), hh, mm, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-                if (cand.timeInMillis >= fromMs) return cand.timeInMillis
-            }
-            cal.add(Calendar.DAY_OF_YEAR, 1)
+            val date = startDate.plusDays(i.toLong())
+            if (date.dayOfWeek.value % 7 !in days) continue
+            val candidate = date.atTime(hh, mm).atZone(zone).toInstant()
+            if (!candidate.isBefore(from)) return candidate.toEpochMilli()
         }
         return null
     }
@@ -227,11 +242,13 @@ class AlarmScheduler(private val context: Context) {
                 val snoozeMinutes = j.optInt("snoozeMinutes", 5)
                 val localId = j.optString("localId").takeIf { it.isNotBlank() }
                 if (days.isNotEmpty() && hh >= 0 && mm >= 0) {
-                    val next = nextOccurrence(hh, mm, days, System.currentTimeMillis() + 60_000)
+                    val timezone = j.optString("timezone").ifBlank { null }
+                    val next = nextOccurrence(hh, mm, days, System.currentTimeMillis() + 60_000, timezone)
                     if (next != null) {
                         schedule(
                             id, j.optString("title", "Vyneural"), j.optString("body", ""), next, days,
                             freq, beat, wave, soundUri, vibrationId, snoozeEnabled, snoozeMinutes, localId,
+                            timezone, LocalTime.of(hh, mm).toString(),
                         )
                     }
                 } else {

@@ -1143,7 +1143,9 @@ function wireItineraryForm() {
       try {
         const wasCreating = !editingItineraryId;
         if (editingItineraryId) {
-          await updateItinerary(editingItineraryId, { name: name.slice(0, 120), description: desc, day_of_week, items });
+          await updateItinerary(editingItineraryId, {
+            name: name.slice(0, 120), description: desc, day_of_week: day_of_week ?? null, items,
+          });
         } else {
           await createItinerary({ name: name.slice(0, 120), description: desc, timezone: tz, day_of_week, items });
         }

@@ -22,9 +22,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
+import java.time.OffsetDateTime
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -66,6 +64,10 @@ object AlarmSync {
     private const val PREFS_SYNCED = "bineural_synced_alarms"
     private const val KEY_IDS = "ids"
     private const val KEY_LAST_REPORTED = "last_reported"
+    private val syncLock = Any()
+    private var workerRunning = false
+    private var syncRequested = false
+    private var sessionGeneration = 0L
 
     /** Programa el próximo ciclo. Se auto-reprograma al ejecutarse. */
     fun schedulePeriodic(context: Context) {
@@ -84,13 +86,31 @@ object AlarmSync {
      *  entrar): si syncAlarms lo refresca —o lo limpia por sesión muerta—
      *  reportDevice ve el estado actualizado, no uno viejo. */
     fun run(context: Context) {
-        if (AuthStore.token(context) == null) {
-            // Sin sesión no hay nada que sincronizar; el ciclo periódico igual
-            // queda programado (para cuando haya sesión).
-            schedulePeriodic(context)
-            return
+        // Dejar el próximo intento en AlarmManager antes de salir del
+        // BroadcastReceiver: Android puede terminar el proceso durante el HTTP.
+        runCatching { schedulePeriodic(context) }.onFailure {
+            BineuralLog.e("alarmsync", "no se pudo programar el próximo ciclo", it)
         }
-        Thread {
+        if (AuthStore.token(context) == null) return
+        val appContext = context.applicationContext
+        synchronized(syncLock) {
+            syncRequested = true
+            if (workerRunning) return
+            workerRunning = true
+        }
+        Thread({ drainSyncRequests(appContext) }, "vyneural-alarm-sync").start()
+    }
+
+    private fun drainSyncRequests(context: Context) {
+        while (true) {
+            val generation = synchronized(syncLock) {
+                if (!syncRequested) {
+                    workerRunning = false
+                    return
+                }
+                syncRequested = false
+                sessionGeneration
+            }
             // Cada paso en su propio try/catch: antes, una excepción en
             // syncAlarms() (una alarma puntual con datos raros del servidor)
             // impedía que reportDevice() corriera SIQUIERA UNA VEZ en ese
@@ -100,7 +120,7 @@ object AlarmSync {
             // ciclo tras ciclo, mientras se veía "todo bien" salvo por la
             // ausencia total de PUT /devices/me en el servidor.
             try {
-                syncAlarms(context)
+                syncAlarms(context, generation)
             } catch (e: Exception) {
                 BineuralLog.e("alarmsync", "syncAlarms falló", e)
             }
@@ -109,13 +129,37 @@ object AlarmSync {
             } catch (e: Exception) {
                 BineuralLog.e("alarmsync", "reportDevice falló", e)
             }
-            schedulePeriodic(context)
-        }.start()
+        }
     }
 
     /** Cancela y olvida las alarmas que llegaron por sync (al cerrar sesión,
      *  o cuando el refresh nativo descubre que la sesión ya no es válida). */
-    fun clearSynced(context: Context) {
+    fun storeAuth(context: Context, token: String?, refresh: String?, userId: String?, email: String?) {
+        synchronized(syncLock) {
+            val accountId = AuthStore.accountId(token) ?: userId
+            if (AuthStore.userId(context) != accountId) clearSynced(context)
+            AuthStore.save(context, token, refresh, accountId, email)
+        }
+        run(context)
+    }
+
+    fun clearAuth(context: Context) = synchronized(syncLock) {
+        AuthStore.clear(context)
+        clearSynced(context)
+    }
+
+    fun withPushRecipient(context: Context, recipient: String?, show: () -> Unit) {
+        synchronized(syncLock) {
+            if (recipient.isNullOrBlank() || AuthStore.token(context) == null ||
+                recipient != AuthStore.userId(context)
+            ) return
+            show()
+        }
+    }
+
+    private fun clearSynced(context: Context) {
+        sessionGeneration++
+        syncRequested = false
         val prefs = context.getSharedPreferences(PREFS_SYNCED, Context.MODE_PRIVATE)
         val synced = prefs.getStringSet(KEY_IDS, emptySet()) ?: emptySet()
         val scheduler = AlarmScheduler(context)
@@ -124,9 +168,19 @@ object AlarmSync {
     }
 
     // ── Sincronización de alarmas ───────────────────────────────────────────
-    private fun syncAlarms(context: Context) {
+    private fun syncAlarms(context: Context, generation: Long) {
+        val ownerId = AuthStore.userId(context)
         val json = authorizedGet(context, "${BuildConfig.API_BASE}/api/v1/alarms") ?: return
         val server = JSONArray(json)
+        synchronized(syncLock) {
+            if (generation != sessionGeneration || AuthStore.token(context) == null ||
+                ownerId != AuthStore.userId(context)
+            ) return
+            applyAlarms(context, server)
+        }
+    }
+
+    private fun applyAlarms(context: Context, server: JSONArray) {
         val scheduler = AlarmScheduler(context)
         val syncedPrefs = context.getSharedPreferences(PREFS_SYNCED, Context.MODE_PRIVATE)
         val previouslySynced = syncedPrefs.getStringSet(KEY_IDS, emptySet()) ?: emptySet()
@@ -138,18 +192,23 @@ object AlarmSync {
             if (id.isEmpty()) continue
             newSynced.add(id)
 
-            if (!a.optBoolean("enabled", true)) {
-                scheduler.cancel(id) // desactivada en la web → se quita del reloj
+            val config = a.optJSONObject("config")
+            val localId = config?.optString("localId")?.takeIf { it.isNotBlank() }
+            if (!a.optBoolean("enabled", true) || !a.optBoolean("notification_enabled", true) ||
+                config?.optString("alarmMode") == "notify_only"
+            ) {
+                scheduler.cancel(id)
+                if (localId != null && localId != id) scheduler.cancel(localId)
                 continue
             }
-            val atMs = parseIsoToMillis(a.optString("scheduled_at", "")) ?: continue
-            if (atMs <= System.currentTimeMillis()) {
-                scheduler.cancel(id) // ya pasó: no reprogramar ráfagas viejas
+            val atMs = parseIsoToMillis(a.optString("scheduled_at", ""))
+            if (atMs == null || atMs <= System.currentTimeMillis()) {
+                scheduler.cancel(id)
+                if (localId != null && localId != id) scheduler.cancel(localId)
                 continue
             }
             val title = a.optString("name").ifBlank { "Vyneural" }
             val days = parseByDay(a.optString("repeat_rule", ""))
-            val config = a.optJSONObject("config")
             // Deep link: al tocar la notificación de esta alarma (manual o
             // generada por un ítem de itinerario con horario), la app abre esta
             // frecuencia exacta en vez de la pantalla por defecto.
@@ -169,11 +228,13 @@ object AlarmSync {
             // Sin pasarlo acá, este camino (AlarmManager nativo) deduplicaba
             // con el id crudo del servidor mientras FCM deduplicaba con
             // localId — dos claves distintas para la misma alarma.
-            val localId = config?.optString("localId")?.takeIf { it.isNotBlank() }
             scheduler.schedule(
                 id, title, buildBody(config, title), atMs, days, freq, beat, wave,
                 soundUri, vibrationId, snoozeEnabled, snoozeMinutes, localId,
+                timezone = a.optString("timezone").ifBlank { null },
+                localTime = a.optString("local_time").ifBlank { null },
             )
+            if (localId != null && localId != id) scheduler.cancel(localId)
         }
 
         // Las sincronizadas que ya no están en el servidor fueron borradas en
@@ -282,7 +343,7 @@ object AlarmSync {
         val token = AuthStore.token(context) ?: return null
         val first = httpGet(url, token)
         if (first.code != 401) return if (first.code in 200..299) first.body else null
-        if (!shouldRetryWithRefresh(context)) return null
+        if (!shouldRetryWithRefresh(context, token)) return null
         val fresh = AuthStore.token(context) ?: return null
         val retry = httpGet(url, fresh)
         return if (retry.code in 200..299) retry.body else null
@@ -293,7 +354,7 @@ object AlarmSync {
         val token = AuthStore.token(context) ?: return false
         val first = httpPut(url, token, body)
         if (first.code != 401) return first.code in 200..299
-        if (!shouldRetryWithRefresh(context)) return false
+        if (!shouldRetryWithRefresh(context, token)) return false
         val fresh = AuthStore.token(context) ?: return false
         return httpPut(url, fresh, body).code in 200..299
     }
@@ -304,9 +365,9 @@ object AlarmSync {
      *  refresh mismo falla (refresh_token vencido o revocado), la sesión
      *  está realmente muerta: limpiarla para que los próximos ciclos corten
      *  de inmediato en vez de seguir pegándole al backend cada 5 min. */
-    private fun shouldRetryWithRefresh(context: Context): Boolean {
+    private fun shouldRetryWithRefresh(context: Context, accessToken: String): Boolean {
         if (LifecycleManager.state == "FOREGROUND") return false
-        when (refreshAccessToken(context)) {
+        when (refreshAccessToken(context, accessToken)) {
             RefreshOutcome.OK -> return true
             RefreshOutcome.NETWORK_FAILURE -> {
                 // No pudimos ni preguntar (backend caído/dormido — Render free
@@ -321,8 +382,6 @@ object AlarmSync {
                 // El servidor contestó que el refresh token NO sirve de verdad
                 // (vencido/revocado): ahí sí la sesión está muerta.
                 BineuralLog.e("alarmsync", "refresh: token rechazado por el servidor, limpiando estado nativo")
-                AuthStore.clear(context)
-                clearSynced(context)
                 return false
             }
         }
@@ -330,8 +389,11 @@ object AlarmSync {
 
     private enum class RefreshOutcome { OK, NETWORK_FAILURE, REJECTED }
 
-    private fun refreshAccessToken(context: Context): RefreshOutcome {
-        val refreshToken = AuthStore.refreshToken(context) ?: return RefreshOutcome.REJECTED
+    private fun refreshAccessToken(context: Context, accessToken: String): RefreshOutcome {
+        val refreshToken = synchronized(syncLock) {
+            if (AuthStore.token(context) != accessToken) return RefreshOutcome.NETWORK_FAILURE
+            AuthStore.refreshToken(context) ?: return RefreshOutcome.NETWORK_FAILURE
+        }
         val body = JSONObject().put("refresh_token", refreshToken)
         val result = httpPost("${BuildConfig.API_BASE}/api/v1/auth/refresh", body)
         // code == -1 es httpPost's propio marcador de fallo de red/timeout.
@@ -351,17 +413,29 @@ object AlarmSync {
             BineuralLog.e("alarmsync", "refresh: respuesta inesperada ${result.code}, sesión intacta")
             return RefreshOutcome.NETWORK_FAILURE
         }
-        if (result.code !in 200..299 || result.body == null) return RefreshOutcome.REJECTED
+        if (result.code == 401) {
+            synchronized(syncLock) {
+                if (AuthStore.refreshToken(context) != refreshToken) return RefreshOutcome.NETWORK_FAILURE
+                clearAuth(context)
+            }
+            return RefreshOutcome.REJECTED
+        }
+        val responseBody = result.body ?: return RefreshOutcome.NETWORK_FAILURE
         return try {
-            val json = JSONObject(result.body)
-            val newAccess = json.optString("access_token", null) ?: return RefreshOutcome.REJECTED
-            val newRefresh = json.optString("refresh_token", null) ?: return RefreshOutcome.REJECTED
-            AuthStore.saveTokens(context, newAccess, newRefresh)
+            val json = JSONObject(responseBody)
+            val newAccess = (json.opt("access_token") as? String)?.takeIf { it.isNotBlank() }
+                ?: return RefreshOutcome.NETWORK_FAILURE
+            val newRefresh = (json.opt("refresh_token") as? String)?.takeIf { it.isNotBlank() }
+                ?: return RefreshOutcome.NETWORK_FAILURE
+            synchronized(syncLock) {
+                if (AuthStore.refreshToken(context) != refreshToken) return RefreshOutcome.NETWORK_FAILURE
+                AuthStore.saveTokens(context, newAccess, newRefresh)
+            }
             BineuralLog.d("alarmsync", "access token refrescado en background")
             RefreshOutcome.OK
         } catch (e: Exception) {
             BineuralLog.e("alarmsync", "refresh: respuesta inválida", e)
-            RefreshOutcome.REJECTED
+            RefreshOutcome.NETWORK_FAILURE
         }
     }
 
@@ -399,24 +473,10 @@ object AlarmSync {
         return if (days.isEmpty()) null else days
     }
 
-    // ISO 8601 con offset ('2026-08-17T19:00:00+00:00', '…Z', con o sin milis).
-    private fun parseIsoToMillis(iso: String): Long? {
-        if (iso.isBlank()) return null
-        val patterns = listOf(
-            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
-            "yyyy-MM-dd'T'HH:mm:ssXXX",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-            "yyyy-MM-dd'T'HH:mm:ss'Z'",
-        )
-        for (p in patterns) {
-            try {
-                val sdf = SimpleDateFormat(p, Locale.US)
-                sdf.timeZone = TimeZone.getTimeZone("UTC")
-                return sdf.parse(iso)?.time
-            } catch (_: Exception) { /* probar el siguiente formato */ }
-        }
-        return null
-    }
+    // PostgreSQL puede serializar hasta seis decimales. Interpretarlos como
+    // milisegundos con SimpleDateFormat desplaza el disparo de la alarma.
+    private fun parseIsoToMillis(iso: String): Long? =
+        runCatching { OffsetDateTime.parse(iso).toInstant().toEpochMilli() }.getOrNull()
 
     // ── HTTP crudo (sin retry: eso lo maneja authorizedGet/Put arriba) ──────
     private class HttpResult(val code: Int, val body: String?)

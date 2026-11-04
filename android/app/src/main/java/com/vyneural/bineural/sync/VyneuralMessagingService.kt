@@ -2,7 +2,6 @@ package com.vyneural.bineural.sync
 
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import com.vyneural.bineural.notifications.AlarmScheduler
 import com.vyneural.bineural.notifications.NotificationHelper
 import com.vyneural.bineural.util.FcmTokenStore
 
@@ -34,6 +33,12 @@ class VyneuralMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
         val data = message.data
+        AlarmSync.withPushRecipient(applicationContext, data["recipient_user_id"]) {
+            showMessage(data)
+        }
+    }
+
+    private fun showMessage(data: Map<String, String>) {
         // Data-only (nunca message.notification): la app decide qué mostrar,
         // nunca el payload de FCM directamente — mismo principio que "el
         // backend nunca arranca audio", aplicado a la notificación misma.
@@ -49,15 +54,14 @@ class VyneuralMessagingService : FirebaseMessagingService() {
             val vibrationId = data["vibrationId"] ?: "default"
             val snoozeEnabled = data["snoozeEnabled"] == "true"
             val snoozeMinutes = data["snoozeMinutes"]?.toIntOrNull() ?: 5
+            val notifyOnly = data["alarmMode"] == "notify_only"
 
             NotificationHelper.showAlarm(
                 applicationContext, title, body, freq, beat, wave, alarmId = id,
                 soundUri = soundUri, vibrationId = vibrationId,
                 snoozeEnabled = snoozeEnabled, snoozeMinutes = snoozeMinutes,
+                notifyOnly = notifyOnly,
             )
-            // Mismo límite de sonido/vibración sin respuesta que una alarma
-            // local (AlarmReceiver): se auto-silencia si nadie la toca.
-            AlarmScheduler(applicationContext).scheduleSilence(id)
         } else if (kind == "support_message") {
             val title = data["title"] ?: "Vyneural Soporte"
             val body = data["body"] ?: "Tenés un mensaje nuevo"

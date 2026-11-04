@@ -363,14 +363,14 @@ function syncUiWithNativeSession() {
   if (!data || !data.serviceRunning || data.playbackState !== 'playing') return false;
   // Alinear la UI a la sesión REAL (frecuencias, onda, volumen).
   const base = typeof data.base === 'number' && data.base > 0 ? data.base : null;
-  const beat = typeof data.beat === 'number' && data.beat > 0 ? data.beat : null;
+  const beat = Number.isFinite(data.beat) && data.beat >= 0 ? data.beat : null;
   const wave = typeof data.wave === 'string' && data.wave ? data.wave : null;
   const vol = typeof data.volume === 'number' && data.volume > 0 && data.volume <= 1 ? data.volume : null;
   const customState = STATES.find((s) => s.custom);
   if (base && customState) {
     selectState(customState);
     customBase.value = String(Math.round(base * 10) / 10);
-    if (beat) customBeat.value = String(Math.round(beat * 10) / 10);
+    if (beat != null) setCustomBeat(beat);
     if (wave) selectedWave = wave;
     syncWaveButtons();
     syncCarrierChips();
@@ -553,7 +553,7 @@ window.addEventListener('vyneural:audiofreq', (e) => {
   selectState(customState);
   setCarrierFamily('personalizado');
   customBase.value = String(Math.round(base * 10) / 10);
-  if (beat != null) customBeat.value = String(Math.round(beat * 10) / 10);
+  if (beat != null) setCustomBeat(beat);
   updateCustomLabels();
   updateStatus();
   updateCarrierWarning();
@@ -945,8 +945,8 @@ function saveSession() {
     // Valores del panel personalizado: sin esto, la base y el ritmo
     // personalizados se perdían al recargar.
     custom: {
-      base: parseFloat(customBase ? customBase.value : NaN),
-      beat: parseFloat(customBeat ? customBeat.value : NaN),
+      base: loadedCustomBase ?? parseFloat(customBase ? customBase.value : NaN),
+      beat: loadedCustomBeat ?? parseFloat(customBeat ? customBeat.value : NaN),
     },
     // Filtro activo de la rejilla (Dormir, Meditar, Favoritos…).
     goal: activeChip ? activeChip.dataset.goal : 'destacados',
@@ -1025,7 +1025,8 @@ function selectState(state) {
   updateCarrierWarning();
   
   // Set the profile on the simulation engine
-  simulation.setProfile(state, currentParams().base);
+  const { base, beat } = currentParams();
+  simulation.setProfile(state, base, beat);
 
   // P5.6 (H1) — en la APK el estado seleccionado también retunea el motor
   // NATIVO en vivo: antes solo cambiaba la UI y el sonido seguía en el estado
@@ -1091,21 +1092,16 @@ function currentParams() {
   const base = selected.custom
     ? carrierBaseFor(carrier, ownBase, ownBase)
     : carrierBaseFor(carrier, selected.base, ownBase);
-  const beat = selected.custom ? parseFloat(customBeat.value) : (selected.stimulus ? selected.stimulus.beat : 10);
+  const beat = selected.custom
+    ? loadedCustomBeat ?? parseFloat(customBeat.value)
+    : (selected.stimulus ? selected.stimulus.beat : 10);
   const wave = selectedWave;
   return { base, beat, wave, volume: volumeLevel };
 }
 
 function applyAudio() {
-  simulation.start(currentParams().base);
-  // P5 — la onda elegida se re-afirma SIEMPRE tras el arranque: el motor
-  // (core) arranca con la onda del perfil del estado ('sine' en Personalizado)
-  // y aquí se aplica la onda que eligió el usuario (bug: custom + onda ≠ sine).
-  // setWave muta el tipo del oscilador en vivo, sin cortar el sonido.
-  simulation.audio.setWave(selectedWave);
-  // Aplica el volumen del slider a la sesión: el motor arranca con un valor
-  // por defecto y aquí se re-afirma el nivel real elegido por el usuario.
-  simulation.setVolume(volumeLevel);
+  const { base, ...audioOptions } = currentParams();
+  simulation.start(base, audioOptions);
   applyAmbient();
 }
 
@@ -1717,7 +1713,7 @@ function applySeqStep(index) {
   selectState(customState);
   setCarrierFamily('personalizado');
   customBase.value = String(Math.round(step.base * 10) / 10);
-  customBeat.value = String(Math.round(step.beat * 10) / 10);
+  setCustomBeat(step.beat);
   selectedWave = step.wave;
   syncWaveButtons();
   updateCustomLabels();
@@ -2014,7 +2010,7 @@ function updateCustomLabels() {
   // slider, que ni se movió.
   const baseHz = loadedCustomBase != null ? loadedCustomBase : customBase.value;
   customBaseLabel.textContent = `Portada: ${baseHz} Hz`;
-  customBeatLabel.textContent = `Ritmo binaural: ${customBeat.value} Hz`;
+  customBeatLabel.textContent = `Ritmo binaural: ${loadedCustomBeat ?? customBeat.value} Hz`;
 }
 
 // Mover cualquier slider a mano deja de ser exactamente la guardada que
@@ -2044,6 +2040,7 @@ customBase.addEventListener('input', () => {
 });
 customBeat.addEventListener('input', () => {
   deselectLoadedFrequency();
+  loadedCustomBeat = null;
   updateCustomLabels();
   if (selected.custom && playing) {
     simulation.audio.retune(currentParams());
@@ -2077,6 +2074,12 @@ let selectedWave = 'sine';
 // valor en vez de leer customBase.value. Se limpia (null) apenas el usuario
 // toca el slider a mano (ver deselectLoadedFrequency).
 let loadedCustomBase = null;
+let loadedCustomBeat = null;
+
+function setCustomBeat(beat) {
+  loadedCustomBeat = Number.isFinite(beat) && beat >= 0 ? beat : 10;
+  customBeat.value = String(loadedCustomBeat);
+}
 
 function waveIcon(path) {
   return `<svg class="wave-icon" viewBox="0 0 40 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
@@ -2202,8 +2205,8 @@ if (customSaveFreqBtn) {
     try {
       await createFrequency({
         name: name.slice(0, 120),
-        carrier_frequency: Math.round((p.base || 220) * 10) / 10,
-        beat_frequency: Math.round((p.beat || 10) * 10) / 10,
+        carrier_frequency: p.base,
+        beat_frequency: p.beat,
         waveform: p.wave || 'sine',
         // Antes quedaba SIEMPRE 'binaural' hardcodeado — guardar con
         // Condición experimental en 'ruido' o 'tono puro' perdía esa
@@ -2302,7 +2305,7 @@ if (customLoadSelect) {
       setCarrierFamily('personalizado');
       loadedCustomBase = f.carrier_frequency || 220;
     }
-    customBeat.value = String(f.beat_frequency > 0 ? Math.round(f.beat_frequency * 10) / 10 : 10);
+    setCustomBeat(f.beat_frequency);
     selectedWave = ['sine', 'triangle', 'sawtooth', 'square'].includes(f.waveform) ? f.waveform : 'sine';
     // Simétrico al guardado: reproducir una guardada restaura TODA su
     // config, no solo base/ritmo/onda — la condición experimental y el
@@ -3941,8 +3944,8 @@ function restoreSession(saved) {
     if (typeof saved.custom.base === 'number' && isFinite(saved.custom.base) && saved.custom.base > 0) {
       customBase.value = String(saved.custom.base);
     }
-    if (typeof saved.custom.beat === 'number' && isFinite(saved.custom.beat) && saved.custom.beat > 0) {
-      customBeat.value = String(saved.custom.beat);
+    if (Number.isFinite(saved.custom.beat) && saved.custom.beat >= 0) {
+      setCustomBeat(saved.custom.beat);
     }
   }
 }
@@ -4107,12 +4110,13 @@ function refreshAlarmPerm() {
   if (b) {
     const info = b.getState ? b.getState().info : null;
     const np = info ? info.notificationPermission : null;
+    const hasPendingAlarms = info?.alarmCount > 0;
     if (nativeNote) nativeNote.classList.remove('hidden');
     const exact = info ? info.exactAlarmsGranted : null;
     if (exactP) {
       exactP.textContent =
         exact === false
-          ? '⏰ Alarma aproximada (±1 min): Android bloqueó las alarmas exactas para esta app. Arreglalo desde Permisos de la web.'
+          ? '⏰ Sin permiso de alarmas exactas, Android puede demorar el aviso.'
           : '⏰ Alarma exacta: dispara a la hora indicada aunque la app esté cerrada.';
     }
     if (np === 'DENIED' || np === 'DENIED_PERMANENTLY') {
@@ -4120,13 +4124,16 @@ function refreshAlarmPerm() {
         np === 'DENIED_PERMANENTLY'
           ? '🚫 Notificaciones bloqueadas de forma permanente en Android: la alarma se guardará pero no podrá avisarte. Activá el permiso desde Permisos de la web.'
           : '⚠️ Notificaciones bloqueadas en Android: la alarma se guardará pero no podrá avisarte. Activalo desde Permisos de la web.';
-      setAlarmTroubleshootIssue(true);
+      setAlarmTroubleshootIssue(hasPendingAlarms);
       return;
     }
     if (np === 'GRANTED') {
       const ch = info ? info.alarmChannel : null;
       const usedAlarmsBefore = !!(ch && ch.exists); // mismo proxy que degraded-alarm-banner.js: el canal se crea al usar la primera alarma
-      const importanceDegraded = !!(usedAlarmsBefore && typeof ch.importance === 'number' && ch.importance < 4);
+      const importanceDegraded = !!(
+        usedAlarmsBefore && (info.defaultAlarmCount ?? info.alarmCount) > 0 &&
+        typeof ch.importance === 'number' && ch.importance < 4
+      );
       // Bug real (2026-10-17): exact alarms es un permiso de SISTEMA
       // (requiere concesión manual desde Android 13+, no se pide solo), no
       // depende de si esta persona usó alarmas antes — sin este gate daba
@@ -4135,11 +4142,11 @@ function refreshAlarmPerm() {
       const exactMissing = usedAlarmsBefore && exact === false;
       if (importanceDegraded) {
         alarmPerm.textContent =
-          '⚠️ Las alarmas están silenciadas: Android bajó el aviso de este canal sin avisarte (pasa si se descartan notificaciones sin abrirlas). Arreglalo desde Permisos de la web.';
+          '⚠️ El canal de alarmas tiene prioridad reducida. Revisá los ajustes de notificaciones de Android.';
       } else {
         alarmPerm.textContent = '✅ Notificaciones de Android activadas: la alarma avisa aunque la app esté cerrada.';
       }
-      setAlarmTroubleshootIssue(exactMissing || importanceDegraded);
+      setAlarmTroubleshootIssue(hasPendingAlarms && (exactMissing || importanceDegraded));
       return;
     }
     alarmPerm.textContent = '🔔 Al guardar, te pediremos permiso de notificaciones en Android.';
@@ -4703,6 +4710,15 @@ const alarmManager = new AlarmManager({
     // NUNCA arranca una sesión: una notificación no crea audio (Fase 21).
     const res = notificationManager.notify(alarm);
     const shown = !!(res && res.shown);
+    if (alarm.days && alarm.days.length) {
+      const [h, m] = String(alarm.time || '').split(':').map(Number);
+      const nextAt = nextOccurrenceAt(h, m, alarm.days);
+      if (nextAt) alarmManager.create({ ...alarm, id: alarm.id, nextAt }).catch(() => {});
+    }
+    if (playing || sessionStartTime) {
+      if (!document.hidden) showToast(`Recordatorio de sesión de ${Math.round(alarm.freq)} Hz`);
+      return;
+    }
     if (document.hidden) {
       if (!shown) playChime();
       return;
@@ -4713,10 +4729,11 @@ const alarmManager = new AlarmManager({
     playChime();
     showToast(`¡Hora de tu sesión de ${Math.round(alarm.freq)} Hz!`);
     const custom = STATES.find((s) => s.custom);
-    customBase.value = String(Math.round(alarm.freq * 10) / 10);
-    customBeat.value = String(alarm.beat);
-    selectedWave = alarm.wave || 'sine';
     selectState(custom);
+    carrier = 'personalizado';
+    loadedCustomBase = alarm.freq;
+    setCustomBeat(alarm.beat);
+    selectedWave = WAVES.some((w) => w.id === alarm.wave) ? alarm.wave : 'sine';
     updateCustomLabels();
     syncWaveButtons();
     updateCustomPanel();
@@ -4733,16 +4750,6 @@ const alarmManager = new AlarmManager({
     // alarma no es una causa de PLAY). El estado queda configurado con la
     // frecuencia exacta; el usuario toca play.
     if (!playing) showToast('Tu sesión está lista — toca play para comenzar 🎧');
-    // P5 — rutina en Web/PWA: si la alarma tiene días de repetición, se
-    // reprograma la siguiente ocurrencia (mientras la página esté viva;
-    // con la pestaña cerrada no puede sonar: límite honesto del navegador).
-    if (alarm.days && alarm.days.length) {
-      const [h, m] = String(alarm.time || '').split(':').map(Number);
-      const nextAt = nextOccurrenceAt(h, m, alarm.days);
-      if (nextAt) {
-        alarmManager.create({ ...alarm, id: alarm.id, nextAt }).catch(() => {});
-      }
-    }
   },
   onSync: renderAlarms,
   channel: typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('vyneural-alarms') : null,
@@ -5019,8 +5026,8 @@ if (isFinite(deepFreq) && deepFreq > 0) {
     deepCarrier && deepCarrier in CARRIER_BASE && deepCarrier !== 'estandar' && isFinite(deepOwnBase);
   if (!hasCarrierRecipe) carrier = 'personalizado';
   loadedCustomBase = hasCarrierRecipe ? deepOwnBase : deepFreq;
-  customBeat.value = String(deepBeat > 0 ? Math.round(deepBeat * 10) / 10 : 10);
-  selectedWave = deepWave || 'sine';
+  setCustomBeat(deepBeat);
+  selectedWave = WAVES.some((w) => w.id === deepWave) ? deepWave : 'sine';
   // selectState() ya llamó a updateStatus() internamente más arriba, pero
   // con el carrier/loadedCustomBase todavía sin corregir — se reafirma acá.
   updateStatus();
@@ -5192,7 +5199,7 @@ async function checkPendingReminder() {
   }
   // No hace falta re-chequear "ya vista" acá: dueList.find() de más arriba
   // ya descartó las vencidas ya vistas al elegir `due`.
-  if (!pending) return;
+  if (!pending || playing || sessionStartTime) return;
   // selectState() PRIMERO: si `selected` no era ya el estado Personalizado,
   // entrar a él resetea `carrier` a 'personalizado' (arranque limpio, ver su
   // declaración) — seteando carrier/loadedCustomBase ANTES, ese reset los
@@ -5216,8 +5223,8 @@ async function checkPendingReminder() {
     carrier = 'personalizado';
     loadedCustomBase = pending.freq;
   }
-  customBeat.value = String(pending.beat > 0 ? Math.round(pending.beat * 10) / 10 : 10);
-  selectedWave = pending.wave || 'sine';
+  setCustomBeat(pending.beat);
+  selectedWave = WAVES.some((w) => w.id === pending.wave) ? pending.wave : 'sine';
   // La duración configurada al crear el recordatorio se perdía acá: el
   // camino local (AlarmManager.onFire, más abajo) ya la aplicaba
   // correctamente — este es el mismo bloque, portado al camino del
