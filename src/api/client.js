@@ -106,7 +106,8 @@ export function notifyNativeAlarmsChanged() {
   bridgeNotify('SYNC_ALARMS', null);
 }
 
-// Registra la sesión (access + refresh) tras login/register.
+// Registra la sesión (access + refresh) tras un login real. NO se llama al
+// registrarse: /auth/register ya no emite tokens (ver api/auth.js::register).
 export function storeSession(session) {
   setAccessToken(session.access_token);
   try {

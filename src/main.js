@@ -1313,9 +1313,11 @@ setInterval(async () => {
   const premium = await isPremiumUser();
   if (premium) return;
   showToast('⚠️ Tu Premium terminó: la sesión se detuvo.');
-  stop(false);
-  const fallback = STATES.find((s) => !s.custom && !s.premiumOnly) || STATES[0];
-  selectState(fallback);
+  // Mismo reductor que el resto del gating (ver resetIfNotEligible): detiene,
+  // vuelve al preset gratis Y limpia una rutina en curso. Antes esto se
+  // repetía a mano acá sin la parte de la rutina, así que una rutina quedaba
+  // viva tras el corte y su próximo paso volvía a entrar a Personalizado.
+  resetIfNotEligible(false, { announceSeq: false });
 }, 60000);
 
 // Pausa real (lock screen / notificación / botón de la app): congela el motor
@@ -1712,7 +1714,10 @@ function applySeqStep(index) {
   if (!customState) return;
   selectState(customState);
   setCarrierFamily('personalizado');
-  customBase.value = String(Math.round(step.base * 10) / 10);
+  // setCustomBase (no `customBase.value = …` a secas): el paso tiene que
+  // quedar como portada EFECTIVA, no solo como posición del slider — ver el
+  // porqué en la declaración de setCustomBase.
+  setCustomBase(Math.round(step.base * 10) / 10);
   setCustomBeat(step.beat);
   selectedWave = step.wave;
   syncWaveButtons();
@@ -2081,6 +2086,28 @@ function setCustomBeat(beat) {
   customBeat.value = String(loadedCustomBeat);
 }
 
+// Simétrico a setCustomBeat: fija la portada en Hz EXACTOS (la fuente de
+// verdad que lee currentParams(), donde loadedCustomBase MANDA sobre el
+// slider) y mueve el slider al mismo valor, en un solo lugar.
+// Escribir solo `customBase.value`, como se hacía en applySeqStep, dejaba un
+// loadedCustomBase viejo pisando en silencio el valor nuevo: con un enlace
+// real de rutina (/?freq=220&…&seq=… — ver seqUrlParams/freqUrlParams en
+// rutina.js, que SIEMPRE manda ambos) el bloque de deep link de alarma
+// setea loadedCustomBase=220 y, de ahí en adelante, TODOS los pasos del
+// itinerario sonaban a 220 Hz aunque la barra y el slider ya mostraran
+// 300/432 Hz — solo el ritmo y la onda seguían al paso (confirmado en vivo:
+// pasos 220/300/432 → motor 220 en los tres). Regla de oro: la UI tiene que
+// quedar preparada con los datos CORRECTOS para el play del usuario.
+// Deselecciona la guardada del dropdown por el mismo motivo que
+// deselectLoadedFrequency: lo que está cargado ya no es esa guardada.
+function setCustomBase(base) {
+  const hz = Number.isFinite(base) && base > 0 ? base : 220;
+  const sel = document.getElementById('custom-load-freq');
+  if (sel) sel.value = '';
+  loadedCustomBase = hz;
+  customBase.value = String(Math.round(hz * 10) / 10);
+}
+
 function waveIcon(path) {
   return `<svg class="wave-icon" viewBox="0 0 40 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
 }
@@ -2351,16 +2378,38 @@ loadSavedFrequencies();
 // cada 60s mientras se reproduce): si la cuenta activa no es premium, un
 // preset Personalizado o premiumOnly (ej. "Divino") no debe quedar
 // seleccionado (ni sonando) como si nada.
-function resetIfNotEligible(isPremium) {
+// Una rutina en curso vive en `seq`, que es INDEPENDIENTE del preset: este
+// reset volvía al preset gratis sin tocarla, y quedaba una barra de rutina
+// anunciando "Paso 1/2 · 220 Hz" mientras currentParams() — lo ÚNICO que
+// leen start()/retune() — ya había vuelto a Meditación (210/6). Tocar play
+// entonces reproducía 210/6, no el paso del enlace: violación directa de la
+// Regla de Oro (la UI debe quedar preparada con los datos CORRECTOS).
+// Confirmado en vivo con un ?seq= realista y sin sesión, por dos caminos
+// asincrónicos que llegan acá DESPUÉS del init sincrónico que aplicó el deep
+// link: isPremiumUser()→false al arrancar sin token, y el 'logout' que
+// dispara handleSessionExpired (ui/auth.js) ante un 401 de token vencido.
+// Y además `seq` seguía viva: el siguiente advanceSeq() volvía a entrar a
+// Personalizado vía applySeqStep(), regalando un preset premium a una cuenta
+// que no lo es (también verificado en vivo).
+// `announceSeq`: el chequeo periódico de Premium de más arriba ya avisa con
+// su propio toast, y showToast reusa un único nodo (el segundo pisaría al
+// primero), así que desde ahí se silencia este aviso.
+function resetIfNotEligible(isPremium, { announceSeq = true } = {}) {
   if ((selected.custom || selected.premiumOnly) && !isPremium) {
     if (playing) stop(false);
+    const hadSeq = Boolean(seq);
+    clearSeq();
     const fallback = STATES.find((s) => !s.custom && !s.premiumOnly) || STATES[0];
     selectState(fallback);
+    if (hadSeq && announceSeq) showToast('🔒 Reproducir una rutina es parte de Vyneural Premium.');
   }
 }
 
+// Nota: ya no existe el tipo 'register' (registrarse no abre sesión, ver
+// ui/auth.js). Nada que hacer acá en ese momento — sin token no hay premium
+// ni frecuencias guardadas que cargar; el usuario cae por 'login' después.
 document.addEventListener('vyneural:auth', async (e) => {
-  if (e.detail && (e.detail.type === 'login' || e.detail.type === 'register')) {
+  if (e.detail && e.detail.type === 'login') {
     // El cache de isPremiumUser (TTL 30s) puede seguir teniendo el resultado
     // de la sesión/cuenta anterior — invalidar y forzar un fetch fresco
     // antes de decidir si el preset en pantalla sigue siendo válido.
@@ -3786,6 +3835,17 @@ let vizWarm = false;
 // slider de volumen o cambiar de onda saltaba de golpe en vez de ir "poco a
 // poco" como el resto. Mismo criterio de EMA que visBase/visBeat.
 let visVolume = 0.6;
+// Acota SOLO la frecuencia que ve el renderer de Cimática al rango soportado
+// por el motor de física (mismo 60-1000Hz del slider principal, index.html).
+// Una frecuencia personalizada guardada (hasta 19999Hz vía freq-modal.js) o
+// un deep link ?freq= sin tope puede superar ese rango; por encima de ella
+// MAX_RADIAL_MODE en plate-field.js hace que lorentz() colapse la amplitud a
+// 0 y la gota desaparece sin ningún aviso, mientras el audio real sigue
+// sonando perfecto (pipeline separado, no usa esto). NO usar esta función
+// para nada que afecte audio.
+function clampVisualFreq(f) {
+  return Math.min(1000, Math.max(60, f));
+}
 
 function drawVisual() {
   requestAnimationFrame(drawVisual);
@@ -3809,7 +3869,15 @@ function drawVisual() {
   // arranque al cargar).
   const dts = lastVizT ? Math.min(0.1, (now - lastVizT) / 1000) : 0.016;
   lastVizT = now;
-  const tb = isFinite(p.base) ? p.base : visBase;
+  // Clamp SOLO visual (auditoría ronda 2, 2026-11-06): una frecuencia
+  // personalizada guardada o un deep link ?freq= puede superar el rango del
+  // slider (60-1000Hz) — por encima de eso el motor de física de Cimática
+  // (MAX_RADIAL_MODE=24 en plate-field.js) colapsa la amplitud a 0 vía
+  // lorentz() y la gota queda invisible sin aviso. El audio real (p.base,
+  // usado por applyAudio()/simulation.start(), que no pasa por tb/visBase)
+  // sigue sonando a la frecuencia exacta guardada — regla de oro: solo se
+  // acota la REPRESENTACIÓN, nunca el audio.
+  const tb = clampVisualFreq(isFinite(p.base) ? p.base : visBase);
   const tbt = isFinite(p.beat) ? p.beat : visBeat;
   // Volumen: mismo pipeline que base/beat/color, ver arriba (auditoría P7).
   // Slider continuo (τ=0,35s, más ágil que el color: un arrastre de volumen

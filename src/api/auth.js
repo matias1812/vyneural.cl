@@ -4,8 +4,23 @@
 
 import { post, patch, get, cachedGet, clearSession, storeSession } from './client.js';
 
+// Alta de cuenta. NO devuelve sesión y a propósito NO llama a storeSession():
+// el backend responde `{ detail }` y nada más (ver
+// backvyneural/backend/app/routers/auth.py::register). Dos motivos:
+//
+//  - la sesión no puede nacer antes de confirmar el correo;
+//  - sobre todo, la respuesta tiene que ser IDÉNTICA exista o no ya una
+//    cuenta con ese email. Si el alta nueva devolviera tokens y el email
+//    repetido no, esa diferencia sola ya permitiría enumerar qué emails
+//    están registrados — exactamente el 409 que el backend dejó de mandar,
+//    por otra puerta.
+//
+// Tras esto el usuario ve "revisá tu correo" y entra, ya verificado, por
+// login(). Un storeSession() acá guardaría `undefined` en localStorage
+// (literalmente el string "undefined" como refresh token) y dejaría la
+// sesión en un estado corrupto imposible de refrescar.
 export async function register({ email, password, username, display_name, coupon_code, marketing_consent = false }) {
-  const session = await post('/api/v1/auth/register', {
+  return post('/api/v1/auth/register', {
     email,
     password,
     username,
@@ -13,8 +28,6 @@ export async function register({ email, password, username, display_name, coupon
     coupon_code,
     marketing_consent: marketing_consent === true,
   });
-  storeSession(session);
-  return session;
 }
 
 // Primer factor. El backend devuelve DOS formas posibles (ver

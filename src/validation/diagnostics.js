@@ -19,8 +19,8 @@ import { WaveField } from '../wavefield.js';
 // esa física ya no vive ahí — se extrajo a core/plate-field.js (fuente
 // única compartida por la vista 2D, la vista 3D y este validador). Mismos
 // nombres, mismos valores; solo cambió de dónde vienen.
-import { ZP_BY_M, modeOmega, gammaAt, PHYS_A, GAMMA_MIN, GAMMA_MAX, besselJ0, besselJ1, besselJArray, zPrimeApprox, MORPH_BLEND_K, SLOWMO_K, selectModeWithFallback } from '../core/plate-field.js';
-import { G as WAVE_G, SIGMA_RHO as WAVE_SIGMA_RHO } from '../core/wave-physics.js';
+import { ZP_BY_M, modeOmega, gammaAt, PHYS_A, GAMMA_MIN, GAMMA_MAX, besselJ0, besselJ1, besselJArray, zPrimeApprox, mcmahonZeroJPrime, zeroFor, MAX_RADIAL_MODE, REF_F, REF_RINGS, MORPH_BLEND_K, SLOWMO_K, selectModeWithFallback } from '../core/plate-field.js';
+import { G as WAVE_G, SIGMA_RHO as WAVE_SIGMA_RHO, faradayWavenumber } from '../core/wave-physics.js';
 import { buildSilentWav, ANCHOR_SECONDS } from '../core/media-anchor.js';
 import {
   evaluatePermissions,
@@ -552,18 +552,28 @@ export async function runBineuralDiagnostics() {
   // (construyendo un buscador de ceros propio sobre la recurrencia real de
   // Bessel, validado primero contra ZP_BY_M) que el orden de magnitud es
   // correcto — varios % de error, creciendo con m y decreciendo con n —
-  // pero NO se pudo fijar un valor exacto de referencia confiable para
-  // m≥4 en n>~8: la MISMA recurrencia ascendente que evalúa besselJArray()
-  // acumula error creciente ahí (medido: 2,6e-2 absoluto en m=6,n=10, ya
-  // mayor que la precisión típica de una tabla publicada), un problema
-  // numérico DISTINTO del error de McMahon y que necesitaría recurrencia
-  // descendente (algoritmo de Miller) para resolverse bien — fuera de
-  // alcance de este test. Por eso este test NO fija un número de error
-  // exacto (sería anclarse a una referencia de la que no hay certeza total)
-  // y en cambio verifica solo las propiedades que SÍ se pueden garantizar
-  // sin ese trabajo adicional: la aproximación crece monótonamente con n, y
-  // el espaciado entre ceros consecutivos tiende a π (la propiedad
-  // asintótica en la que se basa, ver el comentario de zPrimeApprox).
+  // pero NO se pudo fijar entonces un valor exacto de referencia confiable
+  // para m≥4 en n>~8. Este test quedó por eso limitado a las propiedades
+  // estructurales: crecimiento monótono en n y espaciado EXACTAMENTE π (que
+  // es cierto por construcción del orden líder, no solo asintóticamente).
+  //
+  // CORRECCIÓN DE ATRIBUCIÓN (auditoría 2026-11-06): el comentario original
+  // culpaba de aquel 2,6e-2 absoluto en m=6,n=10 a la recurrencia ASCENDENTE
+  // que besselJArray() usaba entonces. Era un diagnóstico equivocado, y el
+  // error ya se había arreglado igual al pasar a recurrencia descendente de
+  // Miller. Con una referencia independiente de 80 dígitos (serie de
+  // potencias en punto fijo BigInt, sin recurrencia de ningún tipo) resulta
+  // que **ese 2,6e-2 es de la propia tabla ZP_BY_M**: j'_{6,10} tabulado como
+  // 37,9737 cuando el valor real es 37,999641. El árbitro de entonces
+  // comparaba contra ZP_BY_M, que es justo la fuente equivocada en esa celda,
+  // así que la diferencia se le adjudicó al evaluador de Bessel en vez de a
+  // la tabla. besselJArray() con Miller reproduce los ceros a ~1e-13
+  // relativo (ver los tests nuevos de abajo) — no tenía la culpa.
+  //
+  // Este test se mantiene TAL CUAL (zPrimeApprox no se tocó) porque el
+  // espaciado exactamente π sigue siendo una propiedad real del orden líder
+  // y la única que conviene fijar sobre él. Lo que SÍ se puede garantizar
+  // ahora sobre los ceros de verdad está en los tests nuevos que siguen.
   runTest('Cymatics: zPrimeApprox is monotonically increasing with ~π spacing (McMahon asymptotic sanity)', () => {
     for (let m = 0; m <= 6; m++) {
       let prev = zPrimeApprox(m, 1);
@@ -578,6 +588,291 @@ export async function runBineuralDiagnostics() {
         }
         prev = cur;
       }
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // NUEVO (auditoría 2026-11-06) — cierre de la deuda que el comentario de
+  // zPrimeApprox declaraba "SIGUE ABIERTO". El bloque de arriba solo podía
+  // garantizar propiedades estructurales (monotonía, espaciado π) porque en su
+  // momento no había una referencia confiable para m≥4, n>~8. Ahora sí la hay:
+  // se construyó una referencia de 80 dígitos (serie de potencias A&S 9.1.10
+  // en punto fijo BigInt + barrido de cambios de signo + bisección), validada
+  // antes de usarla con reglas de suma e identidades exactas de Bessel, con
+  // j'_{0,n} obtenido por DOS rutas independientes (ceros de J'_0 vs ceros de
+  // J_1, concordancia 9e-62) y robustez de paso de barrido (0,2 vs 0,07,
+  // 7e-62). Esa referencia reveló DOS problemas, y estos tests fijan ambos:
+  //   1. zPrimeApprox (McMahon de orden líder) erraba hasta 11,1 % en la
+  //      grilla alcanzable, lo que hacía que selectModeWithFallback eligiera
+  //      un (m,n) distinto al físicamente correcto en el 53,0 % de las
+  //      frecuencias de 60-1000 Hz — la mitad de las veces "la flor
+  //      equivocada", con el número de pétalos m distinto en todas ellas.
+  //   2. La propia tabla ZP_BY_M, escrita a mano, tiene error real en su cola
+  //      (8 celdas, peor m=6,n=10: 37,9737 vs 37,999641 — 2,6e-2 absoluto,
+  //      260× su propia precisión de 4 decimales). El test de A&S 9.5 de más
+  //      arriba nunca lo vio porque solo compara n=1..3.
+  // zeroFor() ahora resuelve los ceros numéricamente (barrido con bracketing +
+  // Newton resguardado) y no lee ZP_BY_M.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // J'_m(x) = J_{m-1}(x) − (m/x)·J_m(x)  [DLMF 10.6.2]; J'_0 = −J_1.
+  // Verificada contra la referencia de 80 dígitos: las tres formas
+  // equivalentes de J'_m concuerdan entre sí y con una diferencia finita
+  // central a ~1e-22 antes de usarse acá.
+  function jPrimeAt(m, x) {
+    const buf = new Array(Math.max(2, m + 1));
+    besselJArray(Math.max(1, m), x, buf);
+    return m === 0 ? -buf[1] : buf[m - 1] - (m / x) * buf[m];
+  }
+
+  runTest('Cymatics: zeroFor matches independently verified high-precision zeros of J\'_m', () => {
+    // Valores de la referencia de 80 dígitos. NO están transcritos de memoria
+    // ni de una tabla publicada: cada literal se arbitró por RESIDUO en
+    // aritmética exacta (|J'_m(literal)| comparado con |J''_m·offset|), y los
+    // 14 quedan a ≤0,38 ulp del cero verdadero, o sea son el cero verdadero
+    // hasta donde float64 puede representarlo. Esa arbitración existe porque
+    // este mismo audit encontró que unas constantes "de alta precisión"
+    // escritas de memoria estaban mal en los últimos dígitos (hasta 1,3e-11).
+    const REF = [
+      [0, 11, 35.332307550083868], [0, 24, 76.178699584641464],
+      [1, 17, 52.605041111556687], [2, 17, 54.148597242671237],
+      [3, 13, 43.083652662375080], [4, 11, 38.265316987088156],
+      [4, 24, 79.219458926117269], [5, 17, 58.685283593407370],
+      [6, 10, 37.999640897715302], [6, 11, 41.178849474321410],
+      [6, 24, 82.243256457338035], [10, 24, 88.178024195365268],
+      [16, 5, 34.712479585422834], [16, 24, 96.846042342483813],
+    ];
+    const TOL = 1e-11; // relativo; lo medido es ~1e-15, así que 1e-11 deja 4 órdenes de margen
+    let worst = 0;
+    let worstAt = '';
+    for (const [m, n, want] of REF) {
+      const got = zeroFor(m, n);
+      const rel = Math.abs(got - want) / want;
+      if (rel > worst) { worst = rel; worstAt = `m=${m},n=${n}: ${got} vs ${want}`; }
+    }
+    if (worst > TOL) {
+      throw new Error(
+        `zeroFor se aparta de los ceros de referencia por ${worst.toExponential(2)} relativo (tope ${TOL.toExponential(0)}) — peor celda ${worstAt}. ` +
+          'La aproximación de McMahon de orden líder que estuvo en producción hasta 2026-11-06 erraba hasta 11,1% acá.'
+      );
+    }
+  });
+
+  runTest('Cymatics: zeroFor satisfies the defining property J\'_m(z)=0 over the whole reachable grid', () => {
+    // Test independiente de CUALQUIER tabla o fórmula: un cero de J'_m es, por
+    // definición, donde J'_m se anula. Se mide el desplazamiento implícito
+    // |J'_m(z)| / |J''_m(z)| (distancia real al cero verdadero) en vez del
+    // residuo crudo, que depende de la pendiente local.
+    // Grilla: m∈[0,16] (los órdenes de filigrana 2m/3m/4m de cymatics.js
+    // llegan a m=16) × n∈[1,MAX_RADIAL_MODE].
+    const TOL = 1e-8; // desplazamiento ABSOLUTO en x; lo medido es ~1e-13
+    let worst = 0;
+    let worstAt = '';
+    for (let m = 0; m <= 16; m++) {
+      for (let n = 1; n <= MAX_RADIAL_MODE; n++) {
+        const z = zeroFor(m, n);
+        if (!isFinite(z) || z <= 0) throw new Error(`zeroFor(${m}, ${n}) = ${z}, debía ser un x positivo finito`);
+        const f = jPrimeAt(m, z);
+        // J''_m(z) = −(1/z)·J'_m(z) − (1 − m²/z²)·J_m(z) [ecuación de Bessel];
+        // en un cero de J'_m el primer término se anula.
+        const buf = new Array(Math.max(2, m + 1));
+        besselJArray(Math.max(1, m), z, buf);
+        const jpp = -(1 - (m * m) / (z * z)) * buf[m];
+        const shift = Math.abs(f / jpp);
+        if (shift > worst) { worst = shift; worstAt = `m=${m},n=${n} (z=${z}, J'=${f.toExponential(2)})`; }
+      }
+    }
+    if (worst > TOL) {
+      throw new Error(`zeroFor devuelve un x que dista ${worst.toExponential(2)} del cero real de J'_m (tope ${TOL.toExponential(0)}) — peor celda ${worstAt}`);
+    }
+  });
+
+  runTest('Cymatics: zeroFor no longer reads the hand-typed ZP_BY_M tail (regression: 2.6e-2 error at m=6,n=10)', () => {
+    // Guarda ejecutable del hallazgo: ZP_BY_M[6][9] = 37,9737 está mal (el
+    // cero real es 37,999641). Si alguien vuelve a enchufar la tabla como
+    // fuente de ceros "porque es exacta", este test lo detiene.
+    const BAD_CELLS = [[4, 9], [4, 10], [6, 7], [6, 8], [6, 9], [6, 10]];
+    for (const [m, n] of BAD_CELLS) {
+      const table = ZP_BY_M[m][n - 1];
+      const got = zeroFor(m, n);
+      // zeroFor debe estar MÁS cerca del cero verdadero que la celda tabulada:
+      // se mide por la propiedad definitoria, no contra otra tabla.
+      const shiftTable = Math.abs(jPrimeAt(m, table));
+      const shiftGot = Math.abs(jPrimeAt(m, got));
+      if (!(shiftGot < shiftTable)) {
+        throw new Error(
+          `En m=${m},n=${n} zeroFor devuelve ${got} con |J'|=${shiftGot.toExponential(2)}, no mejor que la celda tabulada ` +
+            `${table} con |J'|=${shiftTable.toExponential(2)} — parece que volvió a leerse ZP_BY_M como fuente de ceros.`
+        );
+      }
+    }
+    // Y PHYS_A sí debe seguir anclado a la tabla, bit a bit: es la constante de
+    // calibración del radio del plato (j'_{0,6}/k(220 Hz)), no una predicción
+    // física. Moverla corre TODOS los patrones ya calibrados.
+    const expectedA = ZP_BY_M[0][REF_RINGS - 1] / faradayWavenumber(REF_F);
+    if (PHYS_A !== expectedA) {
+      throw new Error(`PHYS_A = ${PHYS_A} ya no coincide con ZP_BY_M[0][${REF_RINGS - 1}]/k(${REF_F}) = ${expectedA} — el ancla de calibración se movió.`);
+    }
+  });
+
+  runTest('Cymatics: zeroFor is strictly increasing in n, across the numeric-solver / McMahon boundary too', () => {
+    // El resolvedor cubre n ≤ 64 y por encima cae a mcmahonZeroJPrime. La
+    // monotonía estricta tiene que valer también CRUZANDO ese límite, porque
+    // selectNearestMode asume un espectro ordenado.
+    for (let m = 0; m <= 16; m++) {
+      let prev = 0;
+      for (let n = 1; n <= 90; n++) {
+        const cur = zeroFor(m, n);
+        if (!(cur > prev)) {
+          throw new Error(`zeroFor(${m}, ${n}) = ${cur} no es mayor que zeroFor(${m}, ${n - 1}) = ${prev}`);
+        }
+        if (n >= 2 && cur - prev < Math.PI - 1e-9) {
+          throw new Error(`zeroFor(${m}, ${n}) − zeroFor(${m}, ${n - 1}) = ${cur - prev} < π — la separación entre ceros consecutivos de J'_m nunca baja de π`);
+        }
+        prev = cur;
+      }
+    }
+  });
+
+  runTest('Cymatics: mcmahonZeroJPrime (DLMF 10.21.20) is accurate in the asymptotic regime where zeroFor falls back to it', () => {
+    // Es el plan B para n > 64. Ahí es asintóticamente exacto, pero NO sirve
+    // en n chico con m grande (hasta 7,1 % de error en n≤4, m≥7) — por eso no
+    // es la ruta principal. Este test fija lo primero y documenta lo segundo.
+    let worst = 0;
+    let worstAt = '';
+    for (let m = 0; m <= 16; m++) {
+      for (let n = 11; n <= MAX_RADIAL_MODE; n++) {
+        const z = mcmahonZeroJPrime(m, n);
+        const buf = new Array(Math.max(2, m + 1));
+        besselJArray(Math.max(1, m), z, buf);
+        const jpp = -(1 - (m * m) / (z * z)) * buf[m];
+        const shift = Math.abs(jPrimeAt(m, z) / jpp) / z; // desplazamiento RELATIVO
+        if (shift > worst) { worst = shift; worstAt = `m=${m},n=${n}`; }
+      }
+    }
+    // Medido: 2,4e-5 relativo peor caso (m=16,n=11). Tope con ~4× de margen.
+    if (worst > 1e-4) {
+      throw new Error(`mcmahonZeroJPrime erra ${worst.toExponential(2)} relativo en n≥11 (tope 1e-4) — peor celda ${worstAt}. ¿Se tocó algún coeficiente de DLMF 10.21.20?`);
+    }
+    // El orden LÍDER solo (zPrimeApprox) debe ser notablemente peor acá — si
+    // dejara de serlo, alguien cambió zPrimeApprox y el test de espaciado π
+    // exacto de más arriba dejó de significar lo que dice.
+    const leadShift = Math.abs(zPrimeApprox(6, 11) - zeroFor(6, 11)) / zeroFor(6, 11);
+    if (!(leadShift > 1e-3)) {
+      throw new Error(`zPrimeApprox(6,11) ya no se aparta del cero real (${leadShift.toExponential(2)}) — ¿se cambió el orden líder? Revisar el test de espaciado π exacto.`);
+    }
+  });
+
+  runTest('Cymatics: mode search picks the physically correct (m,n) across 60-1000 Hz (was wrong 53% of the time)', () => {
+    // EL test que cuantifica el impacto real para el usuario: no el error
+    // numérico de una fórmula, sino cuántas veces se dibuja la flor
+    // equivocada. Rango 60-1000 Hz = el rango visual real tras el clamp de
+    // clampVisualFreq() en main.js (T4 de esta misma ronda).
+    //
+    // La referencia se construye acá con un buscador INDEPENDIENTE: mismo
+    // barrido secuencial de cambios de signo (el índice del cero sale
+    // estructuralmente, no de una semilla asintótica) pero refinado con
+    // bisección PURA, un algoritmo distinto del Newton resguardado que usa
+    // producción — así un bug en el refinamiento de producción no se esconde
+    // por estar replicado en el test. Verificado a 2,2e-16 relativo contra la
+    // referencia de 80 dígitos.
+    function bisectColumn(m, count) {
+      const out = [];
+      let xa = 0.02;
+      let fa = jPrimeAt(m, xa);
+      let guard = 0;
+      while (out.length < count) {
+        if (++guard > 20000) throw new Error(`bisectColumn(${m}) no encontró ${count} ceros`);
+        const xb = xa + 0.2; // < separación mínima real (3,1418)
+        const fb = jPrimeAt(m, xb);
+        // sign(0) = + a propósito, igual que en el resolvedor de producción:
+        // descartar un bracket con un extremo exactamente en 0 perdería ese
+        // cero y correría todos los índices siguientes.
+        if ((fa < 0) !== (fb < 0)) {
+          let lo = xa;
+          let hi = xb;
+          let flo = fa;
+          for (let i = 0; i < 70; i++) {
+            const mid = 0.5 * (lo + hi);
+            const fm = jPrimeAt(m, mid);
+            if (fm === 0) { lo = mid; hi = mid; break; }
+            if ((flo < 0) !== (fm < 0)) hi = mid;
+            else { lo = mid; flo = fm; }
+          }
+          out.push(0.5 * (lo + hi));
+        }
+        xa = xb;
+        fa = fb;
+      }
+      return out;
+    }
+    const refCols = [];
+    for (let m = 0; m <= 6; m++) refCols.push(bisectColumn(m, MAX_RADIAL_MODE));
+    const refZero = (m, n) => refCols[m][n - 1];
+
+    const omegaFromZero = (z) => {
+      const k = z / PHYS_A;
+      return Math.sqrt(WAVE_G * k + WAVE_SIGMA_RHO * k * k * k);
+    };
+    function refSelectNearest(target, mMin, mMax) {
+      let bm = mMin;
+      let bn = 1;
+      let bw = omegaFromZero(refZero(mMin, 1));
+      let bd = Math.abs(bw - target);
+      for (let m = mMin; m <= mMax; m++) {
+        for (let n = 1; n <= MAX_RADIAL_MODE; n++) {
+          const w = omegaFromZero(refZero(m, n));
+          const d = Math.abs(w - target);
+          if (d < bd) { bd = d; bm = m; bn = n; bw = w; }
+        }
+      }
+      return { m: bm, n: bn, delta: bw - target };
+    }
+    function refSelectWithFallback(target, f) {
+      const primary = refSelectNearest(target, 2, 6);
+      if (Math.abs(primary.delta) <= 2 * gammaAt(f)) return primary;
+      const fb = refSelectNearest(target, 0, 1);
+      return Math.abs(fb.delta) < Math.abs(primary.delta) ? fb : primary;
+    }
+
+    let wrong = 0;
+    let wrongM = 0;
+    let total = 0;
+    let sumDetune = 0;
+    const examples = [];
+    for (let f = 60; f <= 1000.0001; f += 0.5) {
+      const ws = Math.PI * f; // igual que cymatics.js:1494
+      const got = selectModeWithFallback(ws, PHYS_A, f);
+      const want = refSelectWithFallback(ws, f);
+      total++;
+      sumDetune += Math.abs(omegaFromZero(refZero(got.m, got.n)) - ws);
+      if (got.m !== want.m || got.n !== want.n) {
+        wrong++;
+        if (got.m !== want.m) wrongM++;
+        if (examples.length < 5) examples.push(`${f.toFixed(2)}Hz: (m=${got.m},n=${got.n}) en vez de (m=${want.m},n=${want.n})`);
+      }
+    }
+    // Medido 2026-11-06: 0/1881 con el resolvedor numérico; 53,0 % con la
+    // tabla+McMahon de orden líder que había antes. El tope de 1 % deja
+    // margen para empates exactos sin dejar pasar una regresión real.
+    const rate = wrong / total;
+    if (rate > 0.01) {
+      throw new Error(
+        `selectModeWithFallback elige un (m,n) distinto al físicamente correcto en ${wrong}/${total} (${(rate * 100).toFixed(2)}%) de las frecuencias de 60-1000 Hz ` +
+          `(pétalos m mal en ${wrongM}); ejemplos: ${examples.join('; ')}`
+      );
+    }
+    // Y el desafine medio contra el espectro VERDADERO tiene que quedar en el
+    // orden de un ancho de línea, no de varios: con la aproximación vieja
+    // promediaba 62,5 rad/s con Γ(f) ∈ [7,4; 16,9] — ~4-8 anchos fuera de
+    // resonancia, que es lo que hundía la amplitud de Lorentz. Medido ahora:
+    // 15,7 rad/s.
+    const meanDetune = sumDetune / total;
+    if (meanDetune > 30) {
+      throw new Error(
+        `El desafine medio del modo elegido contra el espectro real es ${meanDetune.toFixed(2)} rad/s (tope 30; Γ(f) ∈ [7,4; 16,9]) — ` +
+          'el modo elegido queda varios anchos de línea fuera de resonancia y la amplitud de Lorentz se hunde.'
+      );
     }
   });
 
@@ -1166,9 +1461,18 @@ export async function runBineuralDiagnostics() {
     // test; lo que se verifica aquí es la fórmula, no la física de fondo).
     for (const k of [50, 200, 800]) {
       const wDirect = Math.sqrt(WAVE_G * k + WAVE_SIGMA_RHO * k * k * k);
-      // modeOmega(m, n, a) = sqrt(G·k + Σ/ρ·k³) con k = ZP_BY_M[m][n-1]/a —
+      // modeOmega(m, n, a) = sqrt(G·k + Σ/ρ·k³) con k = zeroFor(m,n)/a —
       // elegir a tal que k salga exacto y comparar.
-      const a = ZP_BY_M[2][0] / k;
+      // Esto usaba ZP_BY_M[2][0] directo, lo que daba por supuesto que
+      // zeroFor(2,1) ES la celda de la tabla. Desde la auditoría 2026-11-06
+      // zeroFor() resuelve los ceros numéricamente y ya no lee ZP_BY_M (la
+      // tabla tiene error real en su cola, ver plate-field.js), así que el
+      // `a` derivado de la tabla hacía salir k=50,006 en vez de 50 y el test
+      // fallaba por 6,3e-6 — un artefacto del propio test, no un error de la
+      // dispersión. Se toma el cero de la MISMA fuente que usa modeOmega,
+      // que es justamente lo que este test declara querer: verificar la
+      // FÓRMULA, "independiente de si la tabla de ceros es correcta".
+      const a = zeroFor(2, 1) / k;
       const wFn = modeOmega(2, 1, a);
       if (Math.abs(wFn - wDirect) > wDirect * 1e-6) {
         throw new Error(`modeOmega da ${wFn} para k=${k}, esperado ${wDirect} (fórmula ω²=gk+(σ/ρ)k³).`);

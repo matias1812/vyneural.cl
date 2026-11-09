@@ -101,8 +101,8 @@ const WAYPOINT_MODE_DIST_MIN = 5;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 // Construye la tabla radial estática de una gota: 13 valores por píxel —
-// r, θ, las Bessel del patrón (J0, J_mDom, J_mS1, J_mS2 y los cinco modos
-// de detalle mandala J_mD1..J_mD5) y las dos texturas espaciales fijas de
+// r, θ, las Bessel del patrón (J0, J_mDom, J_mS1, J_mS2 y los tres modos
+// de detalle mandala J_mD1..J_mD3) y las dos texturas espaciales fijas de
 // la gota (grano capilar y moteado de la sal). Es independiente del tiempo
 // (solo rotan las fases angulares y el grano tiembla con una envolvente
 // global), así que se calcula una sola vez por (resolución, modo) y por
@@ -126,8 +126,6 @@ function fillRadTableRows(
   mD1,
   mD2,
   mD3,
-  mD4,
-  mD5,
   tex
 ) {
   const half = res / 2;
@@ -138,8 +136,6 @@ function fillRadTableRows(
     mD1 >= 1 ? mD1 : 1,
     mD2 >= 1 ? mD2 : 1,
     mD3 >= 1 ? mD3 : 1,
-    mD4 >= 1 ? mD4 : 1,
-    mD5 >= 1 ? mD5 : 1,
     1
   );
   const js = new Array(maxM + 1);
@@ -169,8 +165,9 @@ function fillRadTableRows(
       rad[o + 6] = mD1 >= 1 ? js[mD1] : 0;
       rad[o + 7] = mD2 >= 1 ? js[mD2] : 0;
       rad[o + 8] = mD3 >= 1 ? js[mD3] : 0;
-      rad[o + 9] = mD4 >= 1 ? js[mD4] : 0;
-      rad[o + 10] = mD5 >= 1 ? js[mD5] : 0;
+      // o+9/o+10: columnas sin uso (reservadas en el stride de 13; ver
+      // nota de buildRadTable más abajo). Quedan en 0 por el
+      // Float32Array ya inicializado a cero — no se escriben.
       // Grano capilar espacial (el vaivén temporal se aplica después con una
       // envolvente global por fotograma: barato y sin recalcular senos).
       rad[o + 11] =
@@ -209,10 +206,12 @@ function fillRipRows(rip, rad, res, y0, y1, kRip) {
 }
 
 // Construye la tabla radial completa de una gota (13 columnas por píxel:
-// r, θ, las Bessel del patrón y las dos texturas espaciales fijas).
-function buildRadTable(res, argScale, mDom, mS1, mS2, mD1, mD2, mD3, mD4, mD5, tex) {
+// r, θ, las Bessel del patrón y las dos texturas espaciales fijas; las
+// columnas 9/10 del stride quedan reservadas sin usar — ver nota de
+// fillRadTableRows).
+function buildRadTable(res, argScale, mDom, mS1, mS2, mD1, mD2, mD3, tex) {
   const rad = new Float32Array(res * res * 13);
-  fillRadTableRows(rad, res, 0, res, argScale, mDom, mS1, mS2, mD1, mD2, mD3, mD4, mD5, tex);
+  fillRadTableRows(rad, res, 0, res, argScale, mDom, mS1, mS2, mD1, mD2, mD3, tex);
   return rad;
 }
 
@@ -929,8 +928,9 @@ export class CymaticsRenderer {
     d.canvas.width = res;
     d.canvas.height = res;
     d.img = d.ctx.createImageData(res, res);
-    // 13 valores por píxel: r, θ, J0, J_mDom, J_mS1, J_mS2, J_mD1..J_mD5,
-    // grano capilar y moteado del polvo.
+    // 13 valores por píxel: r, θ, J0, J_mDom, J_mS1, J_mS2, J_mD1..J_mD3
+    // (las columnas 9 y 10 quedan sin usar, en 0), grano capilar y moteado
+    // del polvo.
     d.rad = new Float32Array(res * res * 13);
     // Ondas radiales precalculadas (4 columnas por píxel): col 0 cos(k·r)
     // de la estacionaria, col 1 cos(k'·r) y col 2 sin(k'·r) de las dos
@@ -1421,32 +1421,33 @@ export class CymaticsRenderer {
     const phaseS1 = new Array(n);
     const phaseS2 = new Array(n);
     // Modos de detalle mandala (patrones dentro de patrones): el doble, el
-    // triple, el cuádruple, el quíntuple y el séxtuple de pétalos que el
-    // dominante. Siempre activos (mientras quepan: 2m/3m ≤ 12, 4m ≤ 16 y
-    // 5m/6m ≤ 18) y con peso reducido a filigrana sutil: dibujan puntas
-    // internas dentro de cada pétalo y filigrana en cascada dentro de los
-    // anillos — el efecto mandala de la cimática real — pero la flor
-    // dominante sigue siendo la que manda y el patrón se lee limpio.
+    // triple y el cuádruple de pétalos que el dominante. Siempre activos
+    // (mientras quepan: 2m/3m ≤ 12, 4m ≤ 16) y con peso reducido a
+    // filigrana sutil: dibujan puntas internas dentro de cada pétalo y
+    // filigrana en cascada dentro de los anillos — el efecto mandala de la
+    // cimática real — pero la flor dominante sigue siendo la que manda y el
+    // patrón se lee limpio.
+    // PERF (auditoría 2026-11-06, ronda 2): existían capas adicionales 5m/6m
+    // (mD4/mD5, ampD4/ampD5, rotD4/rotD5, phaseD4/phaseD5) que se calculaban
+    // por gota y por frame pero nunca se leían — ni packGL() (empaqueta solo
+    // columnas 0-8,11,12 de rad[]), ni el fallback CPU (suma hasta o+8), ni
+    // el shader GLSL (uJ[8]/uM[6] no tienen slot para D4/D5). Eliminadas:
+    // bajaban maxM (y por tanto el orden de arranque de la recurrencia de
+    // Miller en besselJArray) sin cambiar ningún píxel visible. El stride de
+    // la tabla radial se mantiene en 13 columnas (o+9/o+10 quedan en 0, sin
+    // usar) para no tener que tocar fillRipRows/packGL, que indexan por *13.
     const mD1 = new Array(n);
     const mD2 = new Array(n);
     const mD3 = new Array(n);
-    const mD4 = new Array(n);
-    const mD5 = new Array(n);
     const ampD1 = new Array(n);
     const ampD2 = new Array(n);
     const ampD3 = new Array(n);
-    const ampD4 = new Array(n);
-    const ampD5 = new Array(n);
     const rotD1 = new Array(n);
     const rotD2 = new Array(n);
     const rotD3 = new Array(n);
-    const rotD4 = new Array(n);
-    const rotD5 = new Array(n);
     const phaseD1 = new Array(n);
     const phaseD2 = new Array(n);
     const phaseD3 = new Array(n);
-    const phaseD4 = new Array(n);
-    const phaseD5 = new Array(n);
     // Componente contrarrotante del modo dominante (degeneración ±m): el
     // batido entre ambos hace que los pétalos se abran y cierren suavemente
     // mientras el patrón gira, como en el agua real.
@@ -1466,7 +1467,7 @@ export class CymaticsRenderer {
     // Forma de onda real → peso de las capas de detalle mandala (auditoría
     // 2026-08-29): antes cambiar sine↔square no cambiaba nada visualmente.
     // Una cuadrada/sierra tiene más armónicos reales que una senoidal, así
-    // que refuerza más la filigrana interna (mD1..mD5); senoidal es la base
+    // que refuerza más la filigrana interna (mD1..mD3); senoidal es la base
     // (1, sin cambio de comportamiento previo).
     const WAVE_RICHNESS = { sine: 1, triangle: 1.15, square: 1.4, sawtooth: 1.45 };
     const waveRichness = WAVE_RICHNESS[wave] || 1;
@@ -1765,32 +1766,6 @@ export class CymaticsRenderer {
         rotD3[i] = 0;
         phaseD3[i] = 0;
       }
-      // Capa 5m (el quíntuple de pétalos): filigrana de quinto nivel,
-      // mínima, apenas perceptible en los patrones calmados (m = 2 y 3).
-      const m5 = m * 5 <= 18 ? m * 5 : -1;
-      mD4[i] = m5;
-      if (m5 >= 1 && !sciMode) {
-        ampD4[i] = (0.04 + 0.02 * lorentz(modeOmega(m5, nn, PHYS_A) - ws, df)) * evo(380, d.p0 * 4.3) * rich;
-        rotD4[i] = this._rotPhase[i * 9 + 6];
-        phaseD4[i] = d.p0 * 4.1 + 2.0;
-      } else {
-        ampD4[i] = 0;
-        rotD4[i] = 0;
-        phaseD4[i] = 0;
-      }
-      // Capa 6m (el séxtuple de pétalos): la filigrana más fina del mandala,
-      // solo un matiz en los patrones más simples.
-      const m6 = m * 6 <= 18 ? m * 6 : -1;
-      mD5[i] = m6;
-      if (m6 >= 1 && !sciMode) {
-        ampD5[i] = (0.028 + 0.015 * lorentz(modeOmega(m6, nn, PHYS_A) - ws, df)) * evo(430, d.p0 * 4.8) * rich;
-        rotD5[i] = this._rotPhase[i * 9 + 7];
-        phaseD5[i] = d.p0 * 4.6 + 2.4;
-      } else {
-        ampD5[i] = 0;
-        rotD5[i] = 0;
-        phaseD5[i] = 0;
-      }
       // Batido de la flor: componente con el mismo m que la dominante pero
       // girando en sentido opuesto (degeneración ±m): los pétalos se abren
       // y cierran de forma bien visible, con oleadas lentas — la
@@ -2087,7 +2062,7 @@ export class CymaticsRenderer {
       // pueden compartir el modo dominante (m, n) — y por tanto argScale —
       // pero tener vecinos o detalles distintos, y entonces la tabla radial
       // quedaría obsoleta (columnas de otro modo).
-      const radKey = `${argScale}|${mDom[i]}|${mS1[i]}|${mS2[i]}|${mD1[i]}|${mD2[i]}|${mD3[i]}|${mD4[i]}|${mD5[i]}`;
+      const radKey = `${argScale}|${mDom[i]}|${mS1[i]}|${mS2[i]}|${mD1[i]}|${mD2[i]}|${mD3[i]}`;
       // Transición al cambiar de frecuencia: si la clave del modo cambió
       // respecto al fotograma anterior (p. ej. al elegir otro estado, o al
       // mover el latido), la flor anterior — que YA está renderizada en
@@ -2201,8 +2176,6 @@ export class CymaticsRenderer {
         mD1: mD1[i],
         mD2: mD2[i],
         mD3: mD3[i],
-        mD4: mD4[i],
-        mD5: mD5[i],
         amp0: amp0[i],
         ampDom: ampDom[i],
         ampBeat: ampBeat[i],
@@ -2211,8 +2184,6 @@ export class CymaticsRenderer {
         ampD1: ampD1[i],
         ampD2: ampD2[i],
         ampD3: ampD3[i],
-        ampD4: ampD4[i],
-        ampD5: ampD5[i],
         phDom: phaseDom[i],
         phBeat: phaseBeat[i],
         phS1: phaseS1[i],
@@ -2220,8 +2191,6 @@ export class CymaticsRenderer {
         phD1: phaseD1[i],
         phD2: phaseD2[i],
         phD3: phaseD3[i],
-        phD4: phaseD4[i],
-        phD5: phaseD5[i],
       };
       // Construcción del nuevo modo por tramos (varias filas por fotograma)
       // para que el render no se congele al cambiar de frecuencia; mientras
@@ -2242,8 +2211,6 @@ export class CymaticsRenderer {
             mD1: mD1[i],
             mD2: mD2[i],
             mD3: mD3[i],
-            mD4: mD4[i],
-            mD5: mD5[i],
             tex,
             kRip,
             rows: 0,
@@ -2266,8 +2233,6 @@ export class CymaticsRenderer {
           pend.mD1,
           pend.mD2,
           pend.mD3,
-          pend.mD4,
-          pend.mD5,
           pend.tex
         );
         // Ondas radiales precalculadas del mismo tramo (usan r de la tabla).

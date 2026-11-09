@@ -608,8 +608,26 @@ export class BinauralEngine {
     if (this._pulseTimer) clearTimeout(this._pulseTimer);
     const tick = () => {
       if (!this._playing) return;
-      // Sin latido percibido (tono puro, ruido, silencio): no hay pulso.
+      // Sin latido percibido (tono puro, ruido, silencio): no hay pulso. Estas
+      // condiciones solo cambian vía setCondition(), que vuelve a llamar
+      // _startPulse() — no hace falta reprogramar manualmente aquí.
       if (this._condition === 'pure-tone' || this._condition === 'noise' || this._condition === 'none') return;
+      // QA 2026-11-08 — ritmo 0 o inválido (p. ej. un paso de rutina/alarma
+      // con beat:0 llegado por deep link ?seq=…, aplicado en caliente vía
+      // retune() SIN pasar por setCondition()/_startPulse()): a diferencia de
+      // arriba, aquí NO se puede simplemente `return` y matar la cadena de
+      // reprogramación, porque nada la revive si el paso siguiente vuelve a
+      // tener un beat real. Pero seguir con la fórmula de abajo tampoco sirve:
+      // period = Math.max(0.08, 1/this.beat) da Infinity con beat=0, delay
+      // queda en Infinity, y setTimeout(fn, Infinity) en Chromium NO espera
+      // para siempre — se dispara casi de inmediato (ToInt32(Infinity) = 0),
+      // reprogramando tick() a sí mismo sin fin (~190 disparos/seg sostenidos,
+      // confirmado en vivo). Reintentar a un ritmo fijo y seguro evita el
+      // bucle Y permite que el pulso vuelva solo en cuanto haya un beat > 0.
+      if (!(this.beat > 0)) {
+        this._pulseTimer = setTimeout(tick, 250);
+        return;
+      }
       if (this.onBeatPulse) this.onBeatPulse();
       let delay = this.beat > 0 ? 1000 / this.beat : 1000;
       if (this.ctx && this._epoch != null) {

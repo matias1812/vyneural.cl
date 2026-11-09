@@ -16,7 +16,15 @@
 //
 // API pública:
 //   window.__vyneuralAuth = { open(mode), onAuthChange(fn), isLoggedIn(), getProfile(), logout() }
-//   document 'vyneural:auth' → CustomEvent { type: 'login'|'register'|'logout' }
+//   document 'vyneural:auth' → CustomEvent { type: 'login'|'logout' }
+//
+// Ya NO existe el tipo 'register': crear una cuenta no abre sesión (ver
+// onSubmitAuth y api/auth.js::register). Todos los listeners de este evento
+// (main.js, onboarding-flow.js, comments.js, cuenta.js, premium.js,
+// rutina.js) hacen trabajo que necesita un access token — invalidar el cache
+// de premium, evaluar onboarding, recargar itinerarios—, así que emitirlo
+// sin sesión solo disparaba fetches condenados al 401. El usuario que se
+// registra pasa por 'login' un rato después, igual que cualquier otro.
 
 import { login, register, logout, me, verifyEmail, resendVerification, forgotPassword, verifyTotpLogin } from '../api/auth.js';
 import { getAccessToken, clearSession } from '../api/client.js';
@@ -755,16 +763,25 @@ async function onSubmitAuth(e) {
         email, password, username, display_name: displayName, coupon_code: couponCode,
         marketing_consent: modal.querySelector('#auth-marketing-consent')?.checked === true,
       });
-      // Sesión creada: mostrar "revisá tu correo" con reenvío.
-      await refreshProfile();
-      renderNav();
-      notify();
-      document.dispatchEvent(new CustomEvent('vyneural:auth', { detail: { type: 'register' } }));
-      afterAuth();
+      // Registrarse YA NO deja sesión abierta (api/auth.js::register no
+      // guarda nada): nada de refreshProfile/renderNav/notify/afterAuth acá —
+      // todo eso asume un access token que no existe, y el chip de la nav
+      // mostraría "logueado" sin estarlo.
+      //
+      // Esta pantalla es la MISMA tanto si la cuenta se creó como si el email
+      // ya estaba registrado: el backend responde igual en los dos casos (ver
+      // su docstring) y la UI no debe reintroducir la diferencia. Por eso el
+      // texto habla de "un enlace" sin prometer cuál: al dueño de la casilla
+      // le llega el de confirmación si es nuevo, o el de "ya tenés cuenta"
+      // con enlace para elegir contraseña si ya existía.
+      //
+      // `resend: false` por el mismo motivo: /auth/resend-verification exige
+      // sesión (no hay) y encima solo tendría sentido en una de las dos
+      // ramas, así que el botón sería a la vez roto y delator.
       showSent({
         title: 'Casi listo: revisá tu correo',
-        text: `Te enviamos un enlace de confirmación a ${escapeHtml(email)}. Verificá tu bandeja (y el spam).`,
-        resend: true,
+        text: `Te enviamos un correo a ${email}. Abrilo para terminar y después iniciá sesión. Revisá también el spam.`,
+        resend: false,
       });
     } else {
       let result;
@@ -844,6 +861,24 @@ function showSent({ title, text, resend }) {
 }
 
 async function doResendVerification() {
+  if (!isLoggedIn()) {
+    // /auth/resend-verification exige access token, y a propósito: un
+    // endpoint público de reenvío por email sería otro oráculo de
+    // enumeración de cuentas, justo lo que esta ronda vino a cerrar.
+    //
+    // El caso es alcanzable desde la vista "Confirmá tu correo", que aparece
+    // tras un login bloqueado por verificación pendiente (403) — un login
+    // que por definición NO dejó sesión. Sin este guard el fetch volvía 401
+    // y friendlyError lo traducía a "Email o contraseña incorrectos", que es
+    // literalmente falso y no deja al usuario ningún próximo paso.
+    showResendFeedback(
+      'Para reenviarte el correo necesitamos tu sesión abierta, y todavía no la tenés. ' +
+      'Buscá el correo de confirmación que ya te mandamos (revisá el spam) o escribinos ' +
+      'por Instagram (@vyneural.cl) y lo resolvemos.',
+      true,
+    );
+    return;
+  }
   const modal = document.getElementById('auth-modal');
   const btn = modal && modal.querySelector('#unverified-resend, #sent-resend');
   if (btn) {
@@ -905,7 +940,16 @@ function friendlyError(err) {
   const status = err && err.status;
   const detail = (err && err.detail) || '';
   if (status === 429) return 'Demasiados intentos. Esperá un momento y volvé a intentar.';
-  if (status === 409) return 'Ese email o nombre de usuario ya está en uso.';
+  if (status === 409) {
+    // Desde que /auth/register dejó de responder 409 por email ya registrado
+    // (ver api/auth.js::register), el único 409 del formulario de registro es
+    // el username tomado — y hay que nombrarlo así: mencionar el email
+    // mandaría al usuario a cambiar justo lo que no falla, y encima sería una
+    // pista falsa sobre qué emails existen, que es lo que se vino a cerrar.
+    // El otro 409 que puede llegar acá es el de /auth/resend-verification.
+    if (/verificad/i.test(detail)) return 'Tu correo ya está confirmado. Iniciá sesión normalmente.';
+    return 'Ese nombre de usuario ya está en uso. Probá con otro.';
+  }
   if (status === 401) return 'Email o contraseña incorrectos.';
   if (status === 404 || status >= 500) {
     return 'El servidor de cuentas no está disponible en este momento. Intentá en unos minutos o escribinos por Instagram (@vyneural.cl).';

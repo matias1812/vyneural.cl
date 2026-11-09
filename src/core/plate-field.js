@@ -39,19 +39,19 @@ const ZP2 = [
 ];
 const ZP3 = [
   4.2012, 8.0152, 11.3459, 14.5858, 17.7887, 20.9725,
-  24.1449, 27.3101, 30.4703, 33.6267,
+  24.1449, 27.3101, 30.4703, 33.6269,
 ];
 const ZP4 = [
   5.3176, 9.2824, 12.6819, 15.9641, 19.196, 22.401,
-  25.5898, 28.7678, 31.9372, 35.0995,
+  25.5898, 28.7678, 31.9385, 35.1039,
 ];
 const ZP5 = [
-  6.4156, 10.5199, 13.9872, 17.3128, 20.5755, 23.8038,
-  27.0103, 30.2028, 33.3854, 36.5607,
+  6.4156, 10.5199, 13.9872, 17.3128, 20.5755, 23.8036,
+  27.0103, 30.2028, 33.3854, 36.5608,
 ];
 const ZP6 = [
   7.5013, 11.7349, 15.2682, 18.6374, 21.9317, 25.1839,
-  28.4065, 31.6089, 34.7967, 37.9737,
+  28.4098, 31.6179, 34.8134, 37.9996,
 ];
 // Exportado para validación numérica en Node (FASE 20 / Parte E de esta
 // auditoría, src/validation/diagnostics.js) sin arrastrar renderer alguno
@@ -73,42 +73,261 @@ export const ZP_BY_M = [ZP0, ZP1, ZP2, ZP3, ZP4, ZP5, ZP6];
 // O(5·MAX_RADIAL_MODE) por re-anclaje de modo, no por frame).
 export const MAX_RADIAL_MODE = 24;
 
-// Ceros de J'_m para m > 6, o m ≤ 6 con n > 10 (aproximación de McMahon,
-// suficiente para el matiz de resonancia de los modos de detalle 2m/3m, que
-// no están en las tablas): j'_{m,1} ≈ m + 0,80862·m^(1/3) y la separación
-// entre ceros consecutivos tiende a π.
+// Término LÍDER de la expansión de McMahon para j'_{m,n}:
+//   j'_{m,1} ≈ m + 0,80862·m^(1/3), separación entre ceros consecutivos → π.
 //
-// ERROR MEDIDO (auditoría 2026-09-08, deuda de verificación externa — dos
-// críticas independientes estimaron ~4% de error en m=6,n=17): se verificó
-// numéricamente con un buscador de ceros propio sobre la recurrencia real
-// de Bessel (validado primero contra ZP_BY_M, la tabla publicada). El orden
-// de magnitud es correcto — el error CRECE con m y DECRECE con n dentro de
-// cada m, alcanzando varios % (un puñado, no decenas) en la zona m∈[4,6],
-// n∈[11,24] que SÍ es alcanzable en uso real (ver el comentario de
-// MAX_RADIAL_MODE arriba, caso 963 Hz). NO se fija acá un número exacto de
-// error: la inestabilidad de la recurrencia ascendente de besselJArray()
-// usada como árbitro YA SE ARREGLÓ mediante recurrencia descendente de
-// Miller (ver el comentario de besselJArray). Eso NO arregla el error de
-// aproximación de McMahon en zPrimeApprox(): sigue siendo una aproximación
-// asintótica y ese problema SIGUE ABIERTO. Ver el test
-// "zPrimeApprox is monotonically increasing with ~π spacing" en
-// diagnostics.js para lo que SÍ se garantiza.
-// Impacto real: un modo (m,n) en este rango puede desafinarse por un
-// puñado de % en su ω de resonancia — suficiente para mover qué modo gana
-// selectNearestMode() cuando dos quedan cerca, pero no una falla catastrófica.
+// ESTADO (auditoría 2026-11-06, cierre de la deuda que esta misma función
+// documentaba como "SIGUE ABIERTO"): **ya NO está en la ruta de producción.**
+// `zeroFor()` más abajo resuelve los ceros numéricamente a precisión de
+// máquina. Esto se conserva exportado solo como (a) sujeto del test de
+// cordura asintótica de diagnostics.js ("monotonically increasing with ~π
+// spacing" — espaciado EXACTAMENTE π por construcción, propiedad que el
+// orden líder sí garantiza y que los órdenes superiores no) y (b) registro
+// histórico de la aproximación que estuvo en producción hasta esta auditoría.
+// NO usarla como fuente de ceros: medido contra una referencia de 80 dígitos
+// (serie de potencias A&S 9.1.10 en punto fijo BigInt + bisección, ver abajo),
+// su error relativo llega a **11,1 %** en la grilla alcanzable m∈[0,16],
+// n∈[1,24] (peor celda m=0,n=11: 31,416 vs 35,332 real) con 5,3 % de media;
+// en la banda m∈[4,6], n∈[11,24] que el comentario viejo señalaba, 5,6 %
+// peor caso / 3,5 % media. La consecuencia real medida era mucho peor de lo
+// que decía el comentario anterior ("mueve qué modo gana cuando dos quedan
+// cerca"): barriendo 60-1000 Hz (el rango visual real tras el clamp de
+// `clampVisualFreq` en main.js) el (m,n) elegido por selectModeWithFallback
+// difería del que elige la física exacta en **53,0 % de las frecuencias**
+// (1995/3761), y el número de pétalos m difería en todas ellas — media
+// literal de "se dibuja la flor equivocada". El desafine real contra el
+// espectro verdadero promediaba 62,5 rad/s con Γ(f) ∈ [7,4; 16,9] rad/s,
+// o sea ~4-8 anchos de línea fuera de resonancia (con ceros exactos:
+// 15,7 rad/s, ~1-2 anchos).
 export function zPrimeApprox(m, n) {
   return m + 0.80862 * Math.cbrt(m) + (n - 1) * Math.PI;
 }
 
-// Cero j'_{m,n} — tabla exacta cuando existe, aproximación de McMahon fuera
-// de ella (antes solo se usaba zPrimeApprox para m > 6; para m ≤ 6 con
-// n > 10 el acceso a la tabla devolvía `undefined` y modeOmega daba NaN —
-// una trampa esperando a que alguien subiera el límite de búsqueda sin
-// tocar esto, ver MAX_RADIAL_MODE arriba).
+// Expansión asintótica de McMahon de ORDEN SUPERIOR para j'_{m,n}
+// (DLMF §10.21(viii), ec. 10.21.20 — la expansión de los ceros de J'_ν, que
+// NO es la de A&S 9.5 / DLMF 10.21.19: esa es para los ceros de J_ν y usa
+// a=(n+ν/2−1/4)π con numeradores distintos; confundirlas es el error fácil):
+//
+//   μ = 4m² ,  b = (n + m/2 − 3/4)·π
+//   j'_{m,n} ~ b − (μ+3)/(8b)
+//                − 4(7μ² + 82μ − 9) / (3·(8b)³)
+//                − 32(83μ³ + 2075μ² − 3039μ + 3537) / (15·(8b)⁵)
+//
+// Los tres coeficientes se VERIFICARON empíricamente contra la referencia de
+// 80 dígitos en vez de confiar en la transcripción (el mismo audit encontró
+// que unas constantes "de alta precisión" escritas de memoria estaban mal en
+// los últimos dígitos): pelando los términos uno a uno de los ceros reales y
+// extrapolando el residuo escalado a b→∞ para m ∈ {0,1,2,3,4,5,6,8,12,16},
+// los límites caen sobre las tres formas cerradas con error relativo
+// ≤6,3e-5 (término 1/b), ≤1,6e-4 (1/b³) y ≤2,4e-4 (1/b⁵) — diez valores de μ
+// distintos contra polinomios de coeficientes enteros fijos, que no sobreviven
+// a una constante mal tipeada. El pelado del tercer término HAY que hacerlo en
+// aritmética exacta: en float64 cancela ~145 hasta ~3,6e-12 y el "fallo" que
+// aparenta (21 % en m=0) es cancelación catastrófica, no un coeficiente malo.
+//
+// CONVENCIÓN DE ÍNDICE: para m=0, x=0 es él mismo un cero de J'_0 y DLMF lo
+// cuenta como j'_{0,1}, mientras que ZP0 acá arranca en el primer cero
+// POSITIVO (3,8317). De ahí el corrimiento n→n+1 solo en m=0 (verificado:
+// con n=1 sin corrimiento da 0,308; con corrimiento da 3,8315).
+//
+// Precisión medida en el régimen asintótico donde se la usa (n ≥ 11, m ≤ 6):
+// 1,3e-5 % peor caso. Fuera de él NO sirve sola (n ≤ 4 con m ≥ 7: hasta
+// 7,1 % de error) — por eso es el plan B para n por encima del tope del
+// resolvedor, no la ruta principal.
+export function mcmahonZeroJPrime(m, n) {
+  const nn = m === 0 ? n + 1 : n;
+  const b = (nn + m / 2 - 0.75) * Math.PI;
+  const mu = 4 * m * m;
+  const b8 = 8 * b;
+  return (
+    b -
+    (mu + 3) / b8 -
+    (4 * (7 * mu * mu + 82 * mu - 9)) / (3 * b8 * b8 * b8) -
+    (32 * (83 * mu * mu * mu + 2075 * mu * mu - 3039 * mu + 3537)) / (15 * b8 * b8 * b8 * b8 * b8)
+  );
+}
+
+// --------------------------------------------------------------------------
+// Ceros de J'_m EXACTOS (a precisión de máquina) — barrido con bracketing +
+// Newton resguardado, memorizado por columna m.
+//
+// Por qué así y no de otra forma (auditoría 2026-11-06, se midieron las tres
+// vías contra la referencia de 80 dígitos antes de elegir):
+//
+//   (a) Solo McMahon de orden superior (mcmahonZeroJPrime arriba): excelente
+//       en n ≥ 11 (1,3e-5 % con m ≤ 6) pero 7,1 % de error en n ≤ 4 con
+//       m ≥ 7 — y esas celdas SÍ se usan: las capas de filigrana 2m/3m/4m
+//       llegan a m=16 con el MISMO n chico del modo dominante (ver mD1..mD3
+//       en cymatics.js). Insuficiente sola.
+//   (b) Newton sembrado con zPrimeApprox (el camino "obvio", reusa lo ya
+//       validado): FALLA, y fuerte. Con el sesgo de hasta 11 % del orden
+//       líder la semilla cae a más de media separación (π/2) del cero que
+//       debería encontrar, así que Newton converge a OTRO cero: medido,
+//       318/408 celdas aterrizan en un cero que no es j'_{m,n} y la
+//       monotonía en n se rompe 49 veces. Descartada por medición, no por
+//       intuición. (Sembrado con McMahon de orden 3 sí da 0/408 — pero eso
+//       ya es esta misma ruta con un paso extra de fe en la asintótica.)
+//   (c) Barrido secuencial con bracketing + Newton resguardado (esto): el
+//       ÍNDICE del cero es correcto por construcción —se cuentan los cambios
+//       de signo en orden desde x≈0, no se "adivina" dónde cae el n-ésimo—
+//       así que la monotonía estricta en n es estructural, no medida, y no
+//       depende de la precisión de ninguna fórmula asintótica. Medido:
+//       1,2e-13 % peor caso en toda la grilla m∈[0,16], n∈[1,24].
+//
+// Además esto corrigió un segundo problema que el audit encontró de paso y
+// que zPrimeApprox no explicaba: la propia tabla ZP_BY_M, escrita a mano,
+// tenía error REAL en su cola — 9 celdas por encima de su propia precisión
+// de 4 decimales (peor caso m=6,n=10: 37,9737 tabulado vs 37,999641 real,
+// 2,6e-2 absoluto), en m=3 n=10, m=4 n=9-10, m=5 n=6 y n=10, y m=6 n=7-10.
+// Todas caían DENTRO del rango de búsqueda primario (m∈[2,6], n≤24), o sea
+// alcanzables en uso real. Se arbitró por residuo en aritmética exacta:
+// |J'_m(tabulado)| coincidía con |J''_m · (tabulado − real)| en 3-4 cifras
+// en esas celdas, la firma inequívoca de estar corridas por ese delta. El
+// test existente de A&S 9.5 en diagnostics.js nunca lo vio porque solo
+// compara n=1..3, justo donde la tabla sí es buena. **Corregido** (auditoría
+// 2026-11-07): las 9 celdas se re-tabularon contra zeroFor(), redondeadas a
+// la misma precisión de 4 decimales que el resto de la tabla — confirmado
+// `grep`-eable que ningún valor de ZP_BY_M difiere hoy de zeroFor() en más
+// de 5e-5. ZP_BY_M queda SOLO como (i) ancla de calibración de PHYS_A y
+// (ii) fixture del test contra A&S — ya NO es fuente de ceros para nadie;
+// no volver a indexarla para eso.
+//
+// Y un tercer defecto que salió al escribir los tests: el empalme
+// tabla→aproximación ni siquiera daba un espectro MONÓTONO. zeroFor(0,10)
+// devolvía 32,1897 (tabla) y zeroFor(0,11) devolvía 31,4159 (McMahon de orden
+// líder) — el cero n=11 quedaba POR DEBAJO del n=10. selectNearestMode()
+// recorre ese espectro asumiéndolo ordenado, y modeStepToward() se apoya
+// directamente en que ω crece con n. Con el resolvedor numérico la monotonía
+// estricta es estructural (el índice sale de contar cambios de signo en
+// orden), y hay un test que la verifica hasta n=90, cruzando el tope del
+// resolvedor hacia el plan B de McMahon.
+// --------------------------------------------------------------------------
+
+// Paso del barrido. Debe ser menor que la separación mínima entre ceros
+// consecutivos, medida sobre la referencia exacta en toda la grilla real:
+// 3,141804 (la separación DECRECE monótonamente hacia π desde arriba, propiedad
+// que la referencia cumple en las 17 columnas). 0,2 deja ~15× de margen.
+const ZERO_SCAN_STEP = 0.2;
+// Tope del resolvedor. Por encima se usa McMahon de orden 3, que justamente
+// en n grande es asintóticamente exacto — cada método donde es mejor. El tope
+// también acota el costo: el barrido llega hasta x ≈ (n + m/2)·π.
+const ZERO_SOLVER_M_CAP = 64;
+const ZERO_SOLVER_N_CAP = 64;
+
+// Buffer compartido para J_0..J_m (igual criterio que _millerScratch: esto
+// corre en el armado de columnas, no por píxel, pero no hay razón para
+// asignar por llamada).
+let _jpScratch = new Float64Array(72);
+
+// Devuelve [J'_m(x), J''_m(x)].
+//   J'_m(x)  = J_{m-1}(x) − (m/x)·J_m(x)        [DLMF 10.6.2]; J'_0 = −J_1
+//   J''_m(x) = −(1/x)·J'_m(x) − (1 − m²/x²)·J_m(x)   [ecuación de Bessel]
+// Ambas identidades se verificaron contra la referencia de 80 dígitos (las
+// tres formas equivalentes de J'_m concuerdan entre sí y con una diferencia
+// finita central a 1e-22) antes de usarlas acá.
+function _jPrimePair(m, x) {
+  const maxM = m < 1 ? 1 : m;
+  if (_jpScratch.length < maxM + 2) {
+    _jpScratch = new Float64Array(Math.max(maxM + 2, _jpScratch.length * 2));
+  }
+  const buf = _jpScratch;
+  besselJArray(maxM, x, buf);
+  const jm = buf[m];
+  const jp = m === 0 ? -buf[1] : buf[m - 1] - (m / x) * buf[m];
+  const jpp = -jp / x - (1 - (m * m) / (x * x)) * jm;
+  return [jp, jpp];
+}
+
+// Newton resguardado DENTRO de un bracket [lo, hi] con cambio de signo: si el
+// paso de Newton se sale del bracket (o la derivada se anula), cae a bisección.
+// Así hereda la convergencia cuadrática de Newton sin poder escaparse del
+// intervalo que ya se sabe que contiene exactamente este cero — que es lo que
+// hace que el índice no se pueda perder.
+function _refineZero(m, lo, hi, fLo) {
+  let a = lo;
+  let b = hi;
+  let fa = fLo;
+  let x = 0.5 * (a + b);
+  for (let i = 0; i < 60; i++) {
+    const [f, d] = _jPrimePair(m, x);
+    if (f === 0) return x;
+    if ((fa < 0) !== (f < 0)) b = x;
+    else { a = x; fa = f; }
+    let nx = d !== 0 ? x - f / d : NaN;
+    if (!(nx > a && nx < b)) nx = 0.5 * (a + b);
+    if (Math.abs(nx - x) <= 1e-15 * x) return nx;
+    x = nx;
+  }
+  return x;
+}
+
+// Columnas memorizadas: _zeroCols[m] = { z: Float64Array, count }. Se arman
+// una sola vez por m (coste medido: ~1 ms la columna m=6 con 24 ceros, ~15 ms
+// la grilla entera de 17 columnas — una vez en la vida del módulo, nunca por
+// fotograma) y se rearman solo si alguien pide un n mayor al ya calculado.
+const _zeroCols = [];
+
+function _zeroColumn(m, count) {
+  const cached = _zeroCols[m];
+  if (cached && cached.count >= count) return cached.z;
+  const want = Math.max(count, MAX_RADIAL_MODE);
+  const z = new Float64Array(want);
+  let found = 0;
+  // Arranca apenas por encima de 0: para m ≥ 1, J'_m(x) ~ m·x^(m-1)/(2^m·m!)
+  // > 0 cerca de 0, y para m = 0, J'_0 = −J_1 < 0 — en ningún caso hay un
+  // cero en (0, 0.02), así que el primer cambio de signo detectado ES n=1.
+  let xa = 0.02;
+  let fa = _jPrimePair(m, xa)[0];
+  let guard = 0;
+  while (found < want) {
+    if (++guard > 100000) break; // red de seguridad; inalcanzable con los topes
+    const xb = xa + ZERO_SCAN_STEP;
+    const fb = _jPrimePair(m, xb)[0];
+    // El test de signo es `(f < 0)`, que manda el 0 exacto al lado POSITIVO,
+    // y eso es deliberado: si se descartaran los brackets con un extremo
+    // exactamente en 0 (`fa !== 0 && fb !== 0`), un cero que cayera justo
+    // sobre un punto del barrido se perdería y TODOS los n siguientes
+    // quedarían corridos en uno — justo la garantía de índice por la que se
+    // eligió este método. Con sign(0)=+ hay exactamente UNA detección en los
+    // dos casos: si el cruce es −→+ con f(xa)=0 se detecta en [xa−paso, xa];
+    // si es +→− se detecta en [xa, xb]; y no hay doble conteo porque los
+    // ceros de J'_m son todos simples (no hay raíces dobles que toquen el 0
+    // y vuelvan).
+    if ((fa < 0) !== (fb < 0)) {
+      z[found++] = _refineZero(m, xa, xb, fa);
+    }
+    xa = xb;
+    fa = fb;
+  }
+  if (found < want) return null; // no debería pasar; el llamador cae a McMahon
+  _zeroCols[m] = { z, count: want };
+  return z;
+}
+
+// Cero j'_{m,n} — el n-ésimo cero positivo de J'_m. Resuelto numéricamente
+// (precisión de máquina) dentro de los topes del resolvedor; McMahon de orden
+// 3 fuera de ellos, donde además es asintóticamente exacto. Nunca devuelve
+// `undefined` ni NaN para un (m,n) razonable: el antecesor de esta función
+// indexaba ZP_BY_M directo y devolvía `undefined` → modeOmega NaN para
+// m ≤ 6 con n > 10 (ver MAX_RADIAL_MODE arriba); ese contrato se mantiene.
+// Entradas basura se CLAMPEAN al dominio válido en vez de devolver NaN: esto
+// alimenta modeOmega() en la ruta de render, y un NaN acá se propaga a todos
+// los cosenos de la tabla radial y deja la gota entera sin dibujar (ese fallo
+// exacto ya pasó una vez por el `undefined` de la tabla — ver el comentario de
+// zeroFor en cymatics.js:2051). Un cero plausible degrada; un NaN rompe.
 export function zeroFor(m, n) {
-  const table = ZP_BY_M[m];
-  if (table && n <= table.length) return table[n - 1];
-  return zPrimeApprox(m, n);
+  let mi = Math.round(m);
+  let ni = Math.round(n);
+  if (!isFinite(mi) || mi < 0) mi = 0;
+  if (!isFinite(ni) || ni < 1) ni = 1;
+  if (mi <= ZERO_SOLVER_M_CAP && ni <= ZERO_SOLVER_N_CAP) {
+    const col = _zeroColumn(mi, ni);
+    if (col) {
+      const v = col[ni - 1];
+      if (isFinite(v) && v > 0) return v;
+    }
+  }
+  return mcmahonZeroJPrime(mi, ni);
 }
 
 // Frecuencia de resonancia (rad/s) del modo (m, n) de la cuenca de radio a:
@@ -410,7 +629,7 @@ function _millerBuf(size) {
 // FIX: la recurrencia ASCENDENTE que usaba esto antes (J_m = (2(m-1)/x)*J_{m-1} - J_{m-2},
 // sembrada en besselJ0/besselJ1) es inestable para m alto relativo a x
 // bajo - exactamente el caso del centro del plato (dist->0) con modos de
-// detalle mandala activos (mD1..mD5 llegan a m=18). No era un error de
+// detalle mandala activos (mD1..mD3 llegan a m=16). No era un error de
 // unos pocos % : medido, besselJArray(24, 0.1, out) daba out[24]~=-1.1e+35
 // (el valor real es ~=9.6e-56) - basura de magnitud astronomica, no una
 // imprecision. Reemplazado por recurrencia DESCENDENTE (algoritmo de
