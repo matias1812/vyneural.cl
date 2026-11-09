@@ -3838,10 +3838,24 @@ let visVolume = 0.6;
 // Acota SOLO la frecuencia que ve el renderer de Cimática al rango soportado
 // por el motor de física (mismo 60-1000Hz del slider principal, index.html).
 // Una frecuencia personalizada guardada (hasta 19999Hz vía freq-modal.js) o
-// un deep link ?freq= sin tope puede superar ese rango; por encima de ella
-// MAX_RADIAL_MODE en plate-field.js hace que lorentz() colapse la amplitud a
-// 0 y la gota desaparece sin ningún aviso, mientras el audio real sigue
-// sonando perfecto (pipeline separado, no usa esto). NO usar esta función
+// un deep link ?freq= sin tope puede superar ese rango, y entonces el patrón
+// deja de SEGUIR a la frecuencia: la rejilla de autovalores del motor
+// (m∈[0,6] × n∈[1,MAX_RADIAL_MODE=24] en plate-field.js) se agota en
+// ω(6,24)/π ≈ 1854,6 Hz, así que por encima de eso el selector de modo
+// devuelve SIEMPRE (m=6, n=24) y el dibujo queda congelado — idéntico a
+// 3000, 10000 o 19999 Hz. El clamp existe por eso: para mantener la
+// representación dentro del tramo donde cada frecuencia resuelve una
+// resonancia distinta, alineado con el rango del slider.
+//
+// CORRECCIÓN (auditoría 2026-11-09): este comentario decía antes que arriba
+// de 1000 Hz "lorentz() colapsa la amplitud a 0 y la gota desaparece". Es
+// falso, medido: lorentz(δ) sí se va a ~0 (3,3e-6 a 3000 Hz, 1,1e-8 a
+// 19999 Hz), pero TODOS los términos que lo usan tienen piso no-cero
+// (cymatics.js: ampS1 = 0,16 + 0,26·lorentz → 0,16; ampS2 → 0,10;
+// ampD1 → 0,16; ampD2 → 0,10; ampD3 → 0,055) y la capa DOMINANTE
+// (`ampDom[i] = 1.0 * evo(...)`) no pasa por lorentz() en absoluto. El
+// patrón sigue perfectamente visible hasta 19999 Hz; lo que se pierde es
+// la correspondencia frecuencia→figura, no la figura. NO usar esta función
 // para nada que afecte audio.
 function clampVisualFreq(f) {
   return Math.min(1000, Math.max(60, f));
@@ -3871,12 +3885,15 @@ function drawVisual() {
   lastVizT = now;
   // Clamp SOLO visual (auditoría ronda 2, 2026-11-06): una frecuencia
   // personalizada guardada o un deep link ?freq= puede superar el rango del
-  // slider (60-1000Hz) — por encima de eso el motor de física de Cimática
-  // (MAX_RADIAL_MODE=24 en plate-field.js) colapsa la amplitud a 0 vía
-  // lorentz() y la gota queda invisible sin aviso. El audio real (p.base,
-  // usado por applyAudio()/simulation.start(), que no pasa por tb/visBase)
-  // sigue sonando a la frecuencia exacta guardada — regla de oro: solo se
-  // acota la REPRESENTACIÓN, nunca el audio.
+  // slider (60-1000Hz) — por encima de eso la rejilla de modos del motor de
+  // Cimática (m∈[0,6] × n∈[1,MAX_RADIAL_MODE=24] en plate-field.js, techo
+  // ω(6,24)/π ≈ 1854,6 Hz) se satura y el patrón se congela en un único
+  // modo para TODO el tramo superior, dejando de representar la frecuencia.
+  // (Sigue visible — ver la corrección detallada en clampVisualFreq arriba;
+  // no "colapsa a 0" como decía este comentario antes.) El audio real
+  // (p.base, usado por applyAudio()/simulation.start(), que no pasa por
+  // tb/visBase) sigue sonando a la frecuencia exacta guardada — regla de
+  // oro: solo se acota la REPRESENTACIÓN, nunca el audio.
   const tb = clampVisualFreq(isFinite(p.base) ? p.base : visBase);
   const tbt = isFinite(p.beat) ? p.beat : visBeat;
   // Volumen: mismo pipeline que base/beat/color, ver arriba (auditoría P7).

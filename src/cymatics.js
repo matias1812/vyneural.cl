@@ -1730,6 +1730,21 @@ export class CymaticsRenderer {
       const m3 = m * 3 <= 12 ? m * 3 : -1;
       mD1[i] = m2;
       mD2[i] = m3;
+      // LIMITACIÓN CONOCIDA (documentada en la auditoría 2026-11-09, NO
+      // corregida acá a propósito — cambiar el comportamiento es una decisión
+      // de diseño visual, no un fix numérico): con m = 0 (modo de anillos
+      // concéntricos, el fallback de selectModeWithFallback en plate-field.js)
+      // se tiene m2 = m3 = m4 = 0, así que este gate y los dos análogos de
+      // abajo (3m, 4m) NUNCA pasan y las TRES capas de filigrana quedan en 0.
+      // El resultado es un "bullseye pelado": anillos concéntricos limpios sin
+      // ningún detalle de mandala encima. No es raro ni marginal: medido sobre
+      // la llamada real (targetOmega = π·f, 60-1000 Hz cada 0,1 Hz), m = 0 sale
+      // elegido en ~10,96% de las frecuencias del rango de la app — p. ej.
+      // 530 Hz → (m=0, n=11) y 1000 Hz → (m=0, n=17). (m = 1 NO tiene el
+      // problema: ahí m2/m3/m4 = 2/3/4 y la filigrana entra normal.) Si algún
+      // día se decide darle filigrana al bullseye, el camino no es relajar el
+      // gate a `>= 0` —eso pondría 0 pétalos, o sea nada— sino elegir
+      // explícitamente un m de detalle no nulo para el caso m = 0.
       if (m2 >= 1 && !sciMode) {
         // Capa 2m (el doble de pétalos): filigrana sutil (~¼ del peso de la
         // flor) que dibuja puntas internas sin competir con la flor.

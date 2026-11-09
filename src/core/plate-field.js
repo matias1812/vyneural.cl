@@ -414,8 +414,25 @@ export function selectNearestMode(targetOmega, a, { mMin = 2, mMax = 6, nMax = M
 // Igual que selectNearestMode, pero con el fallback a m=0 (anillos
 // concéntricos) / m=1 (espiral de un brazo) cuando el mejor modo m≥2 queda
 // desafinado por más de 2·Γ(f) — modos de Bessel físicos reales que
-// aparecen en cimática real a frecuencias de excitación muy bajas donde
-// ningún modo m≥2 está cerca de resonancia.
+// aparecen en cimática real cuando la excitación cae en un HUECO entre dos
+// resonancias m≥2 consecutivas.
+//
+// CORRECCIÓN (auditoría 2026-11-09): este comentario decía antes que el
+// fallback aparece "a frecuencias de excitación muy bajas". Es falso y al
+// revés. Medido sobre la llamada real de cymatics.js (targetOmega = π·f,
+// PHYS_A, m∈[2,6]×n∈[1,24]) barriendo 60-1000 Hz cada 0,1 Hz (9401
+// muestras): la compuerta |δ_primario| > 2·Γ(f) se abre en 39,05% de las
+// muestras y el fallback efectivamente GANA (devuelve m≤1) en 21,85% —
+// casi un cuarto del rango que usa la app, repartido entre m=0 (1030
+// muestras) y m=1 (1024). Y no ocurre abajo: la primera frecuencia donde
+// gana es 225,4 Hz, y de ahí hasta 1000 Hz forma 23 bandas contiguas
+// (225,4-227,9 / 249,4-252,3 / 278,6-282,9 / ... / 997-1000) cada vez más
+// anchas. Por debajo de ~225 Hz NUNCA gana. La razón es geométrica: la
+// separación entre autovalores ω(m,n) consecutivos CRECE con la frecuencia
+// mientras Γ(f) se ANGOSTA (ver gammaAt arriba), así que los huecos sin
+// cobertura m≥2 se abren hacia ARRIBA del rango, no hacia abajo. O sea: no
+// es una rama rara de régimen extremo, es una rama caliente y normal del
+// selector en el rango medio-alto de portadoras.
 export function selectModeWithFallback(targetOmega, a, f, opts = {}) {
   const primary = selectNearestMode(targetOmega, a, { mMin: 2, mMax: 6, ...opts });
   const twoGamma = 2 * gammaAt(f);
