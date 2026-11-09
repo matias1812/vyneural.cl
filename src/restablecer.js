@@ -3,6 +3,7 @@
 // solo uso que llegó por email (?token=…). Exige confirmar la contraseña.
 
 import { resetPassword } from './api/auth.js';
+import { validatePasswordStrength } from './ui/auth.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -50,8 +51,9 @@ async function run() {
       const password = $('reset-password').value;
       const confirm = $('reset-confirm').value;
 
-      if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
-        setError('La contraseña debe tener al menos 8 caracteres, con letras y números.');
+      const pwError = validatePasswordStrength(password);
+      if (pwError) {
+        setError(pwError);
         return;
       }
       if (password !== confirm) {

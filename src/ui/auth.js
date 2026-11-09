@@ -33,8 +33,20 @@ import { initBackendIfConfigured } from '../api/integration.js';
 import { pullCloudFavoritesToLocal } from '../api/fav-sync.js';
 import { enhanceOtpSlots, refreshOtpSlots, setOtpSlotsInvalid } from './otp-slots.js';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,64}$/;
+
+// Validación espejo del backend (ver app/schemas/auth.py): ≥8 caracteres,
+// con letras y números. Única implementación — reutilizada por cuenta.js
+// (cambio de contraseña) y restablecer.js (contraseña nueva vía token de
+// recuperación), antes cada una con su propia copia local.
+export function validatePasswordStrength(password) {
+  if (password.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
+  if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
+    return 'La contraseña debe incluir letras y números.';
+  }
+  return null;
+}
 
 let profile = null; // { id, email, username, display_name, email_verified, created_at }
 const listeners = new Set();
@@ -695,10 +707,8 @@ function validateAuth() {
   const password = modal.querySelector('#auth-password').value;
 
   if (!EMAIL_RE.test(email)) return 'Ingresá un email válido.';
-  if (password.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
-  if (!/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
-    return 'La contraseña debe incluir letras y números.';
-  }
+  const pwError = validatePasswordStrength(password);
+  if (pwError) return pwError;
   if (view === 'register') {
     const username = modal.querySelector('#auth-username').value.trim();
     if (username && !USERNAME_RE.test(username)) {

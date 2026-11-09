@@ -38,6 +38,7 @@ import { listDevices, forgetDevice, reportDevice } from './api/devices.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
 import { celebrateBurst } from './ui/celebrate.js';
 import { enhanceOtpSlots, refreshOtpSlots, setOtpSlotsInvalid } from './ui/otp-slots.js';
+import { EMAIL_RE, validatePasswordStrength } from './ui/auth.js';
 import './marketing.css';
 import { marketingConsentPresentation } from './marketing-ui.js';
 import {
@@ -1367,6 +1368,9 @@ function wireEditProfile() {
     const emailVal = $('edit-profile-email').value.trim();
     const pwVal = $('edit-profile-password').value;
     const emailChanged = editProfileEmailChanged();
+    if (emailChanged && !EMAIL_RE.test(emailVal)) {
+      return showErr('Ingresá un email válido.');
+    }
     if (emailChanged && !pwVal) {
       return showErr('Ingresá tu contraseña actual para confirmar el cambio de correo.');
     }
@@ -1404,12 +1408,6 @@ function wireEditProfile() {
 }
 
 // ── Cambio de contraseña ───────────────────────────────────────────────────
-
-function validatePasswordStrength(pw) {
-  if (pw.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
-  if (!/[a-zA-Z]/.test(pw) || !/\d/.test(pw)) return 'La contraseña debe tener letras y números.';
-  return '';
-}
 
 function wirePasswordForm() {
   const form = $('password-form');
