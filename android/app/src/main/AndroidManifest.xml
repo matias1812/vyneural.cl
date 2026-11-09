@@ -44,6 +44,13 @@
          usuario abre la app. Se pide bajo demanda (REQUEST_IGNORE_BATTERY_
          OPTIMIZATIONS), nunca automático. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Requerido porque el SDK de Meta (com.facebook.android:facebook-android-sdk,
+         ver build.gradle) usa el ID de publicidad del dispositivo para atribuir
+         instalaciones a campañas de Meta Ads Manager (App Events). Sin este
+         permiso, Android fuerza el ID de publicidad a una string de ceros y la
+         atribución de campañas deja de funcionar (advertencia real de Play
+         Console al subir vc86, 2026-11-09). -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 
     <application
         android:label="@string/app_name"
