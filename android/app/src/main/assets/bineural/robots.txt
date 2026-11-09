@@ -5,5 +5,6 @@ Disallow: /oneclick-retorno
 Disallow: /pago-retorno
 Disallow: /restablecer
 Disallow: /verificar
+Disallow: /confirmar-correo
 
 Sitemap: https://www.vyneural.cl/sitemap.xml
