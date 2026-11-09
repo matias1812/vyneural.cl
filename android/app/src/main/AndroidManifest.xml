@@ -20,6 +20,24 @@
          necesita para vibrar de verdad, nunca estuvo declarado. Es un
          permiso "normal" (se concede solo al instalar, sin diálogo). -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Bug real confirmado en vivo (2026-11-08, `adb shell dumpsys
+         notification`): el canal de alarmas salía SIEMPRE con mBypassDnd=false
+         aunque NotificationHelper.ensureChannels() llama setBypassDnd(true)
+         desde v8. Causa raíz: este permiso nunca estuvo declarado. Dos efectos,
+         los dos reales:
+         1. Android solo respeta bypassDnd en canales de apps con acceso a la
+            política de notificaciones (No Molestar) concedido por el usuario.
+         2. La pantalla de Ajustes donde se concede ese acceso
+            (Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS, que la app ya
+            abría desde el botón de la campana vía OPEN_DND_ACCESS_SETTINGS)
+            lista ÚNICAMENTE las apps que piden este permiso en el manifest —
+            sin declararlo, Vyneural no aparecía en esa lista y el botón
+            "arreglarlo" llevaba a un callejón sin salida.
+         Es protectionLevel "normal": se concede solo al instalar, sin diálogo.
+         El acceso a DND en sí lo sigue concediendo el usuario a mano (no hay
+         diálogo de runtime para esto) — ver NotificationHelper.dndAccessGranted()
+         y el id de canal dependiente de ese estado. -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <!-- Sin esto, muchos fabricantes (MIUI, Samsung...) matan el ciclo de
          sincronización en segundo plano (AlarmSync, cada ~5 min): un
          recordatorio creado en la web no llega al reloj nativo hasta que el
@@ -71,12 +89,13 @@
             android:name=".notifications.AlarmReceiver"
             android:exported="false" />
 
-        <!-- Silencia la alarma si nadie respondió dentro del límite de sonido
-             (AlarmScheduler.ALARM_RING_LIMIT_MS). Solo se invoca con un
-             PendingIntent explícito por alarma desde AlarmScheduler. -->
-        <receiver
-            android:name=".notifications.AlarmSilenceReceiver"
-            android:exported="false" />
+        <!-- AlarmSilenceReceiver se eliminó: el límite de sonido de la alarma
+             (AlarmScheduler.ALARM_RING_LIMIT_MS) lo aplica el propio sistema vía
+             builder.setTimeoutAfter() en NotificationHelper.alarmNotification()
+             — no hace falta un segundo AlarmManager por alarma solo para
+             cancelarla. Verificado en vivo (logcat): la notificación se
+             auto-cancela a los 120,0 s exactos. El receiver quedó sin ningún
+             programador desde esa migración. -->
 
         <!-- Botón "Posponer" de la notificación de alarma (P7). -->
         <receiver

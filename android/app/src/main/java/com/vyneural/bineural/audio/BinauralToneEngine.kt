@@ -14,8 +14,13 @@ import kotlin.math.sin
  *
  * - La frecuencia cambia con rampa suave (mismo espíritu que el ramp de
  *   1,5 s de la web) y la ganancia hace fade al pausar/reanudar: sin clics.
+ *   El fade es ASIMÉTRICO (FADE_IN / FADE_OUT): entrar es suave (~2 s),
+ *   pausar es casi inmediato (~0,3 s a inaudible) — una pausa que tarda
+ *   segundos en callarse se lee como "la pausa no funciona".
  * - No usa setInterval/setTimeout como reloj: el reloj es la corriente de
  *   muestras del AudioTrack (P1 audio clock).
+ * - Tras IDLE_RELEASE_NS de pausa sostenida suelta el AudioTrack y el hilo
+ *   (batería); un resume/play explícito lo recrea de forma transparente.
  * - La WebView controla las frecuencias (retune); el transporte lo sostiene
  *   este servicio.
  */
@@ -31,6 +36,17 @@ class BinauralToneEngine {
     @Volatile private var track: AudioTrack? = null
     private var paused = false
     private var ducked = false
+    /** Instante (nanoTime) en que empezó la pausa vigente; 0 = no está en
+     *  pausa. Lo lee el hilo de audio sin tomar el lock (de ahí el @Volatile),
+     *  para decidir si la pausa ya es lo bastante larga como para soltar el
+     *  AudioTrack — ver IDLE_RELEASE_NS. */
+    @Volatile private var pausedSinceNs = 0L
+    /** true SOLO si el AudioTrack se liberó por pausa prolongada (no por un
+     *  stop() del usuario). Es lo que distingue "sesión viva, en pausa, con el
+     *  hardware soltado" de "sesión detenida": la primera puede reanudarse, la
+     *  segunda NO (REGLA DE ORO — un resume() nunca puede crear audio de la
+     *  nada). */
+    private var idleReleased = false
 
     @Synchronized
     fun start() {
@@ -50,9 +66,19 @@ class BinauralToneEngine {
             resume()
             return
         }
+        startLocked()
+    }
+
+    /** Arranca motor + hilo. Ya con el lock tomado (@Synchronized de start()/
+     *  resume()): no re-entra, solo centraliza el arranque para que start() y
+     *  el resume tras una liberación por pausa prolongada hagan EXACTAMENTE lo
+     *  mismo. */
+    private fun startLocked() {
         val newTrack = createTrack()
         gain.set(0.0)
         paused = false
+        pausedSinceNs = 0L
+        idleReleased = false
         ducked = false
         updateTargetGain()
         track = newTrack
@@ -62,15 +88,26 @@ class BinauralToneEngine {
 
     @Synchronized
     fun pause() {
+        if (!paused) pausedSinceNs = System.nanoTime()
         paused = true
         updateTargetGain()
     }
 
     @Synchronized
     fun resume() {
-        if (!playing.get()) return
         paused = false
+        pausedSinceNs = 0L
         updateTargetGain()
+        if (playing.get()) return
+        // El AudioTrack se soltó por pausa prolongada (ver IDLE_RELEASE_NS):
+        // reanudar tiene que RECREARLO. Sin esto, un resume() sobre un motor
+        // liberado dejaría la sesión muda con la notificación en "reproduciendo"
+        // — la misma clase de bug que el histórico "el botón play no funciona"
+        // documentado en start(). `idleReleased` es la guarda que impide que
+        // esto se convierta en "resume() arranca audio de la nada": si el motor
+        // nunca arrancó o el usuario hizo stop(), idleReleased es false y acá
+        // no pasa nada (REGLA DE ORO).
+        if (idleReleased) startLocked()
     }
 
     /** Nivel de volumen de la sesión (0..1); se aplica al reanudar/retomar. */
@@ -148,7 +185,16 @@ class BinauralToneEngine {
 
     @Synchronized
     fun stop() {
-        if (!playing.getAndSet(false)) return
+        val wasPlaying = playing.getAndSet(false)
+        // Un stop() explícito cierra la sesión: deja de ser reanudable (ver
+        // resume()/idleReleased). Se limpia ANTES del return temprano a
+        // propósito: si el motor ya estaba liberado por pausa prolongada,
+        // playing es false y el return saldría dejando la sesión marcada como
+        // reanudable — un resume() posterior volvería a sonar después de un
+        // stop() del usuario (REGLA DE ORO).
+        idleReleased = false
+        pausedSinceNs = 0L
+        if (!wasPlaying) return
         targetGain.set(0.0)
         val stoppedTrack = track
         track = null
@@ -188,6 +234,39 @@ class BinauralToneEngine {
             .build()
     }
 
+    /**
+     * Libera el AudioTrack tras una pausa prolongada y deja la sesión marcada
+     * como reanudable. Decisión consciente (medido en vivo: en pausa el motor
+     * seguía escribiendo ~176 KB de muestras cada 5 s, para siempre, con el
+     * hilo `bineural-audio` y la ruta de audio del SO despiertos — una sesión
+     * "pausada" y olvidada drenaba batería indefinidamente).
+     *
+     * Por qué NO mantener el reloj de audio vivo para siempre: el único
+     * beneficio sería que reanudar es instantáneo, y eso se conserva igual
+     * durante el primer minuto (IDLE_RELEASE_NS), que es la ventana que cubre
+     * las pausas reales — una llamada, una interrupción, mirar otra app.
+     * Después de un minuto, recrear el AudioTrack cuesta milisegundos y el
+     * motor retoma en la MISMA frecuencia objetivo (runLoop arranca en
+     * targetFrequencies, no barre desde cero), así que la única diferencia
+     * audible es el fade de entrada de FADE_IN, idéntico al de cualquier play.
+     *
+     * @return true si hay que salir del loop (liberado, o el track ya no es el
+     *         vigente); false si hubo un resume entre la medición y el lock y
+     *         el loop tiene que seguir sonando.
+     */
+    @Synchronized
+    private fun releaseIdleTrack(tr: AudioTrack): Boolean {
+        if (track !== tr) return true
+        // Carrera real posible: el usuario reanuda justo entre el chequeo del
+        // umbral (sin lock) y este punto. En ese caso NO se libera nada.
+        if (!paused) return false
+        stop()
+        // stop() limpia idleReleased (un stop explícito no es reanudable);
+        // acá se re-marca a propósito, DESPUÉS, porque esta liberación sí lo es.
+        idleReleased = true
+        return true
+    }
+
     private fun runLoop(tr: AudioTrack) {
         val samples = ShortArray(blockSamples * 2)
         val dt = 1.0 / sampleRate
@@ -207,7 +286,28 @@ class BinauralToneEngine {
                 val stepL = f1 * dt
                 val stepR = f2 * dt
                 val previousGain = currentGain
-                currentGain += (targetGain.get() - previousGain) * 0.05
+                val target = targetGain.get()
+                // Fade de ganancia asimétrico. Medido en vivo con el harness
+                // JVM (2026-11-08): con el 0,05 por bloque que usaban AMBAS
+                // direcciones, pausar tardaba ~2,7 s en llegar a -20 dB y ~7,7 s
+                // en apagarse de verdad — por eso los reportes históricos de
+                // "la pausa no funciona" (el usuario toca pausa y sigue oyendo
+                // el tono varios segundos). El fade suave existía para no meter
+                // un click, pero un click necesita una discontinuidad de
+                // MUESTRA: con FADE_OUT la envolvente sigue siendo continua y
+                // lineal por tramos dentro de cada bloque (ver `blend` abajo),
+                // y la caída completa son ~6-7 bloques de 46 ms. La subida
+                // (play/resume, deshacer un duck, subir volumen) mantiene el
+                // 0,05 de siempre: ahí la lentitud es deseada (entrada suave,
+                // ~2 s) y acelerarla sí se oiría como un salto.
+                val k = if (target < previousGain) FADE_OUT else FADE_IN
+                currentGain += (target - previousGain) * k
+                // El fade exponencial nunca llega exactamente a 0: sin este
+                // corte el motor se queda escribiendo muestras de ±1 LSB para
+                // siempre y "silencio real" nunca es medible ni exacto.
+                // SILENT_GAIN equivale a ~1 LSB de 16 bits al volumen máximo:
+                // pasar de 1 LSB a 0 es inaudible por definición.
+                if (target <= 0.0 && currentGain < SILENT_GAIN) currentGain = 0.0
                 val wv = wave.get()
                 for (i in samples.indices step 2) {
                     val blend = (i + 2).toDouble() / samples.size
@@ -232,6 +332,14 @@ class BinauralToneEngine {
                     off += w
                 }
                 if (track === tr) gain.set(currentGain)
+                // Pausa prolongada: soltar el hardware (ver releaseIdleTrack).
+                val since = pausedSinceNs
+                if (since != 0L && currentGain == 0.0 &&
+                    System.nanoTime() - since >= IDLE_RELEASE_NS &&
+                    releaseIdleTrack(tr)
+                ) {
+                    return
+                }
             }
         } catch (_: Exception) {
             // El sistema puede cerrar la salida mientras hay un write activo.
@@ -240,5 +348,25 @@ class BinauralToneEngine {
                 if (track === tr) stop()
             }
         }
+    }
+
+    private companion object {
+        // Los dos coeficientes son POR BLOQUE de `blockSamples` frames
+        // (2048 @ 44,1 kHz ≈ 46,4 ms), no por segundo.
+        /** Subida (play/resume/volumen arriba/fin de duck): entrada suave,
+         *  ~2 s al 90 %. Es el valor histórico — se mantiene a propósito. */
+        private const val FADE_IN = 0.05
+        /** Bajada (pausa/stop/volumen a 0/duck): ~200 ms a -40 dB, ~310 ms a
+         *  -60 dB, silencio exacto a ~0,5 s. Reemplaza el 0,05 que tardaba
+         *  7,7 s en apagarse de verdad. */
+        private const val FADE_OUT = 0.65
+        /** ~1 LSB de 16 bits a la amplitud máxima (amp = gain·32767·0,6):
+         *  por debajo de esto la muestra ya cuantiza a 0. */
+        private const val SILENT_GAIN = 1.0 / (32767.0 * 0.6)
+        /** Pausa sostenida tras la cual se suelta el AudioTrack y muere el
+         *  hilo de audio (ver releaseIdleTrack). 60 s: cubre con holgura las
+         *  pausas "voy y vuelvo" manteniendo el reloj caliente, y corta el
+         *  consumo de una sesión pausada y olvidada. */
+        private const val IDLE_RELEASE_NS = 60_000_000_000L
     }
 }

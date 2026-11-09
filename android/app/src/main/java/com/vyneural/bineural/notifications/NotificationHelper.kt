@@ -38,8 +38,34 @@ object NotificationHelper {
     //   clase de dispositivo. Bumpear el ID de nuevo (v13, v14…) NO arregla
     //   esto ahí; el lever real es channelDegraded() + el diálogo nativo de
     //   MainActivity.onRequestPermissionsResult que ofrece el arreglo de un
-    //   toque apenas se concede el permiso.
-    const val CHANNEL_ALARMS = "bineural_alarms_v12"
+    //   toque apenas se concede el permiso. (Ojo: ese hallazgo es sobre la
+    //   IMPORTANCIA. El bump a v13 de abajo es por otra cosa — bypassDnd — y
+    //   ahí sí el id nuevo es la única salida.)
+    // v13 (2026-11-08): el bump es OBLIGATORIO acá, no cosmético — hasta esta
+    // versión el manifest nunca declaró ACCESS_NOTIFICATION_POLICY, así que
+    // Android descartaba el setBypassDnd(true) de abajo y el canal v12 quedó
+    // creado con mBypassDnd=false en TODOS los dispositivos (confirmado con
+    // `adb shell dumpsys notification`). Como bypassDnd solo se aplica al
+    // CREAR el canal, el v12 ya existente no se arregla ni declarando ahora el
+    // permiso: hay que mintar un id nuevo.
+    private const val CHANNEL_ALARMS_BASE = "bineural_alarms_v13"
+    // ...y el bump solo no alcanza: el usuario concede el acceso a No Molestar
+    // A MANO y casi siempre DESPUÉS de que el canal ya nació (el v13 se crea en
+    // MainActivity.onCreate, mucho antes de que alguien toque el botón de la
+    // campana). Si el id fuera una constante, el canal nacería otra vez con
+    // bypassDnd=false y el próximo arreglo sería un v14 — exactamente el
+    // treadmill v2→v12 de este archivo. Por eso el id EFECTIVO depende del
+    // estado del acceso a DND: hay como máximo DOS ids (sin acceso / con
+    // acceso) y cada uno nace con el bypass que Android de verdad le va a
+    // aplicar. Cuando el usuario concede el acceso, el id cambia a la variante
+    // "d" y ESE canal sí nace con mBypassDnd=true, sin pedirle nada más.
+    private const val CHANNEL_ALARMS_DND = "${CHANNEL_ALARMS_BASE}d"
+    /** Prefijo común de TODA la familia de canales de alarma, incluidos los
+     *  históricos (`bineural_alarms`, `bineural_alarms_v2`…`_v12`) y los
+     *  personalizados por sonido/vibración. Lo usa dropStaleAlarmChannels para
+     *  limpiar los que quedaron de versiones anteriores. Ojo: `bineural_player`
+     *  / `bineural_reminders` / etc. NO caen bajo este prefijo. */
+    private const val ALARM_CHANNEL_FAMILY = "bineural_alarms"
     private const val CHANNEL_REMINDERS = "bineural_reminders"
     // M1 — canal de fin de sesión: IMPORTANCE_DEFAULT (sonido suave, sin
     // vibración) para avisar que el temporizador terminó. Canal propio para
@@ -53,9 +79,66 @@ object NotificationHelper {
     private const val NOTIF_SESSION_END = 2002
     private const val NOTIF_SUPPORT_CHAT = 2003
 
+    /** ¿El usuario concedió el acceso a la política de No Molestar? Es un
+     *  "special app access" (Ajustes → Apps → Acceso a No molestar), NO un
+     *  runtime permission: no hay diálogo que la app pueda mostrar, solo el
+     *  intent a la pantalla de Ajustes (AndroidBridge::OPEN_DND_ACCESS_SETTINGS,
+     *  ya cableado al botón de la campana). El manifest tiene que declarar
+     *  ACCESS_NOTIFICATION_POLICY para que la app siquiera APAREZCA en esa
+     *  lista — ver AndroidManifest.xml. Sin este acceso, setBypassDnd(true) es
+     *  un no-op silencioso. */
+    fun dndAccessGranted(context: Context): Boolean = runCatching {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.isNotificationPolicyAccessGranted
+    }.getOrDefault(false)
+
+    /** Id EFECTIVO del canal de alarmas por defecto (ver CHANNEL_ALARMS_DND).
+     *  Única fuente de verdad: nadie debe volver a hardcodear el literal ni
+     *  guardarse el valor — cambia cuando el usuario concede/revoca el acceso
+     *  a No Molestar. */
+    fun alarmChannelId(context: Context): String =
+        if (dndAccessGranted(context)) CHANNEL_ALARMS_DND else CHANNEL_ALARMS_BASE
+
+    /** Borra todo canal de la familia de alarmas que NO sea el vigente: la
+     *  variante del otro lado del acceso a DND, los canales personalizados
+     *  derivados de ella (ver channelFor) y los canales de versiones viejas
+     *  (v2…v12).
+     *
+     *  Confirmado en vivo (`adb shell dumpsys notification`, 2026-11-09): tras
+     *  actualizar, el `bineural_alarms_v12` seguía ahí al lado del canal nuevo
+     *  — ningún bump anterior borró el que dejaba atrás, así que en un teléfono
+     *  que vivió v2→v12 el usuario ve una lista de "Alarmas Vyneural" idénticas
+     *  en los ajustes del sistema y no puede saber cuál manda (y si toca la
+     *  equivocada para subir la Importancia, no arregla nada). Los canales
+     *  viejos están muertos: nadie publica en ellos.
+     *
+     *  Recrear un canal borrado restaura su config anterior (Android la
+     *  conserva a propósito), así que esto es reversible y estable si el acceso
+     *  a DND se revoca y se vuelve a conceder. */
+    private fun dropStaleAlarmChannels(nm: NotificationManager, activeId: String) {
+        // El "_" final importa: los ids de las dos variantes se diferencian por
+        // la "d", así que "${activeId}_" nunca matchea la otra variante — solo
+        // los personalizados derivados de la ACTIVA, que son los que hay que
+        // conservar.
+        val keepPrefix = "${activeId}_"
+        runCatching {
+            for (ch in nm.notificationChannels) {
+                if (!ch.id.startsWith(ALARM_CHANNEL_FAMILY)) continue
+                if (ch.id == activeId || ch.id.startsWith(keepPrefix)) continue
+                nm.deleteNotificationChannel(ch.id)
+                com.vyneural.bineural.util.BineuralLog.d(
+                    "notif-channel",
+                    "canal de alarmas obsoleto borrado: ${ch.id} (vigente: $activeId)",
+                )
+            }
+        }
+    }
+
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val alarmsChannelId = alarmChannelId(context)
+        dropStaleAlarmChannels(nm, alarmsChannelId)
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_REMINDERS, "Recordatorios Vyneural", NotificationManager.IMPORTANCE_DEFAULT),
         )
@@ -73,7 +156,7 @@ object NotificationHelper {
         // aunque el teléfono esté en silencio/No molestar según la política del
         // SO, y vibra. No es el "pop" genérico de una notificación.
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_ALARMS, "Alarmas Vyneural", NotificationManager.IMPORTANCE_HIGH).apply {
+            NotificationChannel(alarmsChannelId, "Alarmas Vyneural", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Alarmas reales de sesión (sonido de alarma + vibración)"
                 enableVibration(true)
                 setVibrationPattern(VIBRATION_ALARM)
@@ -89,6 +172,11 @@ object NotificationHelper {
                 // lo que explica el "a veces" (varía según el modo activo en cada
                 // disparo). Como sonido/importancia, bypassDnd solo se aplica al
                 // CREARSE el canal — de ahí el bump a v8 (ver arriba).
+                // v13 (2026-11-08): esta línea fue un NO-OP desde v8 hasta hoy —
+                // faltaba ACCESS_NOTIFICATION_POLICY en el manifest Y el acceso a
+                // DND concedido por el usuario. Ahora el id del canal depende de
+                // ese acceso (CHANNEL_ALARMS_DND), así que esta llamada solo
+                // "cuenta" en el canal que nace con el acceso ya concedido.
                 setBypassDnd(true)
                 // Reportado en vivo: ni el botón "Probar notificación" ni las
                 // alarmas reales sonaban/vibraban en un dispositivo — hueco
@@ -128,7 +216,7 @@ object NotificationHelper {
                 setShowBadge(true)
             },
         )
-        logChannelState(nm)
+        logChannelState(nm, alarmsChannelId)
     }
 
     /** Diagnóstico: v4/v5/v6 fueron sucesivos intentos a ciegas de arreglar
@@ -137,13 +225,17 @@ object NotificationHelper {
      *  efectivamente terminó aplicando al canal (no lo que le pedimos) —
      *  visible con `adb logcat -s BineuralLog` — para la próxima vez saber
      *  con certeza en vez de seguir adivinando con otro bump de versión. */
-    private fun logChannelState(nm: NotificationManager) {
+    private fun logChannelState(nm: NotificationManager, channelId: String) {
         try {
-            val ch = nm.getNotificationChannel(CHANNEL_ALARMS) ?: return
+            val ch = nm.getNotificationChannel(channelId) ?: return
             com.vyneural.bineural.util.BineuralLog.d(
                 "notif-channel",
                 "id=${ch.id} importance=${ch.importance} sound=${ch.sound} " +
                     "vibrationEnabled=${ch.shouldVibrate()} pattern=${ch.vibrationPattern?.toList()} " +
+                    // bypassDnd en el log: es lo que confirma de un vistazo si el
+                    // arreglo de v13 (permiso + acceso a DND) está surtiendo efecto
+                    // en el dispositivo real, sin tener que leer dumpsys.
+                    "bypassDnd=${ch.canBypassDnd()} " +
                     "audioAttrs=${ch.audioAttributes}",
             )
         } catch (e: Exception) {
@@ -168,7 +260,7 @@ object NotificationHelper {
     fun channelDegraded(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val ch = nm.getNotificationChannel(CHANNEL_ALARMS) ?: return false
+        val ch = nm.getNotificationChannel(alarmChannelId(context)) ?: return false
         return ch.importance < NotificationManager.IMPORTANCE_HIGH
     }
 
@@ -180,7 +272,7 @@ object NotificationHelper {
         try {
             val i = Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                 .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
-                .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, CHANNEL_ALARMS)
+                .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, alarmChannelId(context))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(i)
         } catch (e: Exception) {
@@ -213,8 +305,8 @@ object NotificationHelper {
      *  arriba) — la única forma de tener sonido/vibración DISTINTOS por
      *  alarma es un canal propio por combinación, creado la primera vez que
      *  se usa. La combinación por defecto (sin sonido custom, vibración
-     *  "default") sigue siendo CHANNEL_ALARMS de siempre — nada cambia para
-     *  una alarma sin personalizar. `soundUri`: URI elegida con el picker de
+     *  "default") sigue siendo el canal de alarmas de siempre — nada cambia
+     *  para una alarma sin personalizar. `soundUri`: URI elegida con el picker de
      *  tonos del sistema (ACTION_RINGTONE_PICKER, TYPE_ALARM) — no un
      *  catálogo fijo nuestro, así el usuario elige entre lo que YA tiene en
      *  su teléfono, sin depender de archivos de audio propios. */
@@ -223,13 +315,17 @@ object NotificationHelper {
 
     fun channelFor(context: Context, soundUri: String?, vibrationId: String): String {
         val vibKey = if (VIBRATIONS.containsKey(vibrationId)) vibrationId else "default"
-        if (usesDefaultAlarmChannel(soundUri, vibrationId)) return CHANNEL_ALARMS
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CHANNEL_ALARMS
-        // Deriva del mismo CHANNEL_ALARMS de arriba (no un literal aparte) —
+        val base = alarmChannelId(context)
+        if (usesDefaultAlarmChannel(soundUri, vibrationId)) return base
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return base
+        // Deriva del id EFECTIVO del canal por defecto (no un literal aparte) —
         // antes este prefijo estaba hardcodeado como "bineural_alarms_v9_",
         // desincronizado del bump de la constante de arriba, así que un
         // futuro v11/v12 solo tocaría uno de los dos lugares por accidente.
-        val id = "${CHANNEL_ALARMS}_" + kotlin.math.abs((soundUri.orEmpty() + "|" + vibKey).hashCode())
+        // Al derivar de alarmChannelId() los canales personalizados también
+        // nacen del lado correcto del acceso a DND (si no, tendrían el mismo
+        // no-op de setBypassDnd que tuvo el canal por defecto hasta v12).
+        val id = "${base}_" + kotlin.math.abs((soundUri.orEmpty() + "|" + vibKey).hashCode())
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(id) == null) {
             val alarmSound = soundUri?.let { android.net.Uri.parse(it) }
@@ -471,7 +567,7 @@ object NotificationHelper {
         }
         if (alarmId != null) markShown(context, alarmId)
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        logChannelState(nm)
+        logChannelState(nm, alarmChannelId(context))
         val notification = alarmNotification(
             context, title, body, freq, beat, wave, alarmId, soundUri, vibrationId,
             snoozeEnabled, snoozeMinutes, notifyOnly,

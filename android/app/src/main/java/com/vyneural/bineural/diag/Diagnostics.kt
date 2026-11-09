@@ -104,7 +104,13 @@ object Diagnostics {
         // versionado v2+) — siempre reportaba NO sin importar el estado real
         // del canal vigente. Usa la constante actual, la misma que crea
         // ensureChannels() y consulta alarmChannelDiagnostics().
-        b.appendLine("  Channel alarms: ${if (channelExists(context, NotificationHelper.CHANNEL_ALARMS)) "YES" else "NO"}")
+        // v13 — el id del canal de alarmas depende del acceso a No Molestar
+        // concedido por el usuario (NotificationHelper.alarmChannelId): se
+        // imprime el id REAL, no el literal, justamente para poder distinguir
+        // en un reporte cuál de las dos variantes está vigente.
+        val alarmsChannel = NotificationHelper.alarmChannelId(context)
+        b.appendLine("  Channel alarms: ${if (channelExists(context, alarmsChannel)) "YES" else "NO"} ($alarmsChannel)")
+        b.appendLine("  DND policy access: ${if (NotificationHelper.dndAccessGranted(context)) "GRANTED" else "NOT GRANTED"}")
         b.appendLine()
         b.appendLine("ALARMS:")
         val s = AlarmScheduler(context)

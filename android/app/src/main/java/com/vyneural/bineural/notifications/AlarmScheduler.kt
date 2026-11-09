@@ -40,7 +40,6 @@ class AlarmScheduler(private val context: Context) {
 
     private val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     private val prefs = context.getSharedPreferences("bineural_alarms", Context.MODE_PRIVATE)
-    private val ACTION_SILENCE_PREFIX = "com.vyneural.bineural.SILENCE_ALARM_"
 
     fun canScheduleExact(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.canScheduleExactAlarms() else true
@@ -123,23 +122,14 @@ class AlarmScheduler(private val context: Context) {
     fun cancel(alarmId: String) {
         prefs.edit().remove(alarmId).apply()
         am.cancel(pendingIntent(alarmId))
-        cancelSilence(alarmId)
-    }
-
-    /** Cancela un silencio programado por una versión anterior de la app. */
-    private fun cancelSilence(alarmId: String) {
-        am.cancel(silencePendingIntent(alarmId))
-    }
-
-    private fun silencePendingIntent(alarmId: String): PendingIntent {
-        val i = Intent(context, AlarmSilenceReceiver::class.java)
-            .setAction("$ACTION_SILENCE_PREFIX$alarmId")
-        return PendingIntent.getBroadcast(
-            context,
-            alarmId.hashCode(),
-            i,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        // Antes acá había un cancelSilence(alarmId) que cancelaba la alarma de
+        // "silenciar" que programaba scheduleSilence() en versiones anteriores.
+        // Se eliminó junto con AlarmSilenceReceiver: el límite de sonido lo
+        // aplica el sistema con builder.setTimeoutAfter() desde que se migró
+        // (ver NotificationHelper.alarmNotification), así que no hay nada que
+        // cancelar — y las alarmas de AlarmManager de la versión anterior ya no
+        // existen de todos modos: el SO las descarta al reemplazar el paquete
+        // (igual que en un reinicio, de ahí BootReceiver/rescheduleAll).
     }
 
     fun list(): List<String> = prefs.all.keys.toList()

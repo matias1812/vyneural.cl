@@ -133,7 +133,15 @@ class AndroidBridge(
         val j = JSONObject()
         try {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            val ch = nm.getNotificationChannel(com.vyneural.bineural.notifications.NotificationHelper.CHANNEL_ALARMS)
+            // v13 — el id del canal de alarmas ya no es una constante: depende
+            // del acceso a No Molestar (ver NotificationHelper.alarmChannelId).
+            // ensureChannels() antes de leer para que, al volver de la pantalla
+            // de Ajustes donde se concede ese acceso, el canal correcto YA
+            // exista cuando la web re-consulta las capacidades.
+            com.vyneural.bineural.notifications.NotificationHelper.ensureChannels(context)
+            val ch = nm.getNotificationChannel(
+                com.vyneural.bineural.notifications.NotificationHelper.alarmChannelId(context),
+            )
             if (ch == null) {
                 j.put("exists", false)
                 return j
@@ -150,6 +158,17 @@ class AndroidBridge(
             // canal, no asumir que setBypassDnd(true) en ensureChannels() bastó
             // (requiere además el permiso ACCESS_NOTIFICATION_POLICY concedido).
             j.put("canBypassDnd", ch.canBypassDnd())
+            // v13 — separa las dos causas posibles de canBypassDnd=false, que
+            // hasta ahora se veían iguales desde la web: (a) el usuario todavía
+            // no concedió el acceso a No Molestar → el botón de la campana lo
+            // resuelve; (b) lo concedió y Android/el fabricante IGUAL dejó el
+            // canal sin bypass → no hay nada que la app pueda hacer y el
+            // diagnóstico tiene que decirlo en vez de mandar al usuario de nuevo
+            // a la misma pantalla de Ajustes.
+            j.put(
+                "dndAccessGranted",
+                com.vyneural.bineural.notifications.NotificationHelper.dndAccessGranted(context),
+            )
             // Verificación cruzada: ¿el sistema global de notificaciones/canal
             // está siquiera habilitado para bloquear/silenciar por fuera del
             // permiso POST_NOTIFICATIONS?
@@ -236,6 +255,28 @@ class AndroidBridge(
                     val vibrationId = payload.optString("vibrationId", "default")
                     val snoozeEnabled = payload.optBoolean("snoozeEnabled", false)
                     val snoozeMinutes = payload.optInt("snoozeMinutes", 5)
+                    // Este camino NO pasa localId/timezone/localTime (sí los pasa
+                    // AlarmSync.applyAlarms para las alarmas del servidor), y eso
+                    // está BIEN — revisado a fondo el 2026-11-08 porque parecía un
+                    // bug de dedup. Por qué no lo es:
+                    // - localId: acá `alarmId` YA ES el id local de la web
+                    //   (main.js:4484 / rutina.js:1233 mandan `alarm.id`), que es
+                    //   exactamente el valor que la web guarda como `config.localId`
+                    //   en la nube (main.js:4640 / rutina.js:1369) y que el backend
+                    //   reenvía por FCM. AlarmReceiver, cuando el record no tiene
+                    //   localId, deduplica con la clave del prefs — que es este
+                    //   mismo id. O sea: misma clave de dedup por los dos caminos.
+                    //   Además AlarmSync cancela la copia local (cancel(localId))
+                    //   en cuanto aparece la del servidor, así que con sesión
+                    //   abierta las dos nunca coexisten.
+                    // - timezone/localTime: solo se usan para recurrentes, y los
+                    //   fallbacks de schedule() son los correctos para una alarma
+                    //   creada EN ESTE dispositivo (ZoneId.systemDefault() y hh:mm
+                    //   derivados de `atMs`, que la web calculó en hora local). El
+                    //   pin explícito de zona existe para las del servidor, que
+                    //   pueden venir de otro dispositivo/zona.
+                    // Si algún día la web manda un alarmId distinto de su localId,
+                    // esta invariante se rompe en silencio: es el único riesgo real.
                     scheduler.schedule(id, title, body, at, days, freq, beat, wave, soundUri, vibrationId, snoozeEnabled, snoozeMinutes)
                     respond("OK", command, null)
                 }
@@ -275,7 +316,10 @@ class AndroidBridge(
                     try {
                         val i = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                             .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                            .putExtra(Settings.EXTRA_CHANNEL_ID, com.vyneural.bineural.notifications.NotificationHelper.CHANNEL_ALARMS)
+                            .putExtra(
+                                Settings.EXTRA_CHANNEL_ID,
+                                com.vyneural.bineural.notifications.NotificationHelper.alarmChannelId(context),
+                            )
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         context.startActivity(i)
                         respond("OK", command, null)

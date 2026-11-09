@@ -306,7 +306,7 @@ object AlarmSync {
         // dispare igual un reporte nuevo.
         val channelImportance = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.getNotificationChannel(NotificationHelper.CHANNEL_ALARMS)?.importance
+            nm.getNotificationChannel(NotificationHelper.alarmChannelId(context))?.importance
         } else null
         val batteryUnrestricted = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)
             ?.isIgnoringBatteryOptimizations(context.packageName)

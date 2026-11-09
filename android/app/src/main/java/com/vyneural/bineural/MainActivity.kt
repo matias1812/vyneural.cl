@@ -433,6 +433,14 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         webView.onResume()
         LifecycleManager.onResume()
+        // v13 — el id del canal de alarmas depende del acceso a No Molestar, que
+        // el usuario concede en una pantalla de AJUSTES del sistema (no hay
+        // diálogo in-app, ver NotificationHelper.dndAccessGranted). Al volver de
+        // esa pantalla pasamos por acá: re-asegurar los canales es lo que hace
+        // que el canal con bypassDnd de verdad nazca en ese momento, sin exigir
+        // reiniciar la app. Idempotente (createNotificationChannel es no-op
+        // sobre un id existente), ya se llama también en onCreate y en showAlarm.
+        NotificationHelper.ensureChannels(this)
         syncAuthFromNativeStore()
         // Sincronización al volver a primer plano: si hay sesión, las alarmas
         // creadas en la web mientras la app estuvo cerrada llegan al instante
