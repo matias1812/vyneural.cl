@@ -3,7 +3,14 @@
 //
 // Única autoridad sobre: creación, persistencia, programación y ejecución de
 // alarmas. Arquitectura de providers: LocalNotification / ServiceWorker /
-// Calendar (viven en notifications.js); Push queda DESACTIVADO (sin backend).
+// Calendar (viven en notifications.js). Web Push SÍ está conectado de punta
+// a punta (suscripción en ui/auth.js::syncPushState → POST /push/subscribe →
+// reminders.py::_dispatch_push → FCM o fallback a Web Push VAPID real vía
+// push/service.py → listener 'push' en public/sw.js) — este comentario decía
+// "DESACTIVADO (sin backend)" desde el 2026-08-14, pero el backend de push
+// existe desde el 2026-08-16/17; quedó desactualizado ~3 meses. Dentro de la
+// APK este camino se desactiva a propósito (auth.js) porque ahí FCM nativo ya
+// cubre el dispositivo — no es el caso web/PWA.
 //
 // Persistencia: IndexedDB (durable) con espejo síncrono en localStorage para
 // la UI (getAlarms() sigue funcionando); si IndexedDB no existe, localStorage.
