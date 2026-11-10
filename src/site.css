@@ -4771,6 +4771,32 @@ label.it-step-notify-sub {
   max-width: 720px;
   margin: 0 auto;
   padding: 40px 20px 10px;
+  /* PERF (auditoría T4b 2026-11-10): última sección de la home, arranca a
+     ~3160px del tope (65% de la página) — muy lejos del near-viewport, así
+     que el navegador se salta su estilo/layout/paint en la carga y lo paga
+     recién cuando bajás. En el arranque la lista todavía está vacía (los
+     comentarios llegan del backend, ver src/comments.js), así que el ahorro
+     medido en la tarea larga es chico; crece con la cantidad de
+     comentarios, que es justo lo que va a pasar en producción.
+     `auto` recuerda el alto real una vez pintada; 520px es el valor de
+     arranque (la sección mide 420-500px sin comentarios cargados).
+     Nada lee geometría acá dentro (comments.js no usa
+     getBoundingClientRect/scrollIntoView) ni hay anclas `#comments` en la
+     nav, así que no hay nada que se rompa por no tener layout todavía. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 520px;
+}
+
+/* Al imprimir no hay "near-viewport": se fuerza el render de todo para que
+   nada salga en blanco en el PDF/papel. (El override gemelo de
+   `.state-group` vive en style.css, al lado de su regla: site.css se carga
+   ANTES que style.css — site.js importa site.css y main.js importa
+   style.css, en ese orden en index.html — así que una regla de print puesta
+   acá perdería el empate de especificidad contra style.css.) */
+@media print {
+  .comments-section {
+    content-visibility: visible;
+  }
 }
 
 .comments-head {

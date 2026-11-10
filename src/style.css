@@ -706,6 +706,41 @@ body {
 /* Grupos de estados por objetivo: encabezado + sub-rejilla. */
 .state-group {
   margin-top: 18px;
+  /* PERF (long task de arranque, auditoría T4b 2026-11-10): #estados mete
+     574 elementos en el DOM de la home y su layout inicial era la parte más
+     cara de la tarea larga del arranque. La sección entera NO sirve como
+     unidad para saltarse: arranca a ~770px del tope, dentro del
+     "near-viewport" de Chrome (viewport + 50% en cada dirección), así que
+     siempre se renderiza. Los GRUPOS sí: con el filtro por defecto
+     (⭐ Destacados) son 6, y los 3 de abajo (tope 1395/1615/1818px con un
+     viewport de 915px) caen fuera de esa ventana y el navegador se ahorra
+     su estilo + layout + paint hasta que te acercas con el scroll.
+     Medido con Playwright + 4× de throttling de CPU sobre el build de
+     producción, 412×915, 4 repeticiones intercaladas contra la línea base:
+     la tarea más larga del arranque baja de ~600ms a ~545ms (-9%).
+     `auto` en contain-intrinsic-size hace que, una vez renderizado un
+     grupo, se recuerde su alto real — el 200px es solo el valor de arranque
+     para los que todavía no se pintaron nunca (los grupos miden 185-311px
+     en móvil y 185-221px en escritorio con ese filtro). Sin `auto` el alto
+     quedaría clavado en 200px y volver con el scroll daría saltos.
+     Ojo si se toca: `content-visibility` implica `contain: paint`, que
+     recorta lo que pinte fuera del borde del grupo. Verificado que nada se
+     sale (el translateY(-3px) del hover apunta hacia arriba y la primera
+     fila de tarjetas arranca ~27px bajo el tope del grupo, por el título).
+     Tampoco hay JS que lea geometría dentro de un grupo antes de que se
+     acerque: checkReveal() sí lee el rect de cada `.card`, pero corre
+     recién en afterFirstPaint(), después del layout inicial que es el que
+     nos interesa abaratar. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+
+/* Al imprimir no hay "near-viewport": se fuerza el render de todos los
+   grupos para que no salgan en blanco en el PDF/papel. */
+@media print {
+  .state-group {
+    content-visibility: visible;
+  }
 }
 
 .state-group:first-of-type {
