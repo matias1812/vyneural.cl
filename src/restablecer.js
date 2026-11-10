@@ -3,7 +3,7 @@
 // solo uso que llegó por email (?token=…). Exige confirmar la contraseña.
 
 import { resetPassword } from './api/auth.js';
-import { validatePasswordStrength } from './ui/auth.js';
+import { validatePasswordStrength, errorDetail } from './ui/auth.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -69,7 +69,7 @@ async function run() {
         showDone();
       } catch (err) {
         const status = err && err.status;
-        const detail = (err && err.detail) || '';
+        const detail = errorDetail(err, '');
         if (status === 400 && /venció/i.test(detail)) {
           setError('El enlace venció (dura 30 minutos). Pedí uno nuevo desde "Olvidé mi contraseña".');
         } else if (status === 400) {

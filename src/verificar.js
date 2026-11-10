@@ -5,6 +5,7 @@
 
 import { verifyEmail } from './api/auth.js';
 import { getAccessToken } from './api/client.js';
+import { errorDetail } from './ui/auth.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -65,7 +66,7 @@ async function run() {
     });
   } catch (err) {
     const status = err && err.status;
-    const detail = (err && err.detail) || '';
+    const detail = errorDetail(err, '');
     if (status === 400 && /venció/i.test(detail)) {
       setState({
         title: 'El enlace venció',

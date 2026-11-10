@@ -38,6 +38,7 @@ import {
 } from '../api/marketing.js';
 import { celebrateBurst, prefersReducedMotion } from './celebrate.js';
 import { loadState, saveState } from '../onboarding-flow.js';
+import { errorDetail } from './auth.js';
 
 // Orden y nombres de los pasos: se derivan de ONBOARDING_MILESTONES (misma
 // fuente que usa la lógica de hitos) para no tener dos listas que puedan
@@ -473,7 +474,7 @@ function errorMessage(err, fallback) {
     const base = err.detail || 'Alcanzaste el límite diario de encuestas';
     return `${base}. Puedes responder esto mañana; no perdiste nada.`;
   }
-  return (err && err.detail) || fallback;
+  return errorDetail(err, fallback);
 }
 
 const SAVE_FALLBACK = Object.freeze({

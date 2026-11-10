@@ -52,6 +52,7 @@ import { getOrCreateConversation, sendMessage, getMessages, rateConversation, re
 import { ApiError } from './api/client.js';
 import { openSupportSocket } from './api/support-ws-client.js';
 import { isPremiumUser } from './ui/premium-gate.js';
+import { errorDetail } from './ui/auth.js';
 import { ensureSupportFab } from './support-fab.js';
 // LS_CONV_ID vive en el boot: él tiene que leer la clave ANTES de cargar este
 // módulo (para decidir si retoma el polling de fondo), así que es la única
@@ -450,7 +451,7 @@ export function initSupportChat() {
       if (err instanceof ApiError && err.status === 429) {
         showStatus('Estás enviando demasiadas solicitudes — esperá un momento.', true);
       } else {
-        showStatus((err && err.detail) || 'No se pudo conectar con soporte. Probá de nuevo en un momento.', true);
+        showStatus(errorDetail(err, 'No se pudo conectar con soporte. Probá de nuevo en un momento.'), true);
       }
       return false;
     }
@@ -606,7 +607,7 @@ export function initSupportChat() {
       if (err instanceof ApiError && err.status === 429) {
         showStatus('Estás enviando mensajes muy rápido — esperá un momento antes de reintentar.', true);
       } else {
-        showStatus((err && err.detail) || 'No se pudo enviar el mensaje.', true);
+        showStatus(errorDetail(err, 'No se pudo enviar el mensaje.'), true);
       }
     } finally {
       sendBtn.disabled = false;
@@ -633,7 +634,7 @@ export function initSupportChat() {
       if (err instanceof ApiError && err.status === 429) {
         showStatus('Estás enviando demasiadas solicitudes — esperá un momento.', true, reportStatusEl);
       } else {
-        showStatus((err && err.detail) || 'No se pudo enviar el reporte.', true, reportStatusEl);
+        showStatus(errorDetail(err, 'No se pudo enviar el reporte.'), true, reportStatusEl);
       }
     } finally {
       reportSendBtn.disabled = false;
@@ -681,7 +682,7 @@ export function initSupportChat() {
       resetLocalState();
       close();
     } catch (err) {
-      rateErrorEl.textContent = (err && err.detail) || 'No se pudo enviar la calificación. Probá de nuevo.';
+      rateErrorEl.textContent = errorDetail(err, 'No se pudo enviar la calificación. Probá de nuevo.');
       rateErrorEl.classList.remove('hidden');
     }
   }

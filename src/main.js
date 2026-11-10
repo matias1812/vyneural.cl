@@ -92,6 +92,7 @@ import { createAlarm, updateAlarm, deleteAlarm, listAlarms as listServerAlarms }
 import { listAlarmNotifications } from './api/alarm-notifications.js';
 // P1.5 Fase 5 — proveedor ÚNICO de audio (WEB | NATIVE | NONE). Nunca dos motores.
 import { assertSingleAudioProvider, providerLabel } from './core/audio-provider.js';
+import { errorDetail } from './ui/auth.js';
 
 // Initialize Vercel Analytics (no-op in development)
 inject();
@@ -2257,7 +2258,7 @@ if (customSaveFreqBtn) {
       setCustomSaveNote('✅ Guardada en tu cuenta.');
       loadSavedFrequencies();
     } catch (err) {
-      setCustomSaveNote((err && err.detail) || 'No se pudo guardar. Intentá de nuevo.', true);
+      setCustomSaveNote(errorDetail(err, 'No se pudo guardar. Intentá de nuevo.'), true);
     } finally {
       customSaveFreqBtn.disabled = false;
     }
@@ -5414,18 +5415,6 @@ if (deepAutostart && isFinite(deepFreq) && deepFreq > 0 && !playing) {
 // sesión). Se omite con autostart (start() configura la sesión de la alarma).
 if (!deepAutostart) {
   syncUiWithNativeSession();
-}
-
-// Registro del service worker para la PWA (solo en producción y solo sobre http/https:
-// dentro de la APK la página vive en file://, donde no hay service worker).
-if (
-  'serviceWorker' in navigator &&
-  /^https?:$/.test(location.protocol) &&
-  location.hostname !== 'localhost'
-) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  });
 }
 
 // Solo para el arranque: un cold start de Render (20-50s) hacía que el

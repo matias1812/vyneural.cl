@@ -38,7 +38,7 @@ import { listDevices, forgetDevice, reportDevice } from './api/devices.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
 import { celebrateBurst } from './ui/celebrate.js';
 import { enhanceOtpSlots, refreshOtpSlots, setOtpSlotsInvalid } from './ui/otp-slots.js';
-import { EMAIL_RE, validatePasswordStrength } from './ui/auth.js';
+import { EMAIL_RE, validatePasswordStrength, errorDetail } from './ui/auth.js';
 import './marketing.css';
 import { marketingConsentPresentation } from './marketing-ui.js';
 import {
@@ -584,7 +584,7 @@ async function startOneclickInscription(btn, forceNewCard) {
     btn.textContent = original;
     await notifyModal({
       title: 'No se pudo iniciar la inscripción',
-      text: (err && err.detail) || 'reintentá en unos segundos',
+      text: errorDetail(err, 'reintentá en unos segundos'),
     });
   }
 }
@@ -779,7 +779,7 @@ function wireCouponButton() {
         // — revertir el switch visualmente a como estaba antes del click.
         switchEl.checked = !switchEl.checked;
         if (errorEl) {
-          errorEl.textContent = (err && err.detail) || 'No se pudo conectar — probá de nuevo.';
+          errorEl.textContent = errorDetail(err, 'No se pudo conectar — probá de nuevo.');
           errorEl.classList.remove('hidden');
         }
       } finally {
@@ -856,7 +856,7 @@ function wireOneclickButtons() {
         cancelBtn.disabled = false;
         await notifyModal({
           title: 'No se pudo cancelar',
-          text: (err && err.detail) || 'reintentá en unos segundos',
+          text: errorDetail(err, 'reintentá en unos segundos'),
         });
       }
     });
@@ -1399,7 +1399,7 @@ function wireEditProfile() {
         showOk('Perfil actualizado ✓');
       }
     } catch (err) {
-      showErr((err && err.detail) || 'No se pudo actualizar el perfil.');
+      showErr(errorDetail(err, 'No se pudo actualizar el perfil.'));
     } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = original;
@@ -1437,7 +1437,7 @@ function wirePasswordForm() {
       errEl.classList.add('auth-ok');
       showErr('Contraseña actualizada ✓. Cerramos las demás sesiones: iniciá sesión de nuevo en tus otros dispositivos.');
     } catch (e2) {
-      showErr((e2 && e2.detail) || 'No se pudo cambiar la contraseña. Verificá la contraseña actual.');
+      showErr(errorDetail(e2, 'No se pudo cambiar la contraseña. Verificá la contraseña actual.'));
     } finally {
       btn.disabled = false;
       btn.textContent = 'Actualizar contraseña';
@@ -1630,7 +1630,7 @@ function wire2fa() {
           twoFaKnown = true;
           paint2fa();
         } else {
-          set2faError('cuenta-2fa-enroll-error', (err && err.detail) || 'No se pudo empezar el enrolamiento. Intentá de nuevo.');
+          set2faError('cuenta-2fa-enroll-error', errorDetail(err, 'No se pudo empezar el enrolamiento. Intentá de nuevo.'));
           $('cuenta-2fa-enroll').hidden = false;
         }
       } finally {
@@ -1687,7 +1687,7 @@ function wire2fa() {
       } catch (err) {
         set2faError(
           'cuenta-2fa-enroll-error',
-          (err && err.detail) || 'El código no es correcto. Revisá el que muestra tu app ahora mismo.',
+          errorDetail(err, 'El código no es correcto. Revisá el que muestra tu app ahora mismo.'),
         );
       } finally {
         btn.disabled = false;
@@ -1822,7 +1822,7 @@ function wire2fa() {
       } catch (err) {
         set2faError(
           'cuenta-2fa-disable-error',
-          (err && err.detail) || 'No se pudo desactivar. Verificá tu contraseña y el código.',
+          errorDetail(err, 'No se pudo desactivar. Verificá tu contraseña y el código.'),
         );
       } finally {
         btn.disabled = false;
@@ -1868,7 +1868,7 @@ function wire2fa() {
       } catch (err) {
         set2faError(
           'cuenta-2fa-regen-error',
-          (err && err.detail) || 'No se pudieron regenerar. Verificá tu contraseña.',
+          errorDetail(err, 'No se pudieron regenerar. Verificá tu contraseña.'),
         );
       } finally {
         btn.disabled = false;
@@ -1963,7 +1963,7 @@ function wireDeleteAccount() {
       close();
       renderGate();
     } catch (err) {
-      showErr((err && err.detail) || 'No se pudo eliminar la cuenta. Verificá la contraseña.');
+      showErr(errorDetail(err, 'No se pudo eliminar la cuenta. Verificá la contraseña.'));
     } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = 'Sí, eliminar mi cuenta y mis datos';

@@ -946,9 +946,23 @@ function showResendFeedback(msg, isError) {
   if (!inSentView) setView('sent');
 }
 
-function friendlyError(err) {
+// Extracción cruda de `err.detail` (texto del backend) con fallback: el
+// patrón `(err && err.detail) || 'mensaje propio'` se repetía ~40 veces en
+// 12 archivos (admin.js, cuenta.js, rutina.js, support-chat.js, etc.),
+// cada uno con su propio texto de fallback. A diferencia de friendlyError
+// (abajo) — que traduce CÓDIGOS DE ESTADO del flujo de login/registro a
+// textos específicos de esa UI ("Email o contraseña incorrectos", cuenta
+// inactiva, username tomado) y por eso solo tiene sentido dentro del modal
+// de autenticación — esta función no interpreta el status, solo centraliza
+// la extracción; es segura de reutilizar en cualquier pantalla porque nunca
+// pisa el detail real del backend con un texto ajeno al contexto que llama.
+export function errorDetail(err, fallback) {
+  return (err && err.detail) || fallback;
+}
+
+export function friendlyError(err) {
   const status = err && err.status;
-  const detail = (err && err.detail) || '';
+  const detail = errorDetail(err, '');
   if (status === 429) return 'Demasiados intentos. Esperá un momento y volvé a intentar.';
   if (status === 409) {
     // Desde que /auth/register dejó de responder 409 por email ya registrado

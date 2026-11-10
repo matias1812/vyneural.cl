@@ -25,6 +25,7 @@ import {
 } from './platform/google-play-redeem.js';
 import { initStarfield } from './starfield.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
+import { errorDetail } from './ui/auth.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -630,7 +631,7 @@ async function buyPlan(plan, btn, activePlanKey) {
     clearTimeout(timer);
     btn.disabled = false;
     btn.textContent = originalLabel;
-    const detail = (err && err.detail) || '';
+    const detail = errorDetail(err, '');
     showError(
       typeof detail === 'string' && detail
         ? detail

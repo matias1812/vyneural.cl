@@ -27,6 +27,7 @@ import {
 } from './api/admin.js';
 import { openSupportSocket } from './api/support-ws-client.js';
 import { confirmModal, notifyModal } from './ui/confirm-modal.js';
+import { errorDetail } from './ui/auth.js';
 import {
   CONTRACT_TEMPLATES, fillClauses, defaultClausesFor,
 } from './ui/contract-templates.js';
@@ -168,7 +169,7 @@ function renderAdminCouponList(coupons) {
         } catch (err) {
           saveBtn.disabled = false;
           if (errorEl) {
-            errorEl.textContent = (err && err.detail) || 'No se pudo guardar los cambios.';
+            errorEl.textContent = errorDetail(err, 'No se pudo guardar los cambios.');
             errorEl.classList.remove('hidden');
           }
         }
@@ -192,7 +193,7 @@ function renderAdminCouponList(coupons) {
           deleteBtn.disabled = false;
           await notifyModal({
             title: 'No se pudo eliminar',
-            text: (err && err.detail) || 'Reintentá en unos segundos.',
+            text: errorDetail(err, 'Reintentá en unos segundos.'),
           });
         }
       });
@@ -251,7 +252,7 @@ function wireAdminCouponForm() {
       await loadAdminCoupons();
     } catch (err) {
       if (errorEl) {
-        errorEl.textContent = (err && err.detail) || 'No se pudo crear el cupón.';
+        errorEl.textContent = errorDetail(err, 'No se pudo crear el cupón.');
         errorEl.classList.remove('hidden');
       }
     } finally {
@@ -531,7 +532,7 @@ function wireAdminSalesForm() {
         setTimeout(() => URL.revokeObjectURL(url), 4000);
       } catch (err) {
         if (errorEl) {
-          errorEl.textContent = (err && err.detail) || 'No se pudo descargar el CSV.';
+          errorEl.textContent = errorDetail(err, 'No se pudo descargar el CSV.');
           errorEl.classList.remove('hidden');
         }
       } finally {
@@ -552,7 +553,7 @@ function wireAdminSalesForm() {
         await downloadSalesPdf(from, to);
       } catch (err) {
         if (errorEl) {
-          errorEl.textContent = (err && err.detail) || 'No se pudo generar el PDF.';
+          errorEl.textContent = errorDetail(err, 'No se pudo generar el PDF.');
           errorEl.classList.remove('hidden');
         }
       } finally {
@@ -675,7 +676,7 @@ function wireAdminUserRows(list) {
                 btn.disabled = false;
                 await notifyModal({
                   title: 'No se pudo reembolsar',
-                  text: (err && err.detail) || 'reintentá en unos segundos',
+                  text: errorDetail(err, 'reintentá en unos segundos'),
                 });
               }
             });
@@ -707,7 +708,7 @@ function wireAdminUserRows(list) {
           await loadAdminUsers();
         } catch (err) {
           if (errorEl) {
-            errorEl.textContent = (err && err.detail) || 'No se pudo otorgar Premium.';
+            errorEl.textContent = errorDetail(err, 'No se pudo otorgar Premium.');
             errorEl.classList.remove('hidden');
           }
         } finally {
@@ -725,7 +726,7 @@ function wireAdminUserRows(list) {
           await loadAdminUsers();
         } catch (err) {
           if (errorEl) {
-            errorEl.textContent = (err && err.detail) || 'No se pudo revocar Premium.';
+            errorEl.textContent = errorDetail(err, 'No se pudo revocar Premium.');
             errorEl.classList.remove('hidden');
           }
         } finally {
@@ -1149,7 +1150,7 @@ function wireAdminSupportReplyForm() {
       }
     } catch (err) {
       if (errorEl) {
-        errorEl.textContent = (err && err.detail) || 'No se pudo enviar la respuesta.';
+        errorEl.textContent = errorDetail(err, 'No se pudo enviar la respuesta.');
         errorEl.classList.remove('hidden');
       }
     } finally {
@@ -1211,7 +1212,7 @@ function wireAdminSupportResolveButton() {
       btn.disabled = false;
       await notifyModal({
         title: 'No se pudo marcar como resuelta',
-        text: (err && err.detail) || 'Reintentá en unos segundos.',
+        text: errorDetail(err, 'Reintentá en unos segundos.'),
       });
     }
   });
@@ -1609,7 +1610,7 @@ function wireMonthlyAccounting() {
         setTimeout(() => URL.revokeObjectURL(url), 4000);
       } catch (err) {
         if (errorEl) {
-          errorEl.textContent = (err && err.detail) || 'No se pudo descargar el CSV.';
+          errorEl.textContent = errorDetail(err, 'No se pudo descargar el CSV.');
           errorEl.classList.remove('hidden');
         }
       } finally {
@@ -1626,7 +1627,7 @@ function wireMonthlyAccounting() {
         await downloadMonthlyAccountingPdf();
       } catch (err) {
         if (errorEl) {
-          errorEl.textContent = (err && err.detail) || 'No se pudo generar el PDF.';
+          errorEl.textContent = errorDetail(err, 'No se pudo generar el PDF.');
           errorEl.classList.remove('hidden');
         }
       } finally {
@@ -1666,7 +1667,7 @@ function wireMonthlyAccounting() {
         await loadMonthlyAccounting();
       } catch (err) {
         if (invoiceError) {
-          invoiceError.textContent = (err && err.detail) || 'No se pudo crear la factura.';
+          invoiceError.textContent = errorDetail(err, 'No se pudo crear la factura.');
           invoiceError.classList.remove('hidden');
         }
       } finally {
@@ -1688,7 +1689,7 @@ function wireMonthlyAccounting() {
         await loadMonthlyAccounting();
       } catch (err) {
         if (invoiceError) {
-          invoiceError.textContent = (err && err.detail) || 'No se pudo borrar la factura.';
+          invoiceError.textContent = errorDetail(err, 'No se pudo borrar la factura.');
           invoiceError.classList.remove('hidden');
         }
         e.target.disabled = false;
@@ -2207,7 +2208,7 @@ function wireAdminContracts() {
       } catch (err) {
         await notifyModal({
           title: 'No se pudo generar el PDF',
-          text: (err && err.detail) || 'reintentá en unos segundos',
+          text: errorDetail(err, 'reintentá en unos segundos'),
         });
       } finally {
         downloadBtn.disabled = false;

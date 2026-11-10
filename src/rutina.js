@@ -29,6 +29,7 @@ import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js
 // src/ui/premium-gate.js, mismo criterio que el generador y /cuenta).
 import { isPremiumUser, openPremiumRequired } from './ui/premium-gate.js';
 import { celebrateBurst } from './ui/celebrate.js';
+import { errorDetail } from './ui/auth.js';
 
 // Refuerzo positivo puntual, UNA sola vez por navegador/dispositivo: la
 // primera alarma o el primer itinerario que el usuario crea. No hay canvas
@@ -858,7 +859,7 @@ function wireItCustomPanel() {
         panel.classList.add('hidden');
         toggle.setAttribute('aria-expanded', 'false');
       } catch (err) {
-        setItCustomNote((err && err.detail) || 'No se pudo guardar. Intentá de nuevo.', true);
+        setItCustomNote(errorDetail(err, 'No se pudo guardar. Intentá de nuevo.'), true);
       } finally {
         saveBtn.disabled = false;
         if (submitBtn) submitBtn.disabled = false;
@@ -1036,7 +1037,7 @@ function wireItineraryForm() {
       pendingStepEdit = false;
       return true;
     } catch (err) {
-      alert(`No se pudo preparar la frecuencia: ${(err && err.detail) || 'error'}`);
+      alert(`No se pudo preparar la frecuencia: ${errorDetail(err, 'error')}`);
       return false;
     } finally {
       add.disabled = false;
@@ -1164,7 +1165,7 @@ function wireItineraryForm() {
         // llegaba a sonar (ver notifyNativeAlarmsChanged en api/client.js).
         notifyNativeAlarmsChanged();
       } catch (err) {
-        alert(`No se pudo guardar el itinerario: ${(err && err.detail) || 'error'}`);
+        alert(`No se pudo guardar el itinerario: ${errorDetail(err, 'error')}`);
       } finally {
         if (submitBtn) submitBtn.disabled = false;
       }
@@ -1462,7 +1463,7 @@ itListEl.addEventListener('click', async (e) => {
       notifyNativeAlarmsChanged();
       loadItineraries();
     } catch (err) {
-      alert(`No se pudo eliminar: ${(err && err.detail) || 'error'}`);
+      alert(`No se pudo eliminar: ${errorDetail(err, 'error')}`);
       delBtn.disabled = false;
     }
     return;

@@ -10,6 +10,7 @@
 import { createFrequency } from '../api/frequencies.js';
 import { getAccessToken } from '../api/client.js';
 import { freqCoverSVG } from './freq-cover.js';
+import { errorDetail } from './auth.js';
 
 const WAVES = [
   { id: 'sine', label: 'Senoidal (suave)' },
@@ -170,7 +171,7 @@ async function onSubmit(e) {
       new CustomEvent('vyneural:freq-saved', { detail: { frequency } }),
     );
   } catch (err) {
-    const msg = (err && err.detail) || 'No se pudo guardar. Intentá de nuevo.';
+    const msg = errorDetail(err, 'No se pudo guardar. Intentá de nuevo.');
     setError(String(msg).slice(0, 300));
   } finally {
     setPending(false);
