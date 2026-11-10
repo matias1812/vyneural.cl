@@ -129,10 +129,16 @@ function renderShowAllButton(items) {
   btn.textContent = `Ver todos (${items.length})`;
 }
 
+// Intl.DateTimeFormat se construye UNA vez a nivel de módulo: crearlo por
+// llamada (lo que hacía toLocaleDateString acá, una vez por comentario
+// renderizado) medido en 259ms para ~10 fechas en el perfil de carga de la
+// home — reusar .format() evita ese costo repetido.
+const DATE_FMT = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+
 function fmtDate(iso) {
   if (!iso) return '';
   try {
-    return new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+    return DATE_FMT.format(new Date(iso));
   } catch (_) {
     return '';
   }
