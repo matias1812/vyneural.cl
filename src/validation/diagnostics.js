@@ -488,6 +488,67 @@ export async function runBineuralDiagnostics() {
     }
   });
 
+  runTest('Cymatics: besselJArray sobrevive la recurrencia de Miller en todo el rango declarado del solver (regresion: falta de reescalado BIGNO)', () => {
+    // Antes del reescalado BIGNO (Numerical Recipes §6.5) la recurrencia
+    // DESCENDENTE desbordaba el doble antes de llegar a m=0 cuando x es chico
+    // y el orden alto: besselJArray(56, 0.02) daba NaN en todo el array, y
+    // besselJArray(64, 0.0995) daba exactamente 0.0 en todo el array (tmp[0]
+    // -> Infinity => norm = 1/Infinity = 0). Los dos casos caen DENTRO del
+    // rango que el modulo declara soportar (ZERO_SOLVER_M_CAP = 64), asi que
+    // _jPrimePair()/_zeroColumn() se quedaban sin ceros para esos m.
+    // J_m(x) para x << m vale ~(x/2)^m/m!, y es lo que se chequea abajo.
+    const CASES = [
+      // [maxM, x, m, valor de referencia — serie de potencias J_m(x) = sum_k
+      // (-1)^k (x/2)^(2k+m)/(k!(k+m)!), forma iterativa sin overflow,
+      // precision completa de double (17 cifras). Para x chico la serie no
+      // tiene cancelacion catastrofica, asi que double alcanza para esto sin
+      // necesitar BigInt/decimal de precision arbitraria.
+      [56, 0.02, 56, 1.40647008695606821e-187],
+      [64, 0.02, 64, 7.88102008861457500e-218],
+      [64, 0.0995, 1, 4.96884582121778148e-2],
+      [56, 0.0404, 1, 2.01958790762598143e-2],
+    ];
+    for (const [maxM, x, m, want] of CASES) {
+      const out = new Float64Array(maxM + 1);
+      besselJArray(maxM, x, out);
+      for (let k = 0; k <= maxM; k++) {
+        if (!isFinite(out[k])) {
+          throw new Error(`besselJArray(${maxM}, ${x}) devolvio no-finito en out[${k}]=${out[k]}`);
+        }
+      }
+      if (out[0] === 0) {
+        throw new Error(`besselJArray(${maxM}, ${x})[0] = 0 — el array entero se anulo (norm = 1/Infinity)`);
+      }
+      const rel = Math.abs(out[m] - want) / Math.abs(want);
+      if (!(rel < 1e-12)) {
+        throw new Error(`besselJArray(${maxM}, ${x})[${m}] = ${out[m]}, referencia = ${want}, err.rel = ${rel.toExponential(2)}`);
+      }
+    }
+    // El reescalado NO debe mover el rango real de render: J_m(x) con m chico
+    // sigue cumpliendo la regla de suma J_0 + 2*sum J_2k = 1.
+    //
+    // Esta identidad es J_0(x) + 2*sum_{k=1}^{infinito} J_2k(x) = 1 — para
+    // truncarla en maxM=24 y que la suma parcial siga valiendo ~1 hace falta
+    // que la cola mas alla de m=24 sea despreciable, lo cual solo es cierto
+    // para x bien por debajo del "punto de giro" m~x donde J_m(x) empieza a
+    // decaer. x=60/120 (reales en el render, ver PHYS_A) estan MAS ALLA de
+    // ese punto de giro para maxM=24: ahi J_26..J_40 siguen en regimen
+    // oscilatorio sin decaer (amplitud ~sqrt(2/(pi x)), no despreciable), asi
+    // que la suma truncada NO vale ~1 por diseño matematico, no por ningun
+    // bug — probarlo en ese rango daria un falso positivo. Por eso este
+    // check se limita a x <= 10, donde la cola si es despreciable (medido:
+    // ~1.4e-9 en x=10, de ahi la tolerancia 1e-7 en vez de 1e-9 exacto).
+    const o = new Float64Array(25);
+    for (const x of [0.001, 0.02, 0.1, 1, 10]) {
+      besselJArray(24, x, o);
+      let s = o[0];
+      for (let k = 2; k <= 24; k += 2) s += 2 * o[k];
+      if (Math.abs(s - 1) > 1e-7) {
+        throw new Error(`regla de suma rota en x=${x}: J_0 + 2*sum J_2k = ${s}`);
+      }
+    }
+  });
+
   function jSeriesReference(m, x, terms = 60) {
     const halfX = x / 2;
     let sum = 0;

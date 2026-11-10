@@ -660,6 +660,42 @@ function _millerBuf(size) {
 // el validador los usan directo); aca simplemente ya no se splicean en
 // out[0]/out[1] - Miller los reproduce con acuerdo de ~1e-9 a 1e-12, muy
 // por debajo de cualquier tolerancia visual o de test existente.
+//
+// FIX 2 (auditoria 2026-11-09): a la recurrencia descendente le faltaba el
+// REESCALADO PERIODICO que exige Numerical Recipes §6.5. La recurrencia crece
+// hacia abajo por un factor ~2m/x por paso, asi que con x chico y M grande el
+// producto desborda el doble ANTES de llegar a m=0: tmp[0] ~ 1e-30 ·
+// prod_{m=1..M}(2m/x), que para x=0.02 y M=104 (maxM=56) da ~1e344 ->
+// Infinity, y el Infinity - Infinity del paso siguiente da NaN. Medido:
+// _jPrimePair(m, 0.02) devolvia NaN para TODO m de 51 a 64 (14 ordenes),
+// dentro del rango que el propio modulo declara soportar
+// (ZERO_SOLVER_M_CAP = 64), asi que _zeroColumn() para esos m perdia sus
+// ceros y zeroFor() caia a McMahon en silencio.
+//
+// Dos detalles deliberados del reescalado de aca:
+//
+//  (a) BIGNO es una POTENCIA DE DOS (2^256), no el 1e10 del libro. Dividir un
+//      doble normal por una potencia de dos solo le resta al exponente: es
+//      EXACTO, sin redondeo. Con 1e10 cada reescalado metia un error de
+//      redondeo nuevo y los valores del rango real de uso habrian cambiado en
+//      el ultimo bit; con 2^256 el resultado es bit-por-bit identico al de
+//      antes en todo el rango donde el reescalado no hace falta, y una copia
+//      exactamente escalada donde si. Headroom verificado: el crecimiento
+//      maximo de UN paso es 2M/x <= 2·116/1e-3 ~ 2,3e5 (x < 1e-3 sale por el
+//      retorno temprano de arriba), o sea el pico antes de reescalar es
+//      ~2^256·2,3e5 ~ 2,7e82, muy lejos del 1,8e308 del doble.
+//
+//  (b) NO hace falta acumular el factor de reescalado. NR lo necesita porque
+//      arma `sum` y la respuesta de forma incremental DENTRO del bucle; aca
+//      `sum` se calcula al final sobre el array ya terminado, y la regla de
+//      suma es invariante de escala: si tmp = C·J entonces sum = C·(J_0 +
+//      2·sum J_2k) = C, luego norm = 1/C y out = tmp·norm = J. El factor se
+//      cancela solo. Lo que SI es obligatorio es reescalar TODOS los valores
+//      ya calculados (indices m-1..M) en el mismo paso, no solo el par en
+//      vuelo: dejar el array en dos escalas distintas es exactamente lo que
+//      romperia la normalizacion.
+const MILLER_BIGNO = Math.pow(2, 256); // ~1.158e77, potencia de dos exacta
+const MILLER_BIGNI = Math.pow(2, -256); // 1/MILLER_BIGNO, tambien exacto
 export function besselJArray(maxM, x, out) {
   x = Math.abs(x);
   if (x < 1e-3) {
@@ -672,7 +708,12 @@ export function besselJArray(maxM, x, out) {
   tmp[M] = 0;
   tmp[M - 1] = 1e-30; // semilla arbitraria - se cancela en la normalizacion
   for (let m = M - 1; m >= 1; m--) {
-    tmp[m - 1] = ((2 * m) / x) * tmp[m] - tmp[m + 1];
+    const v = ((2 * m) / x) * tmp[m] - tmp[m + 1];
+    tmp[m - 1] = v;
+    if (v > MILLER_BIGNO || v < -MILLER_BIGNO) {
+      // Reescalado exacto de TODO lo ya calculado (ver (a) y (b) arriba).
+      for (let k = m - 1; k <= M; k++) tmp[k] *= MILLER_BIGNI;
+    }
   }
   let sum = tmp[0];
   for (let k = 2; k <= M; k += 2) sum += 2 * tmp[k];
