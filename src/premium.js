@@ -321,6 +321,7 @@ function renderPlans(plans, status, oneclick) {
     const isActiveAutoRenew = key === activePlanKey;
     const disableForGooglePlay = googlePlayActive && key !== 'lifetime';
     const card = document.createElement('div');
+    card.id = `plan-${key}`;
     card.className = `page-card premium-plan premium-plan-${key}${featured ? ' premium-plan-featured' : ''}`;
     const priceLine = plan.days
       ? `${clp.format(plan.amount)} <span class="cuenta-meta">/ ${plan.days === 365 ? 'año' : plan.days + ' días'}</span>`
@@ -386,6 +387,15 @@ function renderPlans(plans, status, oneclick) {
   wrap.querySelectorAll('button[data-plan]').forEach((btn) => {
     btn.addEventListener('click', () => buyPlan(btn.dataset.plan, btn, activePlanKey));
   });
+  if (location.hash === '#plan-monthly' && !renderPlans._monthlyLinkHandled) {
+    const monthly = document.getElementById('plan-monthly');
+    if (monthly) {
+      renderPlans._monthlyLinkHandled = true;
+      monthly.tabIndex = -1;
+      monthly.focus({ preventScroll: true });
+      monthly.scrollIntoView({ block: 'center' });
+    }
+  }
 
   // Revelado festivo de los planes — una sola vez por carga, no en cada
   // re-render de renderPlans(). Se salta si el sistema pide reducir

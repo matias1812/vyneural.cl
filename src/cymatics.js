@@ -37,6 +37,21 @@
 // con suavizado, manteniendo 60 FPS en móvil y escritorio.
 
 const TWO_PI = Math.PI * 2;
+const DROP_RESOLUTIONS = [48, 64, 80, 100, 128, 160, 200, 256, 320];
+
+function dropResolution(target, current, locked) {
+  if (current && locked) return current;
+  let index = DROP_RESOLUTIONS.indexOf(current);
+  if (index < 0) return DROP_RESOLUTIONS.find((res) => res >= target) ?? 320;
+
+  // Para cruzar un escalón, el objetivo debe superar su punto medio
+  // en un 10%. Los dos umbrales evitan alternar en el mismo borde.
+  while (index < DROP_RESOLUTIONS.length - 1 &&
+    target > (DROP_RESOLUTIONS[index] + DROP_RESOLUTIONS[index + 1]) * .55) index++;
+  while (index > 0 &&
+    target < (DROP_RESOLUTIONS[index - 1] + DROP_RESOLUTIONS[index]) * .45) index--;
+  return DROP_RESOLUTIONS[index];
+}
 
 // FIX (auditoría 2026-09-08, Parte A — "una sola cimática, dos cámaras"):
 // toda la física modal que vivía acá (tablas de ceros de Bessel, búsqueda
@@ -49,6 +64,7 @@ const TWO_PI = Math.PI * 2;
 import {
   zeroFor,
   modeOmega,
+  selectNearestMode,
   selectModeWithFallback,
   resonantModeForBeat,
   gammaAt,
@@ -833,10 +849,9 @@ export class CymaticsRenderer {
     // cualquier dispositivo (más nitidez si sobra tiempo, más suave si no).
     this._frameEMA = 16;
     this._resMul = 1;
-    // Ruta GPU (WebGL2) con fallback al rasterizador CPU: si la GPU o el
-    // shader no están disponibles, _gl es null y el bucle de píxeles de
-    // abajo sigue funcionando igual.
-    this._gl = initGL();
+    // Se inicializa en el primer render visible. null indica que el
+    // navegador debe usar el rasterizador CPU.
+    this._gl = undefined;
     this._glDrops = [
       { texA: null, texB: null, texC: null },
       { texA: null, texB: null, texC: null },
@@ -996,22 +1011,19 @@ export class CymaticsRenderer {
     // también se re-suben por modo, no solo por resolución: antes solo se
     // creaba si no existía y, al cambiar de estado con la misma resolución,
     // los anillos de fondo quedaban los de un modo viejo para siempre.
-    if (!this._morph[i]) {
-      this._deleteTex(gd.texA);
-    } else if (gd.texA && !this._morph[i].texAold) {
+    const morph = this._morph[i];
+    if (morph && gd.texA && !morph.texAold) {
       // Transición en curso: la flor anterior sigue usando su J0 (textura
       // A vieja) hasta que termine el fundido; se guarda aquí para
       // restaurarla en el shader (uTexAo) y liberarla al final.
-      this._morph[i].texAold = gd.texA;
+      morph.texAold = gd.texA;
     }
+    // Solo las texturas capturadas por el fundido siguen en uso. Las de
+    // reconstrucciones intermedias se liberan al reemplazarlas.
+    if (gd.texA !== morph?.texAold) this._deleteTex(gd.texA);
+    if (gd.texB !== morph?.texBold) this._deleteTex(gd.texB);
+    if (gd.texC !== morph?.texCold) this._deleteTex(gd.texC);
     gd.texA = this._makeTex(res, packed[0]);
-    // Durante una transición no se borran las texturas viejas al subir las
-    // nuevas: la flor anterior las usa (las limpia el final de la transición
-    // o el cambio de resolución). Sin transición, se reemplazan sin fuga.
-    if (!this._morph[i]) {
-      this._deleteTex(gd.texB);
-      this._deleteTex(gd.texC);
-    }
     gd.texB = this._makeTex(res, packed[1]);
     gd.texC = this._makeTex(res, packed[2]);
   }
@@ -1020,8 +1032,7 @@ export class CymaticsRenderer {
   // resonancias REALES entre el modo viejo y el nuevo, muestreando la
   // frecuencia resonante a pasos regulares entre fCenter(viejo) y
   // fCenter(nuevo) y buscando el modo físico más cercano en cada paso —
-  // exactamente lo mismo que hace la búsqueda normal (`selectModeWithFallback`),
-  // solo que evaluada en varios puntos intermedios en vez de uno solo. Cada
+  // con la búsqueda acotada al rango angular de los dos extremos. Cada
   // punto del camino es un modo (m,n) real y completo — la gota lo va a
   // renderizar con SUS propios pétalos y anillos reales, no una geometría
   // interpolada a mano. Los pasos duplicados/consecutivos-iguales se
@@ -1070,7 +1081,7 @@ export class CymaticsRenderer {
     let last = { m: mOld, n: nOld };
     for (let k = 1; k <= STEPS; k++) {
       const fMid = fOld + (fNew - fOld) * (k / (STEPS + 1));
-      const found = selectModeWithFallback(Math.PI * Math.max(1, fMid), PHYS_A, fMid, { mMin: mLo, mMax: mHi });
+      const found = selectNearestMode(Math.PI * Math.max(1, fMid), PHYS_A, { mMin: mLo, mMax: mHi });
       if (found.m !== last.m || found.n !== last.n) {
         waypoints.push({ m: found.m, n: found.n });
         last = { m: found.m, n: found.n };
@@ -1106,6 +1117,7 @@ export class CymaticsRenderer {
    *   pulse: 0..1, fase del latido real (1 = justo en el pulso)
    */
   render(ctx, w, h, params) {
+    if (this._gl === undefined) this._gl = initGL();
     const { base = 220, beat = 6, pulse = 0.5, colors, playing = true, condition = 'binaural', volume = 0.6, wave = 'sine' } = params;
     // Condiciones con batido real (binaural/AM): la placa respira con el
     // latido. Las demás (tono puro, ruido, silencio) respiran a ritmo natural.
@@ -1395,8 +1407,8 @@ export class CymaticsRenderer {
     // plato cimático (o un cuenco cantor) al tono que lo hace vibrar. El
     // modo dominante produce la flor característica de la cimática real — m
     // pétalos sobre n−1 anillos concéntricos — y cambia con la frecuencia:
-    // a más tono, más pétalos y más anillos. La gota central (el latido)
-    // usa un modo de 2 a 5 pétalos según la frecuencia del latido.
+    // a más tono, más pétalos y más anillos. La gota central parte del
+    // modo más cercano al latido. Varios latidos comparten el mismo modo.
     const mDom = new Array(n);
     const nDom = new Array(n);
     // Peso del modo radial J0 (los anillos concéntricos de fondo).
@@ -1527,10 +1539,8 @@ export class CymaticsRenderer {
         nn = lockSrc.nDom != null ? lockSrc.nDom : lockSrc.radN;
         delta = modeOmega(m, nn, PHYS_A) - ws;
       } else if (i === 1) {
-        // Gota del latido: pétalos ∝ frecuencia del latido (2 a 5) y un
-        // par de anillos extra para que se lea como un pequeño mandala. No
-        // elige modo por búsqueda de ω (no hay "escalera" de la cual dar un
-        // paso) — la fórmula es directa.
+        // La gota del latido toma el modo calculado en beatMode y ajusta
+        // su geometría. El latido también modula el brillo y la amplitud.
         // FIX (2026-09-08, "no es estable" / colisionador de frecuencias):
         // esto daba UN paso de ±1 en m y ±1 en nn por ciclo de transición en
         // vez de ir directo a (mTarget, nTarget) — ver la misma nota, mucho
@@ -1932,13 +1942,15 @@ export class CymaticsRenderer {
     // ----- Gotas: cada una en su propio buffer de alta resolución --------
     // En la ruta GPU las tres gotas comparten un lienzo GL de 3·res × res,
     // así que todas usan la misma resolución (la mayor que necesiten).
+    const buildingDrop = this._drops.some((drop) => drop.pending);
+    const transitioning = this._morph.some(Boolean);
     let glResAll = 0;
     if (this._gl) {
       let maxNeed = 0;
       for (let i = 0; i < n; i++) {
         maxNeed = Math.max(maxNeed, Math.max(nDom[i] * 16, dropR * 2));
       }
-      glResAll = Math.max(48, Math.min(320, Math.round(maxNeed * this._resMul)));
+      glResAll = dropResolution(maxNeed * this._resMul, this._glRes, buildingDrop || transitioning);
       // FIX (2026-09-12, "apagón" tras varios cambios de frecuencia seguidos
       // y rápidos — ej. arrastrar el slider): `glResAll` se recalcula cada
       // fotograma a partir del `nDom` que se está BUSCANDO ahora mismo (no
@@ -2035,18 +2047,15 @@ export class CymaticsRenderer {
       // para mantener 60 FPS también en móvil.
       // Resolución del buffer con ajuste adaptativo: _resMul baja si el
       // dispositivo va lento (se mide el fotograma) y sube si sobra tiempo.
+      const buf = this._drops[i];
       const resD = this._gl
         ? glResAll
-        : Math.max(
-            48,
-            Math.min(320, Math.round(Math.max(nDom[i] * 16, dropR * 2) * this._resMul))
-          );
-      const buf = this._drops[i];
+        : dropResolution(Math.max(nDom[i] * 16, dropR * 2) * this._resMul, buf.res, buf.pending || this._morph[i]);
       this._ensureDrop(buf, resD);
       // Si cambió el tamaño del búfer a mitad de una transición (p. ej. al
       // redimensionar la ventana), se descarta la transición: la tabla de la
       // flor anterior se construyó para otra resolución y no encajaría.
-      if (this._morph[i] && this._morph[i].p.res !== resD) {
+      if (!this._gl && this._morph[i] && this._morph[i].p.res !== resD) {
         this._releaseMorphTex(i);
         this._morph[i] = null;
       }
@@ -2463,6 +2472,8 @@ export class CymaticsRenderer {
           gl.uniform1f(U.uRipCl, ripCol[i]);
           gl.uniform1f(U.uColC, cosCol[i]);
           gl.uniform1f(U.uCT, cT);
+          gl.uniform1f(U.uST, sT);
+          gl.uniform1f(U.uCN, cN);
           gl.uniform1f(U.uSN, sN);
           // PHASE 3: Disable capillary grain overlay in Scientific Mode
           gl.uniform1f(U.uGEnv, sciMode ? 0 : granEnv);
@@ -2833,7 +2844,7 @@ export class CymaticsRenderer {
     const frameMs = performance.now() - tMs;
     this._frameEMA = this._frameEMA * 0.92 + Math.min(60, frameMs) * 0.08;
     // FIX (Parte B): mismo criterio que arriba (sin final duro).
-    if (!this._morph.some((m) => m && m.oldW > 0.02)) {
+    if (!this._drops.some((drop) => drop.pending) && !this._morph.some(Boolean)) {
       if (this._frameEMA > 24 && this._resMul > 0.62) {
         this._resMul = Math.max(0.62, this._resMul * 0.985);
       } else if (this._frameEMA < 13 && this._resMul < 1) {

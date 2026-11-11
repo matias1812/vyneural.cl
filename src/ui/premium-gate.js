@@ -9,7 +9,9 @@
 // quien ya pagó (ver isPremiumUser).
 
 import { getAccessToken } from '../api/client.js';
-import { premiumStatus } from '../api/billing.js';
+import { listPlans, premiumStatus } from '../api/billing.js';
+import { createPremiumOrbit } from './premium-orbit.js';
+import './premium-gate.css';
 
 let cache = null; // { value, at }
 const CACHE_TTL_MS = 30000;
@@ -39,48 +41,89 @@ export function invalidatePremiumCache() {
   cache = null;
 }
 
-const GEM_ICON =
-  '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12l4 6-10 13L2 9Z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/></svg>';
+let offer;
 
-function modalHTML() {
-  return `
-  <div class="auth-modal hidden" id="premium-required-modal" role="dialog" aria-modal="true" aria-label="Función Premium">
-    <div class="auth-card">
-      <div class="auth-head">
-        <span class="auth-logo">${GEM_ICON}</span>
-        <div class="auth-title-wrap">
-          <h3>Esto es Premium</h3>
-          <p id="premium-required-text"></p>
-        </div>
-        <button type="button" class="auth-close" id="premium-required-close" aria-label="Cerrar">✕</button>
-      </div>
-      <a href="/premium" class="auth-submit" id="premium-required-cta" style="display:block;text-align:center;text-decoration:none;">Ver planes</a>
+function createOffer() {
+  const modal = document.createElement('dialog');
+  modal.className = 'premium-offer';
+  modal.id = 'premium-required-modal';
+  modal.setAttribute('aria-labelledby', 'premium-offer-title');
+  modal.setAttribute('aria-describedby', 'premium-required-text');
+  modal.innerHTML = `
+    <div class="premium-offer-visual" aria-hidden="true"><canvas width="480" height="240" hidden></canvas></div>
+    <div class="premium-offer-brand">
+      <span class="premium-offer-brand-icon"><img src="${location.protocol === 'file:' ? './icon.svg' : '/icon.svg'}" alt="" width="18" height="18"></span>
+      Vyneural
     </div>
-  </div>`;
-}
+    <button type="button" class="premium-offer-close" aria-label="Cerrar oferta" autofocus>✕</button>
+    <div class="premium-offer-body">
+      <h2 id="premium-offer-title">Tu ritmo, a tu medida.</h2>
+      <p id="premium-required-text"></p>
+      <p class="premium-offer-benefits">Diseña tus frecuencias, arma rutinas y programa recordatorios.</p>
+      <p class="premium-offer-price" data-price hidden></p>
+      <a class="premium-offer-cta" href="${location.protocol === 'file:' ? './premium.html' : '/premium'}#plan-monthly">
+        Ver el plan mensual <span aria-hidden="true">↗</span>
+      </a>
+      <p class="premium-offer-terms">Renovación cada 30 días. Cancela cuando quieras desde tu cuenta.</p>
+    </div>`;
+  const canvas = modal.querySelector('canvas');
+  const navbarIcon = document.querySelector('.site-nav .site-brand .brand-ico svg');
+  if (navbarIcon) modal.querySelector('.premium-offer-brand-icon').replaceChildren(navbarIcon.cloneNode(true));
+  const motion = matchMedia('(prefers-reduced-motion: reduce)');
+  let frame;
+  let draw;
 
-let injected = false;
+  function stop() {
+    cancelAnimationFrame(frame);
+    canvas.hidden = true;
+  }
 
-function inject() {
-  if (injected) return;
-  injected = true;
-  const wrap = document.createElement('div');
-  wrap.innerHTML = modalHTML();
-  document.body.appendChild(wrap.firstElementChild);
-  const modal = document.getElementById('premium-required-modal');
-  const close = () => modal.classList.add('hidden');
-  modal.querySelector('#premium-required-close').addEventListener('click', close);
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) close();
+  function animate() {
+    stop();
+    if (!modal.open || motion.matches) return;
+    draw ??= createPremiumOrbit(canvas);
+    if (!draw || !draw(0)) return;
+    canvas.hidden = false;
+    const start = performance.now();
+    function tick(now) {
+      if (!modal.open || !draw((now - start) / 1000)) return stop();
+      frame = requestAnimationFrame(tick);
+    }
+    frame = requestAnimationFrame(tick);
+  }
+
+  modal.querySelector('button').addEventListener('click', () => modal.close());
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) modal.close();
   });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !modal.classList.contains('hidden')) close();
+  modal.addEventListener('close', stop);
+  motion.addEventListener('change', animate);
+  canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault();
+    stop();
   });
+  canvas.addEventListener('webglcontextrestored', () => {
+    draw = null;
+    animate();
+  });
+  document.body.append(modal);
+  return { modal, animate };
 }
 
 export function openPremiumRequired(message) {
-  inject();
-  const modal = document.getElementById('premium-required-modal');
-  document.getElementById('premium-required-text').textContent = message;
-  modal.classList.remove('hidden');
+  offer ??= createOffer();
+  const { modal, animate } = offer;
+  modal.querySelector('#premium-required-text').textContent = message;
+  if (modal.open) return;
+  modal.showModal();
+  animate();
+  const price = modal.querySelector('[data-price]');
+  price.hidden = true;
+  listPlans().then(({ plans }) => {
+    const amount = plans?.monthly?.amount;
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const formatted = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(amount);
+    price.textContent = `${formatted} CLP cada 30 días`;
+    price.hidden = false;
+  }).catch(() => {});
 }

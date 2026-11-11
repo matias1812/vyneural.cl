@@ -2015,7 +2015,7 @@ function updateCustomLabels() {
   // tope del slider) en vez del valor — potencialmente recortado — del
   // slider, que ni se movió.
   const baseHz = loadedCustomBase != null ? loadedCustomBase : customBase.value;
-  customBaseLabel.textContent = `Portada: ${baseHz} Hz`;
+  customBaseLabel.textContent = `Portadora: ${baseHz} Hz`;
   customBeatLabel.textContent = `Ritmo binaural: ${loadedCustomBeat ?? customBeat.value} Hz`;
 }
 
@@ -2399,10 +2399,13 @@ function resetIfNotEligible(isPremium, { announceSeq = true } = {}) {
   if ((selected.custom || selected.premiumOnly) && !isPremium) {
     if (playing) stop(false);
     const hadSeq = Boolean(seq);
+    const hadPendingReminder = pendingModal && !pendingModal.classList.contains('hidden');
+    closePendingModal();
     clearSeq();
     const fallback = STATES.find((s) => !s.custom && !s.premiumOnly) || STATES[0];
     selectState(fallback);
     if (hadSeq && announceSeq) showToast('🔒 Reproducir una rutina es parte de Vyneural Premium.');
+    if (hadPendingReminder) showToast('🔒 Reproducir este recordatorio requiere Vyneural Premium.');
   }
 }
 
@@ -3862,12 +3865,21 @@ function clampVisualFreq(f) {
   return Math.min(1000, Math.max(60, f));
 }
 
+let visualizerInView = true;
+if (typeof IntersectionObserver === 'function') {
+  visualizerInView = false;
+  const visualizerObserver = new IntersectionObserver(([entry]) => {
+    visualizerInView = entry.isIntersecting;
+  });
+  visualizerObserver.observe(canvas);
+}
+
 function drawVisual() {
   requestAnimationFrame(drawVisual);
   // Segundo plano: no hay nada que renderizar. La simulación visual se
   // congela (P21) y, al volver, la fase se reconstruye desde el reloj de
   // audio (AudioClock) — no se repiten frames perdidos ni se quema CPU.
-  if (document.hidden) return;
+  if (document.hidden || !visualizerInView) return;
   perfTick();
   if (IS_TOUCH && vizFrame++ % 4 > (playing ? 2 : 1)) return;
   const dpr = devicePixelRatio;
@@ -3975,7 +3987,7 @@ function drawVisual() {
     colors: [LANE_LEFT_COLOR_RGB_VIS, ACCENT_RGB_VIS, LANE_RIGHT_COLOR_RGB_VIS],
   });
 }
-drawVisual();
+requestAnimationFrame(drawVisual);
 
 // Restaura la sesión guardada: volumen, ambientes, volúmenes por capa y
 // temporizador (el estado lo elige el deep link o el guardado).
@@ -5021,7 +5033,7 @@ if (deepCarrier && deepCarrier in CARRIER_BASE && deepCarrier !== 'estandar') {
   // fijas (Solfeggio/Ancestral) derivan la base del estado al cargar.
   if (deepCarrier === 'personalizado' && isFinite(deepF1) && deepF1 > 0) {
     customBase.value = String(Math.round(deepF1));
-    customBaseLabel.textContent = `Portada: ${Math.round(deepF1)} Hz`;
+    customBaseLabel.textContent = `Portadora: ${Math.round(deepF1)} Hz`;
   }
 } else if (deepF1 === 528) carrier = 'solfeggio';
 else if (deepF1 === 963) carrier = 'solfeggio963';
@@ -5030,7 +5042,7 @@ else if (deepF1 === 194.7) carrier = 'schumann';
 else if (isFinite(deepF1) && deepF1 > 0) {
   carrier = 'personalizado';
   customBase.value = String(Math.round(deepF1));
-  customBaseLabel.textContent = `Portada: ${Math.round(deepF1)} Hz`;
+  customBaseLabel.textContent = `Portadora: ${Math.round(deepF1)} Hz`;
 }
 // P3 — la sesión se sanitiza ANTES de restaurar: un localStorage corrupto
 // (NaN, fuera de rango) nunca rompe la restauración ni deja la UI en un
@@ -5128,7 +5140,8 @@ if (isFinite(deepFreq) && deepFreq > 0) {
 // free, sin que dispare un evento de login en esta carga), el preset quedaba
 // premium para una cuenta que no lo es. Mismo criterio/funciones que ya usa
 // el listener de auth de más abajo.
-isPremiumUser().then(resetIfNotEligible);
+const initialPremium = isPremiumUser();
+initialPremium.then(resetIfNotEligible);
 // El filtro arranca en la vista curada 'Destacados' (los más populares), o en
 // el filtro que el usuario dejó guardado. Si el enlace profundo o la sesión
 // abren otro estado, seguir a su objetivo.
@@ -5285,7 +5298,7 @@ async function checkPendingReminder() {
   }
   // No hace falta re-chequear "ya vista" acá: dueList.find() de más arriba
   // ya descartó las vencidas ya vistas al elegir `due`.
-  if (!pending || playing || sessionStartTime) return;
+  if (!pending || !(await isPremiumUser()) || playing || sessionStartTime) return;
   // selectState() PRIMERO: si `selected` no era ya el estado Personalizado,
   // entrar a él resetea `carrier` a 'personalizado' (arranque limpio, ver su
   // declaración) — seteando carrier/loadedCustomBase ANTES, ese reset los
@@ -5406,7 +5419,15 @@ if (location.hash === '#permisos') {
 // play queda en manos del usuario (no se depende de que el navegador bloquee
 // el autoplay).
 if (deepAutostart && isFinite(deepFreq) && deepFreq > 0 && !playing) {
-  openPendingModal({ name: deepState ? (STATES.find((s) => s.id === deepState) || {}).name : null });
+  initialPremium.then((premium) => {
+    if (!premium) {
+      showToast('🔒 Reproducir este recordatorio requiere Vyneural Premium.');
+      return;
+    }
+    if (selected === initial && !playing && !sessionStartTime) {
+      openPendingModal({ name: deepState ? (STATES.find((s) => s.id === deepState) || {}).name : null });
+    }
+  });
 }
 
 // P4-B — re-sincronización con la sesión nativa al cargar la página: navegar

@@ -1495,6 +1495,36 @@ export async function runBineuralDiagnostics() {
     }
   });
 
+  runTest('Cymatics: repeated uploads release intermediate textures during a morph', async () => {
+    const { CymaticsRenderer } = await import('../cymatics.js');
+    const renderer = Object.create(CymaticsRenderer.prototype);
+    const live = new Set();
+    renderer._makeTex = () => {
+      const texture = {};
+      live.add(texture);
+      return texture;
+    };
+    renderer._gl = { gl: { deleteTexture: texture => live.delete(texture) } };
+    renderer._glDrops = [{}];
+    renderer._morph = [];
+    const pending = { res: 1, rad: new Float32Array(13) };
+    renderer._uploadDropGL(0, pending);
+    const { texA, texB, texC } = renderer._glDrops[0];
+    renderer._morph[0] = { texAold: texA, texBold: texB, texCold: texC };
+
+    for (let upload = 0; upload < 5; upload++) {
+      renderer._uploadDropGL(0, pending);
+      if (live.size !== 6 || ![texA, texB, texC].every(texture => live.has(texture))) {
+        throw new Error('El fundido debe conservar solo las texturas salientes y las vigentes.');
+      }
+    }
+    renderer._releaseMorphTex(0);
+    const current = renderer._glDrops[0];
+    if (live.size !== 3 || ![current.texA, current.texB, current.texC].every(texture => live.has(texture))) {
+      throw new Error('Al terminar el fundido deben quedar solo las texturas vigentes.');
+    }
+  });
+
   runTest('Cymatics: modeOmega is monotonically increasing in k (dispersion ω²=gk+(σ/ρ)k³)', () => {
     // A mayor número de onda, mayor frecuencia de resonancia — dispersión de
     // gravedad-capilaridad bien orientada. Recorre m=2..6, n=1..8 en orden de

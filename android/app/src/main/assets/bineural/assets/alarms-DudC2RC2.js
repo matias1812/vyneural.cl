@@ -1,0 +1,1 @@
+import{cachedGet as t,del as l,put as r,post as e}from"./client-phMsNx2l.js";const p=()=>t("/api/v1/alarms"),c=a=>e("/api/v1/alarms",a),o=(a,s)=>r(`/api/v1/alarms/${a}`,s),i=a=>l(`/api/v1/alarms/${a}`);export{c,i as d,p as l,o as u};
