@@ -59,7 +59,7 @@ function createOffer() {
     <div class="premium-offer-body">
       <h2 id="premium-offer-title">Tu ritmo, a tu medida.</h2>
       <p id="premium-required-text"></p>
-      <p class="premium-offer-benefits">Diseña tus frecuencias, arma rutinas y programa recordatorios.</p>
+      <p class="premium-offer-benefits">Diseña tus frecuencias, elige el color de la luz de la cimática y programa tus rutinas.</p>
       <p class="premium-offer-price" data-price hidden></p>
       <a class="premium-offer-cta" href="${location.protocol === 'file:' ? './premium.html' : '/premium'}#plan-monthly">
         Ver el plan mensual <span aria-hidden="true">↗</span>

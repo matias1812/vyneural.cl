@@ -6,7 +6,7 @@
 //   AudioContext → masterGain → compressor → analyser → limiter → outputTap
 //                                                          │
 //                                     ┌────────────────────┴──────────┐
-//                                'element' (Android/desktop)     'direct' (iOS)
+//                                'element' (Android web)   'direct' (escritorio/iOS)
 //                                     │                            │
 //                          MediaStreamDestination            ctx.destination
 //                                     │
@@ -19,36 +19,40 @@
 // el audio focus y la pantalla de bloqueo lo ven como UNA sola reproducción
 // (no hay "audio real + audio falso").
 //
-// Modo 'direct' (fallback): iOS Safari no reproduce fiablemente un
-// MediaStream de Web Audio a través de un <audio>; ahí el sonido sale por
-// ctx.destination y el ancla muda (legacy) se usa solo para reclamar la
-// MediaSession. El ancla queda marcada como fallback legacy, nunca como vía
-// principal.
+// Modo 'direct': ctx.destination recibe la señal sin el búfer de MediaStream.
+// En escritorio ese búfer retrasa el primer play. iOS también usa la salida
+// directa por compatibilidad. El ancla muda solo registra la MediaSession.
 //
 // La clase es testeable: recibe fábricas inyectadas (Audio, AudioContext).
 
 export const TRANSPORT_MODES = ['element', 'direct'];
 
+const STREAM_STALL_SECONDS = 2;
+const STREAM_MAX_SAMPLE_GAP_SECONDS = 1.5;
+
 export class AudioTransport {
   /**
-   * @param {{isIos?: boolean, createElement?: (() => HTMLAudioElement)|null,
-   *          onFallback?: (() => void)|null}} [opts]
+   * @param {{isIos?: boolean, preferDirect?: boolean, createElement?: (() => HTMLAudioElement)|null,
+   *          onFallback?: (() => void)|null, onEvent?: ((event: string) => void)|null}} [opts]
    */
-  constructor({ isIos = false, createElement = null, onFallback = null } = {}) {
-    this.isIos = isIos;
+  constructor({ isIos = false, preferDirect = false, createElement = null, onFallback = null, onEvent = null } = {}) {
+    this.preferDirect = isIos || preferDirect;
     this.createElement = createElement || (() => new Audio());
     this.onFallback = onFallback;
+    this.onEvent = onEvent;
     this.mode = 'direct'; // hasta que attach() decida
     this.ctx = null;
     this.outputTap = null;
     this.streamDest = null;
     this.element = null;
     this.fallbackApplied = false;
+    this.playAttempt = 0;
+    this.mediaProgress = null;
   }
 
   get canUseElementMode() {
     return (
-      !this.isIos &&
+      !this.preferDirect &&
       this.ctx != null &&
       typeof this.ctx.createMediaStreamDestination === 'function'
     );
@@ -80,10 +84,17 @@ export class AudioTransport {
         // Es el mismo motivo por el que el anchor legacy se adjunta al body.
         this._attachToDocument();
         // El elemento representa la sesión real: nunca muted ni volume 0.
-        this.element.onerror = () => this._fallbackToDirect();
+        this.element.onerror = () => this._fallbackToDirect('error');
+        if (this.onEvent) {
+          for (const event of ['waiting', 'stalled', 'playing', 'pause']) {
+            this.element.addEventListener?.(event, () => {
+              if (this.mode === 'element') this._report(event);
+            });
+          }
+        }
         this.mode = 'element';
       } catch (_) {
-        this._fallbackToDirect();
+        this._fallbackToDirect('attach');
       }
     } else {
       this.outputTap.connect(ctx.destination);
@@ -95,11 +106,25 @@ export class AudioTransport {
   /** Inicia la reproducción del elemento (llamar dentro del gesto de play). */
   play() {
     if (this.mode !== 'element' || !this.element) return;
-    const p = this.element.play();
-    if (p && typeof p.catch === 'function') p.catch(() => {});
+    const attempt = ++this.playAttempt;
+    this.mediaProgress = null;
+    const handleFailure = error => {
+      // La pausa invalida un play pendiente. Un fallo de formato del
+      // MediaStream sí debe pasar a la salida directa del mismo motor.
+      if (attempt === this.playAttempt && error?.name === 'NotSupportedError') {
+        this._fallbackToDirect('unsupported');
+      }
+    };
+    try {
+      this.element.play()?.catch(handleFailure);
+    } catch (error) {
+      handleFailure(error);
+    }
   }
 
   pause() {
+    ++this.playAttempt;
+    this.mediaProgress = null;
     if (this.mode !== 'element' || !this.element) return;
     try {
       this.element.pause();
@@ -118,6 +143,34 @@ export class AudioTransport {
     return false;
   }
 
+  /**
+   * Detecta un MediaStream detenido aunque el grafo siga produciendo señal.
+   * Se llama desde el monitor en primer plano durante una sesión audible.
+   */
+  checkPlaybackProgress(hasSignal) {
+    const element = this.element;
+    if (this.mode !== 'element' || !element || element.paused || this.ctx?.state !== 'running' || !hasSignal) {
+      this.mediaProgress = null;
+      return false;
+    }
+    const audioTime = this.ctx.currentTime;
+    const mediaTime = element.currentTime;
+    if (!Number.isFinite(audioTime) || !Number.isFinite(mediaTime)) {
+      this.mediaProgress = null;
+      return false;
+    }
+    const previous = this.mediaProgress;
+    const gap = previous ? audioTime - previous.lastSample : 0;
+    if (!previous || mediaTime !== previous.mediaTime || gap < 0 || gap > STREAM_MAX_SAMPLE_GAP_SECONDS) {
+      this.mediaProgress = { mediaTime, lastSample: audioTime, stableSince: audioTime };
+      return false;
+    }
+    previous.lastSample = audioTime;
+    if (audioTime - previous.stableSince < STREAM_STALL_SECONDS) return false;
+    this._fallbackToDirect('no-progress');
+    return true;
+  }
+
   // Adjunta el elemento de reproducción al documento (oculto). En entornos de
   // test no hay document/body: se omite sin error.
   _attachToDocument() {
@@ -131,6 +184,14 @@ export class AudioTransport {
       /* el elemento no se pudo adjuntar: la sesión sigue pero el SO puede no
          exponer los controles (comportamiento previo, no rompe el audio) */
     }
+  }
+
+  _report(event) {
+    if (!this.onEvent) return;
+    const el = this.element;
+    const time = el?.currentTime;
+    const position = Number.isFinite(time) ? time.toFixed(2) : '—';
+    this.onEvent(event + ' · medio ' + position + ' s · estado ' + (el?.readyState ?? '—'));
   }
 
   /** Estado observable para diagnóstico (P0.5.5). */
@@ -151,9 +212,10 @@ export class AudioTransport {
   // Si el elemento falla en runtime (plataforma que no reproduce streams de
   // Web Audio), se migra una sola vez a la salida directa. Legacy anchor:
   // main.js lo añade cuando mode === 'direct'.
-  _fallbackToDirect() {
+  _fallbackToDirect(reason) {
     if (this.fallbackApplied) return;
     this.fallbackApplied = true;
+    this._report('direct/' + reason);
     try {
       if (this.outputTap && this.streamDest) this.outputTap.disconnect(this.streamDest);
       if (this.outputTap && this.ctx) this.outputTap.connect(this.ctx.destination);

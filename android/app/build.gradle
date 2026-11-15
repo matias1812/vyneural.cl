@@ -28,8 +28,8 @@ android {
         applicationId "com.vyneural.bineural"
         minSdk 26
         targetSdk 36
-        versionCode 88
-        versionName "1.8.39"
+        versionCode 89
+        versionName "1.8.40"
         // Backend al que el worker de sincronización en segundo plano consulta
         // alarmas y reporta el dispositivo. Se puede sobrescribir en builds de
         // prueba: ./gradlew assembleRelease -PapiBase=http://10.0.2.2:8000
@@ -69,8 +69,8 @@ android {
         jvmTarget = '17'
     }
     // La web (build de Vite en ../dist) va dentro de assets/bineural para que
-    // la APK funcione OFFLINE. Refrescar así:
-    //   npm run build && rm -rf app/src/main/assets/bineural && cp -r ../dist app/src/main/assets/bineural
+    // la APK funcione OFFLINE. Desde la raíz web, compilar con VITE_API_URL
+    // de producción y ejecutar node scripts/sync-android-assets.mjs.
 }
 
 dependencies {

@@ -212,6 +212,7 @@ class MainActivity : ComponentActivity() {
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                if (!request.isForMainFrame) return true
                 val url = request.url.toString()
                 if (url.startsWith("file:///android_asset/bineural/")) return false
                 // Enlaces externos (GitHub, Instagram, fuentes): abrir en el
@@ -369,13 +370,20 @@ class MainActivity : ComponentActivity() {
     private fun deepLinkQuery(intent: Intent?): String? {
         if (intent == null || !intent.hasExtra(EXTRA_FREQ)) return null
         val freq = intent.getDoubleExtra(EXTRA_FREQ, 0.0)
-        if (freq <= 0) return null
-        val beat = intent.getDoubleExtra(EXTRA_BEAT, 10.0)
-        val wave = intent.getStringExtra(EXTRA_WAVE)?.takeIf { it.isNotBlank() } ?: "sine"
-        val autostart = intent.getBooleanExtra(EXTRA_AUTOSTART, false)
-        val q = StringBuilder("freq=").append(freq).append("&beat=").append(beat).append("&wave=").append(wave)
-        if (autostart) q.append("&autostart=true")
-        return q.toString()
+        if (!freq.isFinite() || freq <= 0) return null
+        val beat = intent.getDoubleExtra(EXTRA_BEAT, 10.0).takeIf { it.isFinite() && it in 0.0..499.0 } ?: 10.0
+        val wave = when (val value = intent.getStringExtra(EXTRA_WAVE)) {
+            "sine", "triangle", "square", "sawtooth" -> value
+            else -> "sine"
+        }
+        val query = Uri.Builder()
+            .appendQueryParameter("freq", freq.toString())
+            .appendQueryParameter("beat", beat.toString())
+            .appendQueryParameter("wave", wave)
+        if (intent.getBooleanExtra(EXTRA_AUTOSTART, false)) {
+            query.appendQueryParameter("autostart", "true")
+        }
+        return query.build().encodedQuery
     }
 
     /** launchMode="singleTask" (manifest): un segundo tap en la notificación

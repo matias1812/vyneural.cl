@@ -7,15 +7,16 @@
     <meta name="robots" content="noindex, nofollow" />
     <meta name="theme-color" content="#0b0d1a" />
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
-    <script type="module" src="./assets/admin-DurFNjk6.js"></script>
+    <script type="module" src="./assets/admin-LvdZdm_N.js"></script>
     <link rel="modulepreload" href="./assets/client-phMsNx2l.js">
     <link rel="modulepreload" href="./assets/auth-CnC5MWUM.js">
     <link rel="modulepreload" href="./assets/_commonjsHelpers-_d1bhYXs.js">
     <link rel="modulepreload" href="./assets/support-ws-client-BH16Spc0.js">
     <link rel="modulepreload" href="./assets/confirm-modal-eBx4xGlb.js">
     <link rel="stylesheet" href="./assets/client-f5SCmrAN.css">
+    <link rel="stylesheet" href="./assets/admin-Q2U93cZz.css">
   </head>
-  <body>
+  <body class="admin-page">
     <header class="admin-topbar">
       <a class="site-brand" href="/cuenta">
         <span class="brand-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></span>
@@ -25,6 +26,17 @@
     </header>
 
     <main class="admin-shell">
+      <p id="admin-loading" class="admin-access-status" role="status">Verificando acceso…</p>
+      <div id="admin-session-expired" class="page-card admin-unauthorized hidden" role="alert">
+        <h2>Tu sesión expiró</h2>
+        <p>Vuelve a iniciar sesión para acceder al panel.</p>
+        <a class="hero-cta" href="/cuenta">Ir a mi cuenta</a>
+      </div>
+      <div id="admin-access-error" class="page-card admin-unauthorized hidden" role="alert">
+        <h2>No se pudo verificar el acceso</h2>
+        <p>Revisa tu conexión y vuelve a intentar.</p>
+        <button type="button" class="cuenta-btn" id="admin-retry">Reintentar</button>
+      </div>
       <!-- Sin sesión o sesión no-admin: nunca se monta el contenido real,
            ver src/admin.js::init() — la seguridad real es require_admin_user
            en cada endpoint del backend, esto es solo para no mostrar un
@@ -37,13 +49,27 @@
       </div>
 
       <div class="admin-grid hidden" id="admin-content">
+        <div class="admin-overview">
+          <h1>Panel de administración</h1>
+          <nav class="admin-section-nav" aria-label="Secciones del panel">
+            <a href="#cuenta-admin-users-card">Usuarios</a>
+            <a href="#cuenta-admin-coupon-card">Cupones</a>
+            <a href="#cuenta-admin-coupon-sales-card">Ventas por cupón</a>
+            <a href="#cuenta-admin-sales-card">Ventas</a>
+            <a href="#cuenta-admin-accounting-card">Contabilidad</a>
+            <a href="#cuenta-admin-analytics-card">Uso por plataforma</a>
+            <a href="#cuenta-admin-support-card">Soporte</a>
+            <a href="#cuenta-admin-contracts-card">Contratos</a>
+            <a href="#cuenta-admin-google-play-codes-card">Google Play</a>
+          </nav>
+        </div>
         <div class="page-card" id="cuenta-admin-users-card">
           <div class="rutina-head">
             <h3>👥 Usuarios</h3>
           </div>
           <form id="admin-users-search-form" class="cuenta-form">
             <div class="admin-inline-row">
-              <input id="admin-users-search" type="text" placeholder="Buscar por email…" />
+              <input id="admin-users-search" type="search" aria-label="Buscar usuarios por correo" placeholder="Buscar por email…" />
               <button type="submit" class="cuenta-btn" id="admin-users-search-btn">Buscar</button>
             </div>
             <div class="admin-inline-row admin-checkbox-row">
@@ -51,10 +77,10 @@
             </div>
           </form>
           <ul class="cuenta-list admin-users-scroll" id="admin-users-list"></ul>
-          <p class="cuenta-empty hidden" id="admin-users-empty">Sin resultados.</p>
+          <p class="cuenta-empty hidden" id="admin-users-empty" role="status">Sin resultados.</p>
           <div class="admin-inline-row">
             <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-prev" disabled>← Anterior</button>
-            <span id="admin-users-page-label"></span>
+            <span id="admin-users-page-label" aria-live="polite"></span>
             <button type="button" class="cuenta-btn cuenta-btn-ghost" id="admin-users-next" disabled>Siguiente →</button>
           </div>
         </div>
@@ -107,6 +133,8 @@
             </div>
             <button type="submit" class="cuenta-btn">Consultar</button>
           </form>
+          <p class="auth-error hidden" id="admin-coupon-sales-error" role="alert"></p>
+          <p class="admin-report-period" id="admin-coupon-sales-period" role="status"></p>
           <div id="admin-coupon-sales-summary"></div>
         </div>
 
@@ -130,6 +158,7 @@
             </div>
             <div class="auth-error hidden" id="admin-sales-error" role="alert"></div>
           </form>
+          <p class="admin-report-period" id="admin-sales-period" role="status"></p>
           <div id="admin-sales-summary"></div>
         </div>
 
@@ -255,17 +284,19 @@
           </div>
           <div class="admin-support-layout">
             <div class="admin-support-list-pane">
-              <div class="admin-support-tabs" role="tablist">
-                <button type="button" class="admin-support-tab is-active" data-tab="open" role="tab" aria-selected="true">Pendientes <span id="admin-support-tab-open-count"></span></button>
-                <button type="button" class="admin-support-tab" data-tab="closed" role="tab" aria-selected="false">Resueltos <span id="admin-support-tab-closed-count"></span></button>
+              <div class="admin-support-tabs" role="tablist" aria-label="Estado de las conversaciones">
+                <button type="button" id="admin-support-open-tab" class="admin-support-tab is-active" data-tab="open" role="tab" aria-selected="true" aria-controls="admin-support-results">Pendientes <span id="admin-support-tab-open-count"></span></button>
+                <button type="button" id="admin-support-closed-tab" class="admin-support-tab" data-tab="closed" role="tab" aria-selected="false" aria-controls="admin-support-results" tabindex="-1">Resueltos <span id="admin-support-tab-closed-count"></span></button>
               </div>
-              <ul class="cuenta-list admin-support-list" id="admin-support-list"></ul>
-              <p class="cuenta-empty hidden" id="admin-support-list-empty"></p>
-              <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-support-show-all">Mostrar más</button>
+              <div id="admin-support-results" role="tabpanel" aria-labelledby="admin-support-open-tab" tabindex="0">
+                <ul class="cuenta-list admin-support-list" id="admin-support-list"></ul>
+                <p class="cuenta-empty hidden" id="admin-support-list-empty" role="status"></p>
+                <button type="button" class="cuenta-btn cuenta-btn-ghost hidden" id="admin-support-show-all">Mostrar más</button>
+              </div>
             </div>
             <div class="admin-support-chat-pane">
               <div class="admin-support-chat-empty" id="admin-support-chat-empty">
-                <p class="cuenta-empty">Elegí una conversación de la izquierda para verla acá.</p>
+                <p class="cuenta-empty">Selecciona una conversación para ver sus detalles.</p>
               </div>
               <div class="admin-support-chat-active hidden" id="admin-support-chat-active">
                 <div class="admin-support-chat-header">
@@ -277,7 +308,7 @@
                 <div class="admin-chat" id="admin-support-chat-messages"></div>
                 <form class="cuenta-form admin-support-reply-form" id="admin-support-reply-form">
                   <div class="admin-inline-row">
-                    <input type="text" class="admin-support-reply-input" id="admin-support-reply-input" placeholder="Responder…" maxlength="2000" required />
+                    <input type="text" class="admin-support-reply-input" id="admin-support-reply-input" aria-label="Respuesta de soporte" placeholder="Responder…" maxlength="2000" required />
                     <button type="submit" class="cuenta-btn">Enviar</button>
                   </div>
                   <div class="auth-error hidden" id="admin-support-reply-error" role="alert"></div>

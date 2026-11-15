@@ -1,13 +1,9 @@
 // src/core/media-anchor.js
 // "Ancla de medios": un elemento <audio> mudo que se reproduce en bucle.
 //
-// ESTADO ACTUAL (P0.5): es un FALLBACK LEGACY, no la vía principal. Desde el
-// refactor de transporte (src/core/audio-transport.js), en Android/desktop el
-// audio REAL sale por AudioContext → MediaStreamDestination → <audio> real, y
-// ese elemento es el que el SO ve como reproducción (MediaSession, audio
-// focus, lock screen). El ancla solo se usa en modo 'direct' (iOS, que no
-// reproduce streams de Web Audio en un <audio>): ahí reclama la MediaSession
-// para que aparezcan los controles en la pantalla de bloqueo (PWA instalada).
+// En modo 'direct', Web Audio envía la señal al dispositivo y el ancla
+// registra los controles de MediaSession. En modo 'element' el <audio>
+// conectado al MediaStream reproduce la señal y registra la sesión.
 //
 // La pista es silencio real (muestras a cero), así que no aporta sonido; no
 // se usa volume=0 para que el navegador no la clasifique como "no audible".

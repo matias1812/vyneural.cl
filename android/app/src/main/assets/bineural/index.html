@@ -72,17 +72,17 @@
         "sameAs": ["https://github.com/matias1812/vyneural.cl"]
       }
     </script>
-    <script type="module" src="./assets/main-Bs-sFyzW.js"></script>
+    <script type="module" src="./assets/main--sqRiZ3O.js"></script>
     <link rel="modulepreload" href="./assets/client-phMsNx2l.js">
     <link rel="modulepreload" href="./assets/auth-CnC5MWUM.js">
     <link rel="modulepreload" href="./assets/marketing-DPaaUnh_.js">
-    <link rel="modulepreload" href="./assets/site-BTsHEHx8.js">
-    <link rel="modulepreload" href="./assets/starfield-CorT_98A.js">
+    <link rel="modulepreload" href="./assets/site-zplMA-vz.js">
+    <link rel="modulepreload" href="./assets/starfield-DUza3iFL.js">
     <link rel="modulepreload" href="./assets/apk-time-picker-CNexq8On.js">
-    <link rel="modulepreload" href="./assets/premium-gate-CjQbULM3.js">
+    <link rel="modulepreload" href="./assets/premium-gate-BLbWOVgG.js">
     <link rel="modulepreload" href="./assets/alarms-DudC2RC2.js">
     <link rel="stylesheet" href="./assets/client-f5SCmrAN.css">
-    <link rel="stylesheet" href="./assets/starfield-BnjJwdZn.css">
+    <link rel="stylesheet" href="./assets/starfield-BDw0ZYGf.css">
     <link rel="stylesheet" href="./assets/premium-gate-CQ42YPik.css">
   </head>
   <body>
@@ -223,6 +223,20 @@
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
           <span id="alarm-badge" class="alarm-badge hidden"></span>
         </button>
+        <button type="button" id="lamp-color-btn" class="icon-btn lamp-color-btn" aria-label="Color y movimiento de la luz" title="Ajustes de la luz" aria-haspopup="dialog" aria-controls="lamp-color-dialog">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18c0-2-1-3-2.4-4.5a6 6 0 1 1 10.8 0C16 15 15 16 15 18M9 18h6m-5 3h4"/><path d="M3 9H1m22 0h-2M5 4 3.5 2.5M19 4l1.5-1.5"/></svg>
+        </button>
+        <dialog id="lamp-color-dialog" class="lamp-color-dialog" aria-labelledby="lamp-color-title">
+          <header><h2 id="lamp-color-title">Luz de la cimática</h2><button type="button" class="icon-btn" aria-label="Cerrar ajustes de la luz" data-lamp-close autofocus>×</button></header>
+          <button type="button" class="lamp-motion-switch" role="switch" aria-checked="false">
+            <span>Movimiento de la luz <small data-lamp-motion-state aria-hidden="true">Estática</small></span>
+            <span class="lamp-motion-track" aria-hidden="true"></span>
+          </button>
+          <div class="lamp-color-label">Color de la luz <span>Premium</span></div>
+          <div class="lamp-swatches" role="group" aria-label="Paleta de la lámpara"></div>
+        </dialog>
+
+
         <button id="more-btn" class="icon-btn more-btn" aria-label="Más opciones" aria-expanded="false" title="Más opciones">
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>
         </button>
@@ -939,6 +953,6 @@
         médico. Usa audífonos: sin ellos no se produce el efecto binaural. No las uses mientras
         conduces o manejas maquinaria.
       </p>
-    </footer>
+    </footer>
   </body>
 </html>

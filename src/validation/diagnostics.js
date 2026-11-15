@@ -20,7 +20,7 @@ import { WaveField } from '../wavefield.js';
 // única compartida por la vista 2D, la vista 3D y este validador). Mismos
 // nombres, mismos valores; solo cambió de dónde vienen.
 import { ZP_BY_M, modeOmega, gammaAt, PHYS_A, GAMMA_MIN, GAMMA_MAX, besselJ0, besselJ1, besselJArray, zPrimeApprox, mcmahonZeroJPrime, zeroFor, MAX_RADIAL_MODE, REF_F, REF_RINGS, MORPH_BLEND_K, SLOWMO_K, selectModeWithFallback } from '../core/plate-field.js';
-import { G as WAVE_G, SIGMA_RHO as WAVE_SIGMA_RHO, faradayWavenumber } from '../core/wave-physics.js';
+import { G as WAVE_G, SIGMA_RHO as WAVE_SIGMA_RHO, faradayWavenumber, viscousDecayRate } from '../core/wave-physics.js';
 import { buildSilentWav, ANCHOR_SECONDS } from '../core/media-anchor.js';
 import {
   evaluatePermissions,
@@ -1425,22 +1425,14 @@ export async function runBineuralDiagnostics() {
     }
   });
 
-  runTest('Cymatics: beat-pulse brightness terms (ringA/sa/detailPulse) keep peak/trough contrast bounded (regression for "sigue titilando")', async () => {
-    // FIX (2026-09-12): ringA/sa/detailPulse mapean pulseEff (0..1, la fase
-    // REAL del latido, sin filtrar — eso no cambia, ver main.js) a un
-    // multiplicador de brillo/detalle. Antes de este fix, ringA recorría
-    // 0.22->1.0 (4.5x) en un trazo brillante cian a hasta ~12.5Hz — lee como
-    // estroboscopio. El fix bajó el CONTRASTE (no el timing) de las 3
-    // fórmulas. Este test lee el código fuente real y falla si alguien
-    // vuelve a subir el contraste por encima de lo razonable, o si lo
-    // aplana del todo (pulseEff dejaría de tener efecto visible).
+  runTest('Cymatics: pulse-driven detail contrast remains bounded', async () => {
+    // El brillo de las ondas se calcula por píxel y sustituye al aro y al
+    // brillo fijo. La filigrana conserva un pulso de contraste limitado.
     if (typeof process === 'undefined') return;
     const fs = await import(/* @vite-ignore */ 'node:fs');
     const root = process.cwd();
     const js = fs.readFileSync(root + '/src/cymatics.js', 'utf8');
     const checks = [
-      { name: 'ringA', re: /const ringA = \((\d+(?:\.\d+)?) \+ (\d+(?:\.\d+)?) \* pulseEff\)/, maxRatio: 2.0 },
-      { name: 'sa', re: /const sa = \((\d+(?:\.\d+)?) \+ (\d+(?:\.\d+)?) \* pulseEff\)/, maxRatio: 2.0 },
       { name: 'detailPulse', re: /const detailPulse = \((\d+(?:\.\d+)?) \+ (\d+(?:\.\d+)?) \* pulseEff\)/, maxRatio: 2.0 },
     ];
     for (const { name, re, maxRatio } of checks) {
@@ -1582,7 +1574,7 @@ export async function runBineuralDiagnostics() {
     if (!(deltaAbove < 0)) throw new Error(`delta debería ser < 0 por encima de la resonancia, dio ${deltaAbove}`);
   });
 
-  runTest('Cymatics: gammaAt is monotonically decreasing and bounded in [GAMMA_MIN, GAMMA_MAX]', () => {
+  runTest('Cymatics: cinematic gamma decreases within the visual bounds', () => {
     let prevG = Infinity;
     for (const f of [0, 10, 40, 80, 160, 320, 640, 2000]) {
       const g = gammaAt(f);
@@ -1590,6 +1582,16 @@ export async function runBineuralDiagnostics() {
       if (g < GAMMA_MIN - 1e-9) throw new Error(`gammaAt(${f}) = ${g} < GAMMA_MIN (${GAMMA_MIN})`);
       if (g > prevG + 1e-9) throw new Error(`gammaAt(${f}) = ${g} > valor anterior (${prevG}) — debería decrecer con f.`);
       prevG = g;
+    }
+  });
+
+  runTest('Cymatics: weakly viscous decay increases across the gravity-capillary dispersion curve', () => {
+    // Referencias por bisección de g·k + (σ/ρ)·k³ = (πf)², con ν = 10⁻⁶ m²/s.
+    for (const [frequency, expected] of [[60, 1.066], [220, 6.827], [963, 49.967]]) {
+      const rate = viscousDecayRate(faradayWavenumber(frequency));
+      if (!Number.isFinite(rate) || Math.abs(rate - expected) > 0.01) {
+        throw new Error(`Decaimiento a ${frequency} Hz: ${rate}, esperado ${expected} s⁻¹.`);
+      }
     }
   });
 
@@ -2058,6 +2060,17 @@ export async function runBineuralDiagnostics() {
     if (clock.beatPhase(0) != null) throw new Error('beat 0 → sin fase');
   });
 
+  runTest('AudioClock: el contador de latidos conserva fase al retocar y fijar una rampa', () => {
+    const clock = new AudioClock();
+    clock.resetBeatCycles(1, 40);
+    clock.retuneBeat(2, 10, 1.5);
+    const halfway = clock.sampleBeat(2.75);
+    if (halfway.cycles !== 64.375 || halfway.hz !== 25) throw new Error('fase incorrecta a mitad de rampa');
+    if (clock.sampleBeat(4.5).cycles !== 87.5) throw new Error('fase incorrecta después de la rampa');
+    clock.retuneBeat(2.75, 20, 0);
+    if (clock.sampleBeat(3.75).cycles !== 84.375) throw new Error('el ajuste instantáneo perdió ciclos');
+  });
+
   runTest('AppLifecycle: secuencia real FOREGROUND → BACKGROUND-audio → suspendido → RETURNING → FOREGROUND', () => {
     const lc = new AppLifecycle();
     // Estado inicial tras play: FOREGROUND ('start' solo aplica desde STOPPED).
@@ -2194,6 +2207,19 @@ export async function runBineuralDiagnostics() {
     if (!ctx.destination.connected) throw new Error('debe conectar a ctx.destination');
   });
 
+  runTest('AudioTransport: la salida directa conecta desde el primer play sin inicializar MediaStream', () => {
+    const ctx = fakeCtx();
+    const transport = new AudioTransport({ preferDirect: true, createElement: fakeElement });
+    transport.attach(ctx, { connect: () => {} });
+    transport.play();
+    if (transport.mode !== 'direct' || !ctx.destination.connected) {
+      throw new Error('el primer play debe usar ctx.destination');
+    }
+    if (transport.element || transport.streamDest || transport.fallbackApplied) {
+      throw new Error('la salida directa no debe esperar a que falle el elemento');
+    }
+  });
+
   runTest('AudioTransport: el audio REAL viaja por un único <audio> (modo element)', () => {
     const ctx = fakeCtx();
     const el = fakeElement();
@@ -2226,6 +2252,66 @@ export async function runBineuralDiagnostics() {
     // volver a intentar); si aún estuviera asignado, tampoco debe re-fallback.
     if (typeof el.onerror === 'function') el.onerror();
     if (fallback !== 1) throw new Error('no debe volver a hacer fallback');
+  });
+
+  runTest('AudioTransport: rechazo de formato recupera la salida solo durante un play vigente', async () => {
+    const ctx = fakeCtx();
+    const el = fakeElement();
+    const transport = new AudioTransport({ createElement: () => el });
+    transport.attach(ctx, { connect() {} });
+    el.play = () => Promise.reject({ name: 'NotSupportedError' });
+    transport.play();
+    transport.pause();
+    await Promise.resolve();
+    if (transport.mode !== 'element') throw new Error('un play cancelado cambió la salida');
+    transport.play();
+    await Promise.resolve();
+    if (transport.mode !== 'direct' || !ctx.destination.connected) throw new Error('la sesión quedó muda al fallar el stream');
+  });
+
+  runTest('AudioTransport: detecta un MediaStream detenido aunque Web Audio siga avanzando', () => {
+    const ctx = Object.assign(fakeCtx(), { state: 'running', currentTime: 0 });
+    const element = fakeElement();
+    let fallbacks = 0;
+    const transport = new AudioTransport({ createElement: () => element, onFallback: () => fallbacks++ });
+    transport.attach(ctx, { connect() {} });
+    transport.play();
+
+    for (let time = 0.5; time <= 3; time += 0.5) {
+      ctx.currentTime = time;
+      element.currentTime = time - 0.2;
+      if (transport.checkPlaybackProgress(true)) throw new Error('un stream sano perdió su salida');
+    }
+    ctx.currentTime = 7;
+    if (transport.checkPlaybackProgress(true)) throw new Error('una medida aislada tras volver de segundo plano activó la recuperación');
+    for (const time of [7.5, 8, 8.5]) {
+      ctx.currentTime = time;
+      if (transport.checkPlaybackProgress(true)) throw new Error('un retraso transitorio activó la recuperación');
+    }
+    ctx.currentTime = 9;
+    if (!transport.checkPlaybackProgress(true) || transport.mode !== 'direct') throw new Error('el stream detenido siguió como salida');
+    if (transport.outputTap.targets.length !== 1 || transport.outputTap.targets[0] !== ctx.destination) {
+      throw new Error('la recuperación debe conectar una sola salida');
+    }
+    if (!element.paused || transport.checkPlaybackProgress(true) || fallbacks !== 1) throw new Error('la recuperación se repitió');
+  });
+
+  runTest('AudioTransport: el monitor no recupera una salida pausada o sin señal', () => {
+    const ctx = Object.assign(fakeCtx(), { state: 'running', currentTime: 0 });
+    const element = fakeElement();
+    const transport = new AudioTransport({ createElement: () => element });
+    transport.attach(ctx, { connect() {} });
+    transport.play();
+    for (let time = 0; time <= 4; time += 0.5) {
+      ctx.currentTime = time;
+      if (transport.checkPlaybackProgress(false)) throw new Error('el monitor intervino durante el silencio');
+    }
+    transport.pause();
+    for (let time = 4.5; time <= 8; time += 0.5) {
+      ctx.currentTime = time;
+      if (transport.checkPlaybackProgress(true)) throw new Error('el monitor intervino durante la pausa');
+    }
+    if (transport.mode !== 'element') throw new Error('cambió el transporte sin reproducción activa');
   });
 
   runTest('PlanRecovery: decide UNA recuperación según el estado real (P0.5.9)', () => {
@@ -2868,8 +2954,15 @@ export async function runBineuralDiagnostics() {
       this.setValueCount = 0;
     }
     cancelScheduledValues() { this.cancelCount += 1; }
-    setValueAtTime(v) { this.setValueCount += 1; this.value = v; }
-    linearRampToValueAtTime(v) { this.value = v; }
+    setValueAtTime(v, time) {
+      this.setValueCount += 1;
+      this.anchor = { value: v, time };
+      this.value = v;
+    }
+    linearRampToValueAtTime(v, end) {
+      this.ramp = { value: v, end };
+      this.value = v;
+    }
     exponentialRampToValueAtTime(v) { this.value = v; }
     setTargetAtTime(v) { this.value = v; }
   }
@@ -2940,6 +3033,104 @@ export async function runBineuralDiagnostics() {
       globalThis.window.AudioContext = saved;
     }
   };
+
+  runTest('Audio: el volumen retoma la rampa desde su ganancia instantánea', () => {
+    const engine = new BinauralEngine();
+    engine.ctx = { currentTime: 1 };
+    engine._playing = true;
+    const events = [];
+    const gain = {
+      value: 0.4,
+      cancelAndHoldAtTime: time => events.push(['hold', time]),
+      cancelScheduledValues: time => { events.push(['cancel', time]); gain.value = 0.9; },
+      setValueAtTime: (value, time) => events.push(['set', value, time]),
+      setTargetAtTime: (value, time, tau) => events.push(['target', value, time, tau]),
+    };
+    engine.masterGain = { gain };
+    engine.setVolume(0.8);
+    engine.setVolume(0.8);
+    if (events.length !== 2 || events[0][0] !== 'hold' || events[1][1] !== 0.8) {
+      throw new Error('Debe conservar la ganancia y evitar una rampa duplicada.');
+    }
+
+    delete gain.cancelAndHoldAtTime;
+    engine.ctx.currentTime = 1.025;
+    engine.setVolume(0);
+    const [cancel, anchor, curve, silence] = events.slice(-4);
+    if (cancel[0] !== 'cancel' || anchor[1] !== 0.4 || curve[0] !== 'target' || curve[1] !== 0 || silence[0] !== 'set' || silence[1] !== 0) {
+      throw new Error('El fallback debe leer la ganancia antes de cancelar y llegar a cero.');
+    }
+  });
+
+  runTest('Audio: pausa web conserva las fuentes, el reloj y el silencio al cambiar volumen', async () => {
+    const engine = new BinauralEngine();
+    const params = { base: 190, beat: 7.83, volume: 0.6 };
+    withFakeWindow(() => engine.start(params));
+    const ctx = engine.ctx;
+    ctx.suspend = () => { ctx.state = 'suspended'; };
+    try {
+      ctx.currentTime = 1.25;
+      const ids = engine.getAudioStats().liveSourceIds;
+      const epoch = engine.getBeatEpoch();
+      const cycles = engine.clock.sampleBeat().cycles;
+      engine.pause();
+      engine.setVolume(0.4);
+      if (engine.isPlaying || engine.masterGain.gain.ramp.value !== 0) throw new Error('volumen reactivó la pausa');
+      await new Promise(resolve => setTimeout(resolve, 85));
+      if (ctx.state !== 'suspended' || engine.masterGain.gain.value !== 0) throw new Error('la pausa no congeló el reloj en silencio');
+      engine.start({ ...params, volume: 0.4 });
+      if (ctx.state !== 'running' || !engine.isPlaying) throw new Error('el play explícito no reanudó');
+      const resumed = engine.getAudioStats();
+      if (JSON.stringify(resumed.liveSourceIds) !== JSON.stringify(ids) || resumed.sessionId !== 1) throw new Error('la reanudación reconstruyó las fuentes');
+      if (engine.getBeatEpoch() !== epoch || engine.clock.sampleBeat().cycles !== cycles) throw new Error('se reinició la fase del batido');
+      if (engine.masterGain.gain.ramp.value !== 0.4 || engine.masterGain.gain.ramp.end > 1.35) throw new Error('el volumen no volvió con un fade corto');
+
+      engine.pause();
+      engine.start(params);
+      await new Promise(resolve => setTimeout(resolve, 85));
+      if (ctx.state !== 'running') throw new Error('una pausa anterior suspendió después de reanudar');
+      engine.pause();
+      engine.stop(false);
+      if (engine.getAudioStats().oscillatorCount !== 0) throw new Error('stop debe liberar las fuentes de la pausa');
+    } finally {
+      engine.stop(false);
+    }
+  });
+
+  runTest('Audio: retune repetido conserva el final de la rampa y el siguiente parte de la frecuencia instantánea', () =>
+    withFakeWindow(() => {
+      for (const condition of ['binaural', 'amplitude-modulation']) {
+        const engine = new BinauralEngine();
+        engine.start({ base: 200, beat: 8, condition });
+        try {
+          const carrier = engine.leftOsc.frequency;
+          const rhythm = (engine.rightOsc ?? engine.amLfo).frequency;
+          const expectedRhythm = condition === 'binaural' ? 336 : 16;
+          engine.retune({ base: 500, beat: 28 });
+          engine.ctx.currentTime = 0.6;
+          engine.retune({ base: 500, beat: 28 });
+          if (carrier.ramp.end !== 1.5 || rhythm.ramp.end !== 1.5) {
+            throw new Error('El mismo objetivo reinició una rampa en curso.');
+          }
+          const beatBefore = engine.clock.sampleBeat().cycles;
+          engine.retune({ base: 260, beat: 14 });
+          if (Math.abs(carrier.anchor.value - 320) > 1e-9 || Math.abs(rhythm.anchor.value - expectedRhythm) > 1e-9) {
+            throw new Error('La rampa no partió de las frecuencias instantáneas.');
+          }
+          if (engine.clock.sampleBeat().cycles !== beatBefore) {
+            throw new Error('El contador de latidos perdió fase al retocar.');
+          }
+          engine.pinFrequencies();
+          engine.retune({ base: 240, beat: 12 });
+          if (carrier.anchor.value !== 260 || rhythm.anchor.value !== (condition === 'binaural' ? 274 : 14)) {
+            throw new Error('La rampa no partió de las frecuencias fijadas al reanudar.');
+          }
+        } finally {
+          engine.stop(false);
+        }
+      }
+    }),
+  );
 
   runTest('Audio: ensure() reports AUDIO_UNSUPPORTED without partially initializing the engine', () =>
     withFakeWindow(() => {
@@ -3610,6 +3801,35 @@ export async function runBineuralDiagnostics() {
     // desde detenido; los lock/unlock (200 eventos) no generaron NINGÚN comando.
     if (nativeStarts + nativeResumes !== 200) {
       throw new Error('cada play de usuario = exactamente 1 comando de reproducción');
+    }
+  });
+
+  runTest('Audio recoverFade: programa la rampa aunque .value conserve la muestra anterior', () => {
+    const engine = new BinauralEngine();
+    const events = [];
+    engine.ctx = { currentTime: 2, state: 'running' };
+    engine.masterGain = {
+      gain: {
+        value: 0.6,
+        cancelScheduledValues: (time) => events.push(['cancel', time]),
+        setValueAtTime: (level, time) => events.push(['set', level, time]),
+        linearRampToValueAtTime: (level, time) => events.push(['ramp', level, time]),
+      },
+    };
+
+    engine.recoverFade(0.6, 0.8);
+    if (events.length) throw new Error('la recuperación no debe modificar el audio en pausa');
+
+    engine._playing = true;
+    engine.recoverFade(1.5, 0.8);
+    if (JSON.stringify(events) !== JSON.stringify([['cancel', 2], ['set', 0.6, 2], ['ramp', 1, 2.8]])) {
+      throw new Error('si el contexto sigue corriendo, la recuperación debe conservar la ganancia antes de la rampa');
+    }
+
+    events.length = 0;
+    engine.recoverFade(0, 0.8);
+    if (JSON.stringify(events) !== JSON.stringify([['cancel', 2], ['set', 0, 2]])) {
+      throw new Error('un volumen de 0 debe permanecer en silencio');
     }
   });
 

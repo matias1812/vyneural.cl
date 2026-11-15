@@ -38,7 +38,7 @@ export class SimulationEngine {
     // Audio watchdog state: detects a session that is "playing but silent"
     // (OS-suspended context, dead gain) and recovers it automatically.
     this._audioHealth = 0;
-    this._healthFrames = 0;
+    this._nextAudioCheck = 0;
     
     // Quick reference to ambient engine so auditory model can check its volume
     this.ambient = null; 
@@ -117,6 +117,7 @@ export class SimulationEngine {
     this.audio.start(params);
     this.lastConfig = config;
     this.isPlaying = true;
+    this._audioHealth = 0;
     
     // Link audio beat pulse to cymatics energy (perturbation model)
     this.audio.onBeatPulse = () => {
@@ -127,6 +128,11 @@ export class SimulationEngine {
         this.cymatics.pulse(pulseStrength);
       }
     };
+  }
+
+  pause() {
+    this.audio.pause();
+    this.isPlaying = false;
   }
 
   stop() {
@@ -170,7 +176,7 @@ export class SimulationEngine {
     this._modelAcc = (this._modelAcc || 0) + dt;
     const cadence = this.isPlaying ? 1 / 30 : 1 / 10;
     if (this._modelAcc < cadence) {
-      this._audioWatchdog();
+      this._audioWatchdog(now);
       return;
     }
     const modelDt = Math.min(0.25, this._modelAcc);
@@ -253,7 +259,7 @@ export class SimulationEngine {
       });
     }
 
-    this._audioWatchdog();
+    this._audioWatchdog(now);
   }
 
   // ── Audio watchdog ────────────────────────────────────────────────────────
@@ -266,7 +272,7 @@ export class SimulationEngine {
   // En segundo plano no hay nada que recuperar audiblemente: actuar ahí solo
   // consume batería y, si el SO vuelve a suspender, produce clics al volver.
   // Al reaparecer la pestaña, restoreFromBackground() de main.js reanuda.
-  _audioWatchdog() {
+  _audioWatchdog(now) {
     // P5.6 (H2) — frontera APK EXPLÍCITA: en modo plataforma-muteada (APK)
     // el watchdog no recupera NADA — la web es inaudible por diseño y el
     // sonido lo sostiene el servicio nativo. Guard explícito, no accidental:
@@ -275,47 +281,42 @@ export class SimulationEngine {
     // La condición 'none' es silencio deliberado (control): el watchdog no
     // debe intentar "recuperar" una sesión que no tiene estímulo.
     if (this.isPlaying && this.audio && this.audio.ctx && this.audio._condition !== 'none' && !document.hidden) {
-      this._healthFrames++;
-      if (this._healthFrames % 30 === 0) {
-        // M3 — el primer frame tras volver de segundo plano cae justo en la
-        // misma ráfaga que dispara visibilitychange → restoreFromBackground()
-        // (main.js), que YA hace su propio recoverFade(). _healthFrames queda
-        // congelado mientras document.hidden (este bloque ni corre ahí), así
-        // que el primer tick al volver puede coincidir con el múltiplo de 30
-        // por pura casualidad de en qué frame se bloqueó — el watchdog nunca
-        // se enteraba y lanzaba una SEGUNDA rampa de ganancia por su cuenta,
-        // pisando la de restoreFromBackground(): dos recoverFade() con
-        // distinto punto de partida = el "acople"/interferencia reportado al
-        // desbloquear. RestoreGate (main.js, expuesto en window.__restoreGate)
-        // ya existe justo para deduplicar esto — el watchdog no lo consultaba.
-        const rg = window.__restoreGate;
-        if (rg) {
-          const s = rg.summary();
-          const justRestored =
-            s.state === 'RESTORING' || (s.state === 'SETTLED' && s.settledAgoMs != null && s.settledAgoMs < rg.settleMs);
-          if (justRestored) return;
-        }
-        const health = evaluateAudioHealth({
-          isPlaying: this.isPlaying,
-          ctxState: this.audio.ctx.state,
-          gain: this.audio.masterGain ? this.audio.masterGain.gain.value : 0,
-          rms: this.audio.getRms(),
-          prevHealth: this._audioHealth,
-        });
-        this._audioHealth = health.health;
-        if (health.action !== 'none') {
-          // recoverFade: baja la ganancia al piso, reanuda el contexto y sube
-          // con rampa. Reanudar a plena ganancia en mitad de un ciclo sonaba
-          // a clic/pop (la "interferencia" al volver al celular).
-          console.warn(
-            `[SimulationEngine] ${health.action === 'resume' ? 'AudioContext suspendido con sesión activa' : 'Sesión en play sin señal de audio'} — recuperando sin clics.`,
-          );
-          // M4 — mismo motivo que restoreFromBackground: fijar la frecuencia
-          // en seco antes de reanudar evita una rampa en vuelo que suene
-          // acelerada/doblada al recuperar el contexto.
-          if (this.audio.pinFrequencies) this.audio.pinFrequencies();
-          this.audio.recoverFade(this.audio._volume ?? 0.6, 0.8);
-        }
+      if (now < this._nextAudioCheck) return;
+      this._nextAudioCheck = now + 500;
+      // La restauración del primer plano ya se encarga de la recuperación.
+      const rg = window.__restoreGate;
+      if (rg) {
+        const s = rg.summary();
+        const justRestored =
+          s.state === 'RESTORING' || (s.state === 'SETTLED' && s.settledAgoMs != null && s.settledAgoMs < rg.settleMs);
+        if (justRestored) return;
+      }
+      const gain = this.audio.masterGain?.gain.value ?? 0;
+      const rms = this.audio.getRms();
+      const health = evaluateAudioHealth({
+        isPlaying: this.isPlaying,
+        ctxState: this.audio.ctx.state,
+        gain,
+        rms,
+        prevHealth: this._audioHealth,
+      });
+      // El analizador está antes del transporte. Señal presente con un
+      // reloj MediaStream detenido requiere recuperar la salida, no el grafo.
+      const hasSignal = this.audio.isPlaying && gain > 0.02 && rms > 0.003;
+      if (this.audio.transport?.checkPlaybackProgress?.(hasSignal)) {
+        console.warn('[SimulationEngine] Transporte MediaStream detenido: usando salida directa.');
+      }
+      this._audioHealth = health.health;
+      if (health.action !== 'none') {
+        window.__interferenceLogPush?.('recuperación', health.action + ' · contexto ' + this.audio.ctx.state);
+        // recoverFade: baja la ganancia al piso, reanuda el contexto y sube
+        // con rampa. Reanudar a plena ganancia en mitad de un ciclo sonaba
+        // a clic/pop (la "interferencia" al volver al celular).
+        console.warn(
+          `[SimulationEngine] ${health.action === 'resume' ? 'AudioContext suspendido con sesión activa' : 'Sesión en play sin señal de audio'} — recuperando sin clics.`,
+        );
+        // La recuperación de la salida conserva la afinación en curso.
+        this.audio.recoverFade(this.audio._volume ?? 0.6, 0.8);
       }
     }
   }

@@ -48,6 +48,10 @@ export class ScientificHUD {
           <div class="hud-row"><span>Mode (m,n)</span><span id="hud-mode">--</span></div>
           <div class="hud-row"><span>ω_res</span><span id="hud-omega">-- rad/s</span></div>
           <div class="hud-row"><span>δ detuning</span><span id="hud-delta">-- rad/s</span></div>
+          <div class="hidden" id="hud-response-row">
+            <div class="hud-row"><span>Relative modal amplitude</span><span id="hud-response">--</span></div>
+            <div class="hud-row"><span>Pattern scale</span><span>Normalized</span></div>
+          </div>
           <div class="hud-row"><span>Energy</span><span id="hud-energy">--</span></div>
           <div class="hud-row"><span>Q factor</span><span id="hud-q">--</span></div>
         </div>
@@ -108,6 +112,8 @@ export class ScientificHUD {
       mode: document.getElementById('hud-mode'),
       omega: document.getElementById('hud-omega'),
       delta: document.getElementById('hud-delta'),
+      responseRow: document.getElementById('hud-response-row'),
+      response: document.getElementById('hud-response'),
       energy: document.getElementById('hud-energy'),
       q: document.getElementById('hud-q'),
       nDelta: document.getElementById('hud-n-delta'),
@@ -198,7 +204,7 @@ export class ScientificHUD {
    * @param {object} [d.cognitive]  CognitiveState
    * @param {object} [d.hypothesis] { targetBands, expectedEffects, evidenceLevel }
    * @param {object} [d.eeg]        EEGState
-   * @param {object} [d.dominantMode] { m, n, omega, detuning }
+   * @param {object} [d.dominantMode] { m, n, omega, detuning, response }
    * @param {object} [d.visual]     VisualState
    */
   update({ stimulus, neural, cognitive, hypothesis, eeg, dominantMode, visual } = {}) {
@@ -216,6 +222,9 @@ export class ScientificHUD {
       const sign = dominantMode.detuning >= 0 ? '+' : '';
       this.els.delta.innerText = `${sign}${fmt(dominantMode.detuning, 1)} rad/s`;
     }
+    const response = dominantMode?.response;
+    this.els.responseRow.classList.toggle('hidden', response == null);
+    if (response != null) this.els.response.innerText = `${fmt(100 * response, 1)} %`;
     if (dominantMode?.energy != null) this.els.energy.innerText = fmt(dominantMode.energy, 3);
     if (dominantMode?.q != null) this.els.q.innerText = fmt(dominantMode.q, 1);
 

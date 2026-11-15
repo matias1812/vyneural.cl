@@ -358,20 +358,11 @@ export function ringsFor(f) {
 }
 
 // --------------------------------------------------------------------------
-// Ancho de resonancia — el ÚNICO modelo de amortiguación del sistema desde
-// esta auditoría (antes wavefield.js tenía el suyo propio, independiente;
-// ver Parte E: wavefield.js pasa a validador, no a motor de render, así que
-// ya no necesita un modelo de amortiguación propio para la ruta visible).
-//
-// PHASE 8 (preexistente): Frequency-dependent resonance width Γ(ω_s). En
-// cimática real la banda de resonancia se angosta a mayor frecuencia (el
-// factor de calidad Q = ω_s/Γ crece con la frecuencia porque las ondas
-// capilares tienen menos amortiguación que las de gravedad). A ω_s baja
-// (pocos Hz) la amortiguación es ancha (Γ ≈ 25 rad/s); a ω_s alta (>300 Hz)
-// se angosta hacia Γ_min. Modelo: Γ(f) = Γ_max / (1 + f/f_half).
+// Ancho de resonancia y ritmo de transición de la vista cinematográfica.
+// Curva heurística que favorece cambios de patrón más lentos en los agudos.
 // --------------------------------------------------------------------------
-export const GAMMA_MAX = 25; // rad/s — régimen de baja frecuencia (ondas de gravedad)
-export const GAMMA_MIN = 6; // rad/s — piso de alta frecuencia (régimen capilar)
+export const GAMMA_MAX = 25; // rad/s — techo visual
+export const GAMMA_MIN = 6; // rad/s — piso visual
 export const GAMMA_HALF = 80; // Hz — frecuencia de cruce
 export function gammaAt(f) {
   return GAMMA_MIN + (GAMMA_MAX - GAMMA_MIN) / (1 + f / GAMMA_HALF);
@@ -433,9 +424,9 @@ export function selectNearestMode(targetOmega, a, { mMin = 2, mMax = 6, nMax = M
 // cobertura m≥2 se abren hacia ARRIBA del rango, no hacia abajo. O sea: no
 // es una rama rara de régimen extremo, es una rama caliente y normal del
 // selector en el rango medio-alto de portadoras.
-export function selectModeWithFallback(targetOmega, a, f, opts = {}) {
+export function selectModeWithFallback(targetOmega, a, f, { resonanceWidth = gammaAt(f), ...opts } = {}) {
   const primary = selectNearestMode(targetOmega, a, { mMin: 2, mMax: 6, ...opts });
-  const twoGamma = 2 * gammaAt(f);
+  const twoGamma = 2 * resonanceWidth;
   if (Math.abs(primary.delta) <= twoGamma) return primary;
   const fallback = selectNearestMode(targetOmega, a, { mMin: 0, mMax: 1, ...opts });
   return Math.abs(fallback.delta) < Math.abs(primary.delta) ? fallback : primary;

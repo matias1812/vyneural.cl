@@ -1,0 +1,85 @@
+.admin-page {
+  background: radial-gradient(ellipse at 85% 0, #211b43 0, transparent 32rem), #0b0d1a;
+}
+
+.admin-overview {
+  grid-column: 1 / -1;
+  padding-block: .5rem .25rem;
+}
+
+.admin-overview h1 {
+  margin: 0 0 1rem;
+  font-size: clamp(1.65rem, 4vw, 2.65rem);
+  line-height: 1.12;
+  letter-spacing: -.035em;
+}
+
+.admin-section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+}
+
+.admin-section-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: .35rem .8rem;
+  border: 1px solid #504674;
+  border-radius: .6rem;
+  color: #e9e0ff;
+  background: #16172e;
+  text-decoration: none;
+}
+
+.admin-section-nav a:hover,
+.admin-section-nav a[aria-current="location"] {
+  background: #302551;
+  border-color: #a78bfa;
+}
+
+.admin-page :focus-visible {
+  outline: 2px solid #c2acff;
+  outline-offset: 3px;
+}
+
+.admin-page .admin-grid > .page-card {
+  scroll-margin-top: 5rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-page .admin-grid > .page-card:target {
+  border-color: #a78bfa;
+}
+
+.admin-access-status {
+  color: #ded4f4;
+  text-align: center;
+  padding-block: 2rem;
+}
+
+.admin-report-period {
+  margin: .85rem 0 .4rem;
+  color: #d1c3ef;
+  font-size: .875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-page .admin-inline-row > input[type="search"] {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+@media (max-width: 600px) {
+  .admin-page .cuenta-form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-page .admin-inline-row {
+    flex-wrap: wrap;
+  }
+
+  .admin-page #cuenta-admin-sales-card {
+    min-height: 0;
+  }
+}

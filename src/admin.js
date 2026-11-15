@@ -9,6 +9,7 @@
 // deje de hacer este archivo.
 
 import './site.css';
+import './admin.css';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { me } from './api/auth.js';
@@ -293,16 +294,37 @@ function renderAdminCouponSales(rows) {
     .join('')}</ul>`;
 }
 
+function readReportRange(prefix) {
+  const from = $(`${prefix}-from`).value || undefined;
+  const to = $(`${prefix}-to`).value || undefined;
+  const error = $(`${prefix}-error`);
+  const invalid = Boolean(from && to && from > to);
+  error.textContent = invalid ? 'La fecha Hasta debe ser igual o posterior a Desde.' : '';
+  error.classList.toggle('hidden', !invalid);
+  return invalid ? null : { from, to };
+}
+
+function renderReportPeriod(prefix, { from, to }) {
+  const display = (date) => date.split('-').reverse().join('/');
+  $(`${prefix}-period`).textContent = from && to ? `Del ${display(from)} al ${display(to)}`
+    : from ? `Desde el ${display(from)}`
+    : to ? `Hasta el ${display(to)}` : 'Todo el período';
+}
+
+let couponSalesRequest = 0;
+
 async function loadAdminCouponSales() {
   const el = $('admin-coupon-sales-summary');
-  const from = $('admin-coupon-sales-from').value || undefined;
-  const to = $('admin-coupon-sales-to').value || undefined;
+  const range = readReportRange('admin-coupon-sales');
+  if (!range) return;
+  const request = ++couponSalesRequest;
+  renderReportPeriod('admin-coupon-sales', range);
   if (el) el.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
   try {
-    const rows = await getAdminCouponSales(from, to);
-    renderAdminCouponSales(rows);
+    const rows = await getAdminCouponSales(range.from, range.to);
+    if (request === couponSalesRequest) renderAdminCouponSales(rows);
   } catch (_) {
-    renderAdminCouponSales(null);
+    if (request === couponSalesRequest) renderAdminCouponSales(null);
   }
 }
 
@@ -359,16 +381,20 @@ function renderAdminSalesSummary(summary) {
     </div>`;
 }
 
+let salesRequest = 0;
+
 async function loadAdminSalesSummary() {
   const el = $('admin-sales-summary');
-  const from = $('admin-sales-from').value || undefined;
-  const to = $('admin-sales-to').value || undefined;
+  const range = readReportRange('admin-sales');
+  if (!range) return;
+  const request = ++salesRequest;
+  renderReportPeriod('admin-sales', range);
   if (el) el.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
   try {
-    const summary = await getSalesSummary(from, to);
-    renderAdminSalesSummary(summary);
+    const summary = await getSalesSummary(range.from, range.to);
+    if (request === salesRequest) renderAdminSalesSummary(summary);
   } catch (_) {
-    renderAdminSalesSummary(null);
+    if (request === salesRequest) renderAdminSalesSummary(null);
   }
 }
 
@@ -514,9 +540,9 @@ function wireAdminSalesForm() {
     // plano (el navegador no le manda ese header a una descarga directa).
     // Mismo patrón blob que main.js::downloadBackup.
     csvBtn.addEventListener('click', async () => {
-      if (errorEl) errorEl.classList.add('hidden');
-      const from = $('admin-sales-from').value || undefined;
-      const to = $('admin-sales-to').value || undefined;
+      const range = readReportRange('admin-sales');
+      if (!range) return;
+      const { from, to } = range;
       csvBtn.disabled = true;
       try {
         const csvText = await downloadSalesCsv(from, to);
@@ -545,9 +571,9 @@ function wireAdminSalesForm() {
     // arma 100% client-side (ver downloadSalesPdf) — no hay descarga
     // autenticada acá, solo otra llamada a getSalesSummary().
     pdfBtn.addEventListener('click', async () => {
-      if (errorEl) errorEl.classList.add('hidden');
-      const from = $('admin-sales-from').value || undefined;
-      const to = $('admin-sales-to').value || undefined;
+      const range = readReportRange('admin-sales');
+      if (!range) return;
+      const { from, to } = range;
       pdfBtn.disabled = true;
       try {
         await downloadSalesPdf(from, to);
@@ -761,13 +787,24 @@ function renderAdminUsersList(data) {
 async function loadAdminUsers() {
   const list = $('admin-users-list');
   if (!list) return;
+  const request = ++adminUsersRequest;
+  $('admin-users-empty').classList.add('hidden');
+  $('admin-users-prev').disabled = true;
+  $('admin-users-next').disabled = true;
+  list.setAttribute('aria-busy', 'true');
   try {
     const data = await listAdminUsers(adminUsersSearchTerm, adminUsersPage, 10, adminUsersOrphanOnly);
-    renderAdminUsersList(data);
+    if (request === adminUsersRequest) renderAdminUsersList(data);
   } catch (_) {
+    if (request !== adminUsersRequest) return;
     list.innerHTML = '<li>No se pudo cargar la lista de usuarios.</li>';
+    $('admin-users-page-label').textContent = '';
+  } finally {
+    if (request === adminUsersRequest) list.removeAttribute('aria-busy');
   }
 }
+
+let adminUsersRequest = 0;
 
 function wireAdminUsersForm() {
   const form = $('admin-users-search-form');
@@ -811,6 +848,7 @@ function wireAdminUsersForm() {
 // sin sacar este polling, que queda como red de seguridad.)
 
 let adminSupportOpenId = null;
+let adminSupportView = 0;
 let adminSupportPollTimer = null;
 let adminSupportLastSeenAt = null;
 // Dedup por id: WebSocket y polling pueden entregar el MISMO mensaje (el
@@ -938,8 +976,10 @@ async function pollAdminSupportMessages(conversationId, container) {
   // Si mientras tanto se cerró/cambió de conversación, este tick es de una
   // conversación que ya no está abierta — no pisar el chat de otra.
   if (adminSupportOpenId !== conversationId) return;
+  const view = adminSupportView;
   try {
     const data = await getAdminSupportMessages(conversationId, adminSupportLastSeenAt || undefined);
+    if (view !== adminSupportView) return;
     const fresh = admitNewAdminMessages((data && data.messages) || []);
     if (fresh.length && adminSupportOpenId === conversationId) {
       renderAdminChatMessages(container, fresh, { append: true });
@@ -973,6 +1013,7 @@ function showResolvedConversation(conversationId) {
 
 async function openAdminSupportConversation(conversationId) {
   closeAdminSupportConversation();
+  const view = adminSupportView;
   adminSupportOpenId = conversationId;
   const item = adminSupportPendingItems.find((c) => c.id === conversationId);
   $('admin-support-chat-empty').classList.add('hidden');
@@ -982,7 +1023,10 @@ async function openAdminSupportConversation(conversationId) {
   $('admin-support-chat-messages').classList.remove('hidden');
   $('admin-support-reply-form').classList.remove('hidden');
   const resolveBtnOpen = $('admin-support-resolve-btn');
-  if (resolveBtnOpen) resolveBtnOpen.classList.remove('hidden');
+  if (resolveBtnOpen) {
+    resolveBtnOpen.textContent = 'Marcar resuelta';
+    resolveBtnOpen.classList.remove('hidden');
+  }
   renderAdminSupportList(); // refresca el resaltado is-active
 
   adminSupportLastSeenAt = null;
@@ -993,10 +1037,12 @@ async function openAdminSupportConversation(conversationId) {
   adminChatLastRenderedDay = null;
   try {
     const data = await getAdminSupportMessages(conversationId);
+    if (view !== adminSupportView) return;
     const messages = admitNewAdminMessages((data && data.messages) || []);
     renderAdminChatMessages(chatEl, messages);
     if (messages.length) adminSupportLastSeenAt = messages[messages.length - 1].created_at;
   } catch (_) {
+    if (view !== adminSupportView) return;
     chatEl.innerHTML = '<p class="cuenta-empty">No se pudieron cargar los mensajes.</p>';
   }
   // Solo arranca el polling/socket si seguimos siendo la conversación
@@ -1006,21 +1052,27 @@ async function openAdminSupportConversation(conversationId) {
     adminSupportPollTimer = setInterval(() => pollAdminSupportMessages(conversationId, chatEl), 4000);
     adminSocketHandle = openSupportSocket(conversationId, {
       onMessage: (m) => {
+        if (view !== adminSupportView) return;
         const fresh = admitNewAdminMessages([m]);
         if (fresh.length) {
           renderAdminChatMessages(chatEl, fresh, { append: true });
           adminSupportLastSeenAt = fresh[0].created_at;
         }
       },
-      onStatusChange: (status) => setAdminConnStatus(status),
+      onStatusChange: (status) => {
+        if (view === adminSupportView) setAdminConnStatus(status);
+      },
     });
   }
 }
 
 function closeAdminSupportConversation() {
+  adminSupportView += 1;
   stopAdminSupportPolling();
   stopAdminSupportSocket();
   adminSupportOpenId = null;
+  $('admin-support-reply-input').value = '';
+  $('admin-support-reply-error').classList.add('hidden');
 }
 
 function renderAdminSupportRow(c) {
@@ -1109,18 +1161,37 @@ function renderAdminSupportList() {
  * compartida, sin volver a pedir nada al backend (loadAdminSupportPending/
  * Resolved ya cachean sus items al cargar). */
 function wireAdminSupportTabs() {
-  document.querySelectorAll('.admin-support-tab').forEach((btn) => {
+  const tabs = [...document.querySelectorAll('.admin-support-tab')];
+  tabs.forEach((btn, index) => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
       if (tab === adminSupportActiveTab) return;
       adminSupportActiveTab = tab;
       adminSupportExpanded = false;
-      document.querySelectorAll('.admin-support-tab').forEach((b) => {
-        const active = b.dataset.tab === tab;
+      closeAdminSupportConversation();
+      $('admin-support-chat-empty').classList.remove('hidden');
+      $('admin-support-chat-active').classList.add('hidden');
+      $('admin-support-results').setAttribute('aria-labelledby', btn.id);
+      tabs.forEach((b) => {
+        const active = b === btn;
         b.classList.toggle('is-active', active);
         b.setAttribute('aria-selected', String(active));
+        b.tabIndex = active ? 0 : -1;
       });
       renderAdminSupportList();
+    });
+    btn.addEventListener('keydown', (event) => {
+      const nextByKey = {
+        ArrowLeft: (index + tabs.length - 1) % tabs.length,
+        ArrowRight: (index + 1) % tabs.length,
+        Home: 0,
+        End: tabs.length - 1,
+      };
+      if (!Object.hasOwn(nextByKey, event.key)) return;
+      event.preventDefault();
+      const next = tabs[nextByKey[event.key]];
+      next.focus();
+      next.click();
     });
   });
 }
@@ -1133,6 +1204,8 @@ function wireAdminSupportReplyForm() {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!adminSupportOpenId) return;
+    const conversationId = adminSupportOpenId;
+    const view = adminSupportView;
     const input = $('admin-support-reply-input');
     const errorEl = $('admin-support-reply-error');
     const content = input.value.trim();
@@ -1141,15 +1214,17 @@ function wireAdminSupportReplyForm() {
     const submitBtn = form.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
     try {
-      const sent = await sendAdminSupportMessage(adminSupportOpenId, content);
-      input.value = '';
+      const sent = await sendAdminSupportMessage(conversationId, content);
+      if (view !== adminSupportView) return;
+      if (input.value.trim() === content) input.value = '';
       const chatEl = $('admin-support-chat-messages');
-      if (chatEl && sent) {
-        renderAdminChatMessages(chatEl, [sent], { append: true });
+      const fresh = sent ? admitNewAdminMessages([sent]) : [];
+      if (chatEl && fresh.length) {
+        renderAdminChatMessages(chatEl, fresh, { append: true });
         adminSupportLastSeenAt = sent.created_at;
       }
     } catch (err) {
-      if (errorEl) {
+      if (errorEl && view === adminSupportView) {
         errorEl.textContent = errorDetail(err, 'No se pudo enviar la respuesta.');
         errorEl.classList.remove('hidden');
       }
@@ -1184,6 +1259,7 @@ function wireAdminSupportResolveButton() {
   btn.addEventListener('click', async () => {
     if (!adminSupportOpenId) return;
     const resolvedId = adminSupportOpenId;
+    const view = adminSupportView;
     btn.disabled = true;
     try {
       await resolveSupportConversation(resolvedId);
@@ -1192,6 +1268,11 @@ function wireAdminSupportResolveButton() {
       // (ver admin_mark_resolved) -- ya no aparece en Pendientes. Refrescar
       // Resueltos y volver el panel a la vista vacía, mismo criterio que el
       // botón "volver" (closeAdminSupportConversation + chat-empty).
+      if (view !== adminSupportView) {
+        btn.disabled = false;
+        loadAdminSupportResolved();
+        return;
+      }
       const stillPending = adminSupportPendingItems.some((c) => c.id === resolvedId);
       if (!stillPending) {
         loadAdminSupportResolved();
@@ -1205,11 +1286,12 @@ function wireAdminSupportResolveButton() {
       }
       btn.textContent = 'Resuelta ✓';
       window.setTimeout(() => {
-        btn.textContent = defaultLabel;
+        if (view === adminSupportView) btn.textContent = defaultLabel;
         btn.disabled = false;
       }, 2000);
     } catch (err) {
       btn.disabled = false;
+      if (view !== adminSupportView) return;
       await notifyModal({
         title: 'No se pudo marcar como resuelta',
         text: errorDetail(err, 'Reintentá en unos segundos.'),
@@ -1358,6 +1440,10 @@ function renderMonthlyAccounting(data) {
     tbody.innerHTML = '';
     if (table) table.classList.add('hidden');
     if (emptyEl) emptyEl.classList.add('hidden');
+    $('admin-consulting-invoice-summary').textContent = '';
+    $('admin-consulting-invoices-table-body').textContent = '';
+    $('admin-consulting-invoices-table').classList.add('hidden');
+    $('admin-consulting-invoices-empty').classList.add('hidden');
     return;
   }
 
@@ -1449,6 +1535,8 @@ function renderMonthlyAccounting(data) {
     .join('');
 }
 
+let adminAccountingRequest = 0;
+
 async function loadMonthlyAccounting() {
   const summaryEl = $('admin-accounting-summary');
   const monthSel = $('admin-accounting-month');
@@ -1456,12 +1544,13 @@ async function loadMonthlyAccounting() {
   if (!monthSel || !yearInput) return;
   const month = parseInt(monthSel.value, 10);
   const year = parseInt(yearInput.value, 10);
+  const request = ++adminAccountingRequest;
   if (summaryEl) summaryEl.innerHTML = '<p class="cuenta-empty">Cargando…</p>';
   try {
     const data = await getMonthlyAccounting(year, month);
-    renderMonthlyAccounting(data);
+    if (request === adminAccountingRequest) renderMonthlyAccounting(data);
   } catch (_) {
-    renderMonthlyAccounting(null);
+    if (request === adminAccountingRequest) renderMonthlyAccounting(null);
   }
 }
 
@@ -2305,11 +2394,20 @@ function wireGooglePlayCodesImport() {
 async function init() {
   const unauthorized = $('admin-unauthorized');
   const content = $('admin-content');
-  let profile = null;
+  const loading = $('admin-loading');
+  const accessError = $('admin-access-error');
+  accessError.classList.add('hidden');
+  loading.classList.remove('hidden');
+  let profile;
   try {
     profile = await me();
-  } catch (_) {
-    profile = null;
+  } catch (error) {
+    if (error.status !== 401 && error.status !== 403) {
+      accessError.classList.remove('hidden');
+      return;
+    }
+  } finally {
+    loading.classList.add('hidden');
   }
   // is_admin lo calcula el backend (/auth/me, ver serializers.py) con el
   // mismo criterio que require_admin_user. Antes acá vivía el email del
@@ -2325,6 +2423,27 @@ async function init() {
   }
   if (unauthorized) unauthorized.classList.add('hidden');
   if (content) content.classList.remove('hidden');
+  document.addEventListener('vyneural:session-expired', () => {
+    closeAdminSupportConversation();
+    content.classList.add('hidden');
+    $('admin-session-expired').classList.remove('hidden');
+  }, { once: true });
+  const sectionLinks = content.querySelectorAll('.admin-section-nav a');
+  for (const link of sectionLinks) {
+    const section = $(link.hash.slice(1));
+    section.tabIndex = -1;
+    link.addEventListener('click', () => section.focus({ preventScroll: true }));
+  }
+  function syncSection() {
+    for (const link of sectionLinks) {
+      if (link.hash === location.hash) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
+    }
+  }
+  window.addEventListener('hashchange', syncSection);
+  syncSection();
+  const initialSection = $(location.hash.slice(1));
+  if (initialSection && content.contains(initialSection)) initialSection.scrollIntoView();
 
   loadAdminCoupons();
   wireAdminCouponForm();
@@ -2344,4 +2463,5 @@ async function init() {
   loadAdminSupport();
 }
 
+$('admin-retry').addEventListener('click', init);
 init();

@@ -8,6 +8,33 @@
 import { AudioClock } from './core/audio-clock.js';
 import { AudioTransport } from './core/audio-transport.js';
 
+const RETUNE_SECONDS = 1.5;
+const PAUSE_FADE_SECONDS = 0.04;
+const RESUME_FADE_SECONDS = 0.08;
+const VOLUME_TIME_CONSTANT = 0.018;
+
+function holdGain(gain, now) {
+  if (typeof gain.cancelAndHoldAtTime === 'function') gain.cancelAndHoldAtTime(now);
+  else {
+    const current = gain.value;
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(current, now);
+  }
+}
+
+function retuneFrequency(param, current, target, now) {
+  if (!param) return;
+  if (typeof param.cancelAndHoldAtTime === 'function') {
+    param.cancelAndHoldAtTime(now);
+  } else {
+    // Firefox y WebViews antiguos pueden no exponer cancelAndHoldAtTime.
+    // El valor programado al instante del corte sale de la rampa del motor.
+    param.cancelScheduledValues(now);
+    param.setValueAtTime(current, now);
+  }
+  param.linearRampToValueAtTime(target, now + RETUNE_SECONDS);
+}
+
 export class BinauralEngine {
   constructor() {
     this.ctx = null;
@@ -21,6 +48,7 @@ export class BinauralEngine {
     this._noiseBuf = null; // búfer de ruido reutilizable (condición 'noise')
     this.beat = 0;
     this._base = 0;
+    this._carrierRamp = null;
     // Condición experimental real del estímulo (P18): binaural | pure-tone |
     // noise | amplitude-modulation | none. Cambia lo que SE OYE, no solo el
     // registro: binaural = dos tonos L/R (latido); pure-tone = un tono en
@@ -28,6 +56,8 @@ export class BinauralEngine {
     // ritmo; noise = ruido sin contenido tonal; none = silencio (control).
     this._condition = 'binaural';
     this._playing = false;
+    this._pausedSession = null;
+    this._pauseTimer = null;
     // P5.6 — frontera estructural de plataforma: en la APK el motor web es
     // PERMANENTEMENTE inaudible (el servicio nativo es el único owner). Con
     // `_platformMuted` activo, NINGUNA operación de ganancia (start,
@@ -51,7 +81,7 @@ export class BinauralEngine {
     // Reloj maestro de la sesión (fase del latido, tiempo transcurrido).
     this.clock = new AudioClock(() => (this.ctx ? this.ctx.currentTime : 0));
     // Transporte de salida (P0.5): 'element' (MediaStreamDestination → <audio>
-    // real) o 'direct' (ctx.destination, fallback iOS). Se asigna desde
+    // real) o 'direct' (ctx.destination). Se asigna desde
     // main.js antes del primer play.
     this.transport = null;
   }
@@ -125,7 +155,7 @@ export class BinauralEngine {
         if (this.onCtxStateChange) this.onCtxStateChange(this.ctx.state);
       };
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (!this._pausedSession) this.resume();
     return this.ctx;
   }
 
@@ -134,8 +164,8 @@ export class BinauralEngine {
   // pestaña temporalmente). Sin esto la sesión vuelve muda hasta que el
   // usuario toca play otra vez.
   resume() {
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {
+    if (this.ctx && (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted')) {
+      this.ctx.resume()?.catch(() => {
         /* el navegador exigirá un gesto para reanudar */
       });
     }
@@ -147,44 +177,25 @@ export class BinauralEngine {
   // ganancia al piso ANTES de reanudar, se reanuda y se sube con una rampa
   // suave hasta el volumen de la sesión: el reinicio queda inaudible.
   recoverFade(volume = 0.6, seconds = 0.8) {
-    if (!this.ctx || !this.masterGain) return;
-    const ctx = this.ctx;
-    const wasSuspended = ctx.state === 'suspended';
-    const now = ctx.currentTime;
+    if (!this._playing || !this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+    const gain = this.masterGain.gain;
+    const target = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 0;
+
     try {
-      this.masterGain.gain.cancelScheduledValues(now);
-      // Piso inmediato: evita que el primer bloque renderizado tras resume()
-      // salte a plena ganancia.
-      this.masterGain.gain.setValueAtTime(0.0001, now);
+      if (this._platformMuted || target === 0 || this.ctx.state !== 'running') {
+        gain.cancelScheduledValues(now);
+        gain.setValueAtTime(this._platformMuted || target === 0 ? 0 : 0.0001, now);
+      } else {
+        // Un grafo que sigue corriendo conserva su ganancia instantánea.
+        holdGain(gain, now);
+      }
+      if (!this._platformMuted && target > 0) gain.linearRampToValueAtTime(target, now + seconds);
     } catch (_) {
       /* contexto cerrado */
     }
-    // P5.6 — frontera APK: la web jamás se recupera hacia lo audible.
-    if (this._platformMuted) {
-      try {
-        this.masterGain.gain.setValueAtTime(0, now);
-      } catch (_) {
-        /* contexto cerrado */
-      }
-      return;
-    }
-    this.resume();
-    if (wasSuspended) {
-      // Rampa desde el piso: el fade de entrada enmascara la reanudación.
-      try {
-        this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, volume), now + seconds);
-      } catch (_) {
-        /* contexto cerrado */
-      }
-    } else if (this.masterGain.gain.value < 0.02) {
-      // Contexto ya corriendo pero mudo (watchdog): subir con suavidad.
-      try {
-        this.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, volume), now + seconds);
-      } catch (_) {
-        /* contexto cerrado */
-      }
-    }
-    this._volume = volume;
+    if (!this._platformMuted) this.resume();
+    this._volume = target;
   }
 
   // RMS de la señal que sale al altavoz, tomada del analizador (0…1 aprox.).
@@ -207,6 +218,25 @@ export class BinauralEngine {
   start({ base = 200, beat = 10, volume = 0.5, wave = 'sine', condition } = {}) {
     const ctx = this.ensure();
     const cond = condition || this._condition;
+    const paused = this._pausedSession;
+    if (paused) {
+      clearTimeout(this._pauseTimer);
+      this._pauseTimer = null;
+      this._pausedSession = null;
+      // Encola resume aun si suspend() acaba de solicitarse y state todavía
+      // figura como running. Ambas operaciones se ordenan en el AudioContext.
+      if (paused.suspendRequested || ctx.state !== 'running') ctx.resume()?.catch(() => {});
+      if (!this._platformMuted && paused.base === base && paused.beat === beat && paused.wave === wave && paused.condition === cond) {
+        this._playing = true;
+        this._volume = volume;
+        const now = ctx.currentTime;
+        holdGain(this.masterGain.gain, now);
+        this.masterGain.gain.linearRampToValueAtTime(volume, now + RESUME_FADE_SECONDS);
+        this.transport?.reaffirm();
+        this._startPulse();
+        return;
+      }
+    }
     // P1 — IDEMPOTENCIA (forense M2): si ya hay una sesión viva con los MISMOS
     // parámetros, un start() duplicado (eventos del sistema, doble play) NO
     // reconstruye nada: mismo sessionId, mismas fuentes, mismo pipeline. Solo
@@ -259,7 +289,7 @@ export class BinauralEngine {
     // la ganancia queda en 0 (el sonido real lo genera el servicio nativo).
     const now = ctx.currentTime;
     this.masterGain.gain.cancelScheduledValues(now);
-    this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
+    this.masterGain.gain.setValueAtTime(paused ? 0 : Math.max(0.0001, this.masterGain.gain.value), now);
     if (this._platformMuted) {
       this.masterGain.gain.setValueAtTime(0, now);
     } else {
@@ -278,6 +308,10 @@ export class BinauralEngine {
   _createSources(base, beat, wave) {
     const ctx = this.ctx;
     if (!ctx) return;
+    const sourceTime = ctx.currentTime;
+    this._carrierRamp = null;
+    // La envolvente AM (seno) llega a su cresta un cuarto de ciclo después.
+    this.clock.resetBeatCycles(sourceTime, beat, this._condition === 'amplitude-modulation' ? -0.25 : 0);
     switch (this._condition) {
       case 'pure-tone': {
         const osc = ctx.createOscillator();
@@ -304,8 +338,8 @@ export class BinauralEngine {
         depth.gain.value = 0.42; // 0.5 ± 0.42: modulación profunda y rítmica
         lfo.connect(depth).connect(am.gain);
         osc.connect(am).connect(this.masterGain);
-        osc.start();
-        lfo.start();
+        osc.start(sourceTime);
+        lfo.start(sourceTime);
         this.leftOsc = this._tag(osc);
         this.rightOsc = null;
         this.amGain = am;
@@ -359,8 +393,8 @@ export class BinauralEngine {
         rightPanner.pan.value = 1;
         left.connect(leftGain).connect(leftPanner).connect(this.masterGain);
         right.connect(rightGain).connect(rightPanner).connect(this.masterGain);
-        left.start();
-        right.start();
+        left.start(sourceTime);
+        right.start(sourceTime);
         this.leftOsc = this._tag(left);
         this.rightOsc = this._tag(right);
       }
@@ -477,17 +511,24 @@ export class BinauralEngine {
   }
 
   setVolume(v) {
-    this._volume = v;
-    if (!this.ctx || !this.masterGain) return;
+    if (!Number.isFinite(v)) return;
+    const target = Math.max(0, Math.min(1, v));
+    if (target === this._volume) return;
+    this._volume = target;
+    if (!this._playing || !this.ctx || !this.masterGain) return;
     const now = this.ctx.currentTime;
-    this.masterGain.gain.cancelScheduledValues(now);
-    this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterGain.gain.value), now);
-    // P5.6 — en APK el volumen real lo aplica el servicio nativo; la web 0.
+    const gain = this.masterGain.gain;
+    // P5.6 — la APK aplica el volumen en el motor nativo.
     if (this._platformMuted) {
-      this.masterGain.gain.setValueAtTime(0, now);
-    } else {
-      this.masterGain.gain.linearRampToValueAtTime(v, now + 0.2);
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(0, now);
+      return;
     }
+    // Una curva continua evita escalones cuando el gesto cambia de
+    // dirección antes de llegar al nivel anterior.
+    holdGain(gain, now);
+    gain.setTargetAtTime(target, now, VOLUME_TIME_CONSTANT);
+    if (target === 0) gain.setValueAtTime(0, now + 10 * VOLUME_TIME_CONSTANT);
   }
 
   // Fundido suave del volumen maestro a un nivel dado (0…1). Se usa al pasar
@@ -511,32 +552,20 @@ export class BinauralEngine {
   // sin reiniciar los osciladores ni cortar el sonido: al cambiar de estado
   // la portadora y el latido se deslizan hasta los valores nuevos en 1.5s.
   retune({ base, beat }) {
-    if (!this.ctx || !this._playing) return;
+    if (!this.ctx || !this._playing || (base === this._base && beat === this.beat)) return;
     const now = this.ctx.currentTime;
-    // En silencio (condición control) solo se guardan los valores.
-    if (this._condition === 'none') {
-      this._base = base;
-      this.beat = beat;
-      return;
+    let currentBase = this._base;
+    if (this._carrierRamp) {
+      const { from, start } = this._carrierRamp;
+      const t = Math.min(1, Math.max(0, (now - start) / RETUNE_SECONDS));
+      currentBase = from + (this._base - from) * t;
     }
-    // Transición ultra-suave cancelando valores previos. Las fuentes según
-    // condición: binaural tiene L/R; pure-tone/AM solo la portadora; noise no
-    // tiene frecuencia (se omite).
-    if (this.leftOsc && this.leftOsc.frequency) {
-      this.leftOsc.frequency.cancelScheduledValues(now);
-      this.leftOsc.frequency.setValueAtTime(this.leftOsc.frequency.value, now);
-      this.leftOsc.frequency.linearRampToValueAtTime(base, now + 1.5);
-    }
-    if (this.rightOsc && this.rightOsc.frequency) {
-      this.rightOsc.frequency.cancelScheduledValues(now);
-      this.rightOsc.frequency.setValueAtTime(this.rightOsc.frequency.value, now);
-      this.rightOsc.frequency.linearRampToValueAtTime(base + beat, now + 1.5);
-    }
-    // AM: el modulador del ritmo sigue al latido nuevo.
-    if (this.amLfo && this.amLfo.frequency) {
-      this.amLfo.frequency.cancelScheduledValues(now);
-      this.amLfo.frequency.linearRampToValueAtTime(beat, now + 1.5);
-    }
+    const currentBeat = this.clock.sampleBeat(now)?.hz ?? this.beat;
+    retuneFrequency(this.leftOsc?.frequency, currentBase, base, now);
+    retuneFrequency(this.rightOsc?.frequency, currentBase + currentBeat, base + beat, now);
+    retuneFrequency(this.amLfo?.frequency, currentBeat, beat, now);
+    this._carrierRamp = { from: currentBase, start: now };
+    this.clock.retuneBeat(now, beat, RETUNE_SECONDS);
     this._base = base;
     this.beat = beat;
   }
@@ -571,6 +600,8 @@ export class BinauralEngine {
         this.amLfo.frequency.cancelScheduledValues(now);
         this.amLfo.frequency.setValueAtTime(beat, now);
       }
+      this.clock.retuneBeat(now, beat, 0);
+      this._carrierRamp = null;
     } catch (_) {
       /* contexto cerrado */
     }
@@ -657,6 +688,14 @@ export class BinauralEngine {
     return this.getBeatPhaseAt(this.ctx.currentTime);
   }
 
+  // El renderizador elige qué crestas mostrar sin contar fotogramas ni timers.
+  getBeatSample() {
+    if (!this._playing || this.ctx?.state !== 'running') return null;
+    if (this._condition !== 'binaural' && this._condition !== 'amplitude-modulation') return null;
+    const sample = this.clock.sampleBeat();
+    return sample?.hz > 0 ? { ...sample, targetHz: this.beat, epoch: this._epoch } : null;
+  }
+
   // Estado real del motor para el monitor de integridad (P26/P36): contexto,
   // sample rate, reloj, ganancia, RMS y nº de osciladores. Devuelve null si
   // todavía no hay contexto.
@@ -694,7 +733,49 @@ export class BinauralEngine {
     return this._epoch;
   }
 
+  pause() {
+    if (!this._playing || !this.ctx) return;
+    if (this._platformMuted) {
+      this.stop(false);
+      return;
+    }
+    const ctx = this.ctx;
+    const paused = { base: this._base, beat: this.beat, wave: this._wave, condition: this._condition, suspendRequested: false };
+    this._pausedSession = paused;
+    this._playing = false;
+    clearTimeout(this._pulseTimer);
+    this._pulseTimer = null;
+    const now = ctx.currentTime;
+    const gain = this.masterGain.gain;
+    holdGain(gain, now);
+    gain.linearRampToValueAtTime(0, now + PAUSE_FADE_SECONDS);
+    this._pauseTimer = setTimeout(() => {
+      if (this._pausedSession !== paused) return;
+      this._pauseTimer = null;
+      this.transport?.pause();
+      if (ctx.state === 'closed') return;
+      // Si los cuantos de audio todavía no llegaron al final de la rampa,
+      // fija cero en el instante congelado para que la reanudación sea limpia.
+      gain.cancelScheduledValues(ctx.currentTime);
+      gain.setValueAtTime(0, ctx.currentTime);
+      paused.suspendRequested = true;
+      ctx.suspend()?.catch(() => {});
+    }, PAUSE_FADE_SECONDS * 1000 + 15);
+  }
+
   stop(fade = true) {
+    if (this._pausedSession) {
+      clearTimeout(this._pauseTimer);
+      this._pauseTimer = null;
+      this._pausedSession = null;
+      const now = this.ctx.currentTime;
+      const gain = this.masterGain.gain;
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(0, now);
+      this.transport?.pause();
+      this._teardownSources();
+      return;
+    }
     if (!this.ctx || !this._playing) return;
     const nodes = [this.leftOsc, this.rightOsc, this.amLfo, this.amGain];
     const now = this.ctx.currentTime;

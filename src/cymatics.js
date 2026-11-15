@@ -37,6 +37,7 @@
 // con suavizado, manteniendo 60 FPS en móvil y escritorio.
 
 const TWO_PI = Math.PI * 2;
+const MAX_LAMP_PULSES_HZ = 2;
 const DROP_RESOLUTIONS = [48, 64, 80, 100, 128, 160, 200, 256, 320];
 
 function dropResolution(target, current, locked) {
@@ -72,10 +73,30 @@ import {
   PHYS_A,
   REF_F,
   GAMMA_MIN,
+  GAMMA_MAX,
   ringsFor,
   besselJArray,
   MORPH_BLEND_K,
 } from './core/plate-field.js';
+import { G, SIGMA_RHO, faradayWavenumber, viscousDecayRate } from './core/wave-physics.js';
+
+function morphRate(m, n, scientific) {
+  if (!scientific) return gammaAt(modeOmega(m, n, PHYS_A) / Math.PI);
+  // Acota el ritmo del fundido a los límites de la interfaz.
+  const rate = viscousDecayRate(zeroFor(m, n) / PHYS_A);
+  return Math.max(GAMMA_MIN, Math.min(GAMMA_MAX, rate));
+}
+
+function isMorphActive(morph, scientific) {
+  return !!morph && (scientific || morph.oldW > 0.02);
+}
+
+// Amplitud relativa a la resonancia en la aproximación lineal local.
+// La excitación paramétrica real también depende del umbral de inestabilidad.
+function modalResponse(omega, driveOmega, wavenumber) {
+  const width = viscousDecayRate(wavenumber);
+  return width / Math.hypot(width, omega - driveOmega);
+}
 
 // FIX (auditoría 2026-09-08, Parte B — "una sola cimática, dos cámaras"):
 // cota de seguridad para una transición de modo que por algún motivo no
@@ -199,24 +220,105 @@ function fillRadTableRows(
   }
 }
 
-// Rellena por tramos las ondas radiales precalculadas de una gota (4
-// columnas por píxel, estáticas por resolución): col 0 cos(k·r) de la
-// estacionaria, col 1 cos(k'·r) y col 2 sin(k'·r) de las dos viajeras
-// opuestas, col 3 sin(2k'·r) del nodo de colisión de las ondas. Al tenerlas
-// en tabla, el bucle por fotograma solo rota fases (cos/sin escalares) en
-// vez de evaluar un coseno por píxel y por onda.
-function fillRipRows(rip, rad, res, y0, y1, kRip) {
-  const kRip2 = kRip * 1.6;
-  const res2 = res * res;
+// Dos frentes que parten de lados distintos. Las distancias están
+// normalizadas al radio; sus fases espaciales se comparten con el shader.
+const WAVE_A = [-0.88, -0.49, 11.3];
+const WAVE_B = [0.77, 0.64, 13.7];
+const WAVE_BLEND_A = 0.65;
+const WAVE_BLEND_B = 0.35;
+const WAVE_DAMPING = 0.90;
+const CPU_DROP_RESOLUTION_LIMIT = 128;
+const WAVE_STRIDE = 4;
+const LOBE_VIBRATION_GAIN = 2.1;
+const IDLE_RIPPLE = 0.115;
+const RIPPLE_HEIGHT = 0.28;
+const STATIC_LAMP_PULSE = 0.50;
+const DEFAULT_LAMP_REFLECTION = [245, 248, 255];
+// La escala de tiempo visual preserva el orden de disipación viscosa.
+const FINE_RIPPLE_DAMPING = (WAVE_B[2] / WAVE_A[2]) ** 2;
+
+function lampInk(rgb, opacity, white = 0) {
+  return 'rgba(' + rgb.map(channel => Math.round(channel + (255 - channel) * white)).join(',') + ',' + opacity + ')';
+}
+const IDLE_LAMP_HZ = 0.65;
+const WATER_SLOPE_SCALE = 0.24;
+// Espesor óptico ilustrativo en radios de gota. La diferencia entre el
+// índice del aire y el del agua limita la desviación en la aproximación paraxial.
+const REFRACTION_SCALE = 0.075 * (1 - 1 / 1.333) * WATER_SLOPE_SCALE;
+const LAMP_HEIGHT = 1.55;
+const LAMP_STRIP_WIDTH = 0.22;
+const LAMP_STRIP_SHIFT = 0.94;
+const LAMP_REFLECTANCE = 0.78;
+const CAUSTIC_GAIN = 0.43;
+const LAMP_HALF_LENGTH = 2.15;
+const WATER_FRESNEL = 0.0204;
+const RIPPLE_CURVATURE_A = WAVE_BLEND_A * WAVE_A[2] ** 2;
+const RIPPLE_CURVATURE_B = WAVE_BLEND_B * WAVE_B[2] ** 2;
+
+// Mismo reflejo cenital que en el shader. Las diferencias centradas usan
+// el relieve compuesto que ya calculó el rasterizador, sin evaluar los
+// modos de Bessel otra vez ni asignar memoria por fotograma.
+function reflectLampInWater(pixels, heights, res, bound, rim, lampX, light, reflectedColor) {
+  const half = res / 2;
+  const slopeScale = 0.5 * half * WATER_SLOPE_SCALE;
+  const edge2 = (bound - 1) ** 2;
+  for (let y = 1; y < res - 1; y++) {
+    const dy = y + 0.5 - half;
+    for (let x = 1; x < res - 1; x++) {
+      const dx = x + 0.5 - half;
+      const distance2 = dx * dx + dy * dy;
+      if (distance2 >= edge2) continue;
+      const i = y * res + x;
+      const gx = (heights[i + 1] - heights[i - 1]) * slopeScale;
+      const gy = (heights[i + res] - heights[i - res]) * slopeScale;
+      const slope2 = gx * gx + gy * gy;
+      if (slope2 >= 1) continue;
+      const projection = 2 * LAMP_HEIGHT / Math.max(0.24, 1 - slope2);
+      const hitX = dx / half - projection * gx;
+      const hitY = dy / half - projection * gy;
+      const strip = (hitY + LAMP_STRIP_SHIFT - 0.09 * hitX * hitX) / LAMP_STRIP_WIDTH;
+      const length = clamp01((Math.abs(hitX - lampX) - 0.55) / (LAMP_HALF_LENGTH - 0.55));
+      const steep = clamp01((slope2 - 0.56) / 0.44);
+      const grazing = 1 - 1 / Math.sqrt(1 + slope2);
+      const fresnel = WATER_FRESNEL + (1 - WATER_FRESNEL) * grazing ** 5;
+      const reflection = LAMP_REFLECTANCE * light * (fresnel / WATER_FRESNEL) / (1 + strip * strip)
+        * (1 - length * length * (3 - 2 * length))
+        * (1 - steep * steep * (3 - 2 * steep));
+      const o = i * 4;
+      const soft = Math.min(1, (bound - Math.sqrt(distance2)) / rim);
+      const alpha = Math.min(1, pixels[o + 3] / (255 * soft));
+      const litAlpha = alpha + (1 - alpha) * reflection;
+      const lightMix = reflection / Math.max(litAlpha, 0.0001);
+      pixels[o] += (reflectedColor[0] - pixels[o]) * lightMix;
+      pixels[o + 1] += (reflectedColor[1] - pixels[o + 1]) * lightMix;
+      pixels[o + 2] += (reflectedColor[2] - pixels[o + 2]) * lightMix;
+      pixels[o + 3] = litAlpha * soft * 255;
+    }
+  }
+}
+
+function rippleOmega(spatialFrequency) {
+  const k = spatialFrequency / PHYS_A;
+  return Math.sqrt(G * k + SIGMA_RHO * k ** 3);
+}
+const RIPPLE_RATE_RATIO = rippleOmega(WAVE_B[2]) / rippleOmega(WAVE_A[2]);
+function fillWaveRows(waves, res, y0, y1) {
+  const half = res / 2;
   for (let py = y0; py < y1; py++) {
-    const base = py * res;
+    const y = (py + 0.5) / half - 1;
     for (let px = 0; px < res; px++) {
-      const idx = base + px;
-      const dist = rad[idx * 13];
-      rip[idx] = Math.cos(kRip * dist);
-      rip[res2 + idx] = Math.cos(kRip2 * dist);
-      rip[2 * res2 + idx] = Math.sin(kRip2 * dist);
-      rip[3 * res2 + idx] = Math.sin(2 * kRip2 * dist);
+      const x = (px + 0.5) / half - 1;
+      const radiusA = Math.hypot(x - WAVE_A[0], y - WAVE_A[1]);
+      const radiusB = Math.hypot(x - WAVE_B[0], y - WAVE_B[1]);
+      const a = WAVE_A[2] * radiusA;
+      const b = WAVE_B[2] * radiusB;
+      const i = (py * res + px) * WAVE_STRIDE;
+      const gainA = 1 / (1 + WAVE_DAMPING * radiusA);
+      const gainB = 1 / (1 + WAVE_DAMPING * radiusB);
+      waves[i] = Math.cos(a) * gainA;
+      waves[i + 1] = Math.sin(a) * gainA;
+      waves[i + 2] = Math.cos(b) * gainB;
+      waves[i + 3] = Math.sin(b) * gainB;
     }
   }
 }
@@ -287,17 +389,14 @@ uniform float uAmpPat;
 uniform float uAmp;
 uniform float uSwell;
 
-// Ondas radiales (fases por fotograma; la GPU evalúa el cos/sin espacial).
-uniform float uRipA;
-uniform float uRipC;
-uniform float uRipT;
-uniform float uRipN;
-uniform float uRipCl;
-uniform float uColC;
-uniform float uCT;
-uniform float uST;
-uniform float uCN;
-uniform float uSN;
+uniform vec2 uWavePhase;
+uniform vec3 uSurfaceOptics;
+uniform vec3 uLampTint;
+uniform vec2 uRippleGain;
+uniform vec2 uLampOptics; // centro horizontal del reflejo, número de onda modal
+uniform float uWaveLight;
+uniform float uWaterVibration;
+uniform bool uClearWater;
 
 // Sal de Chladni y color.
 uniform float uGEnv;
@@ -310,19 +409,6 @@ uniform float uMid;
 uniform vec3 uPal;
 uniform vec3 uDeep;
 uniform vec3 uWhite;
-// Modelo neuronal real (auditoría de luz 2026-09-02): afina el reflejo
-// especular derivado del patrón (ver más abajo). No estaban conectados a
-// NINGUNA capa visual del shader antes de esto.
-uniform float uCoherence;
-uniform float uVelocity;
-// Compuerta de estabilidad (auditoría P7 2026-09-03, "tirones al cambiar de
-// frecuencia"): 0 justo tras un cambio de modo, sube a 1 en ~0,6s una vez
-// que el patrón se asienta. Multiplica el especular y la cáustica más abajo
-// — ambos son derivadas del patrón (1ª y 2ª), mucho más sensibles que el
-// color base a un salto discreto del modo dominante (m,n es un entero, no
-// interpola aunque la frecuencia sí lo haga).
-uniform float uLightGate;
-
 out vec4 outColor;
 
 float clamp01(float v) { return clamp(v, 0.0, 1.0); }
@@ -332,51 +418,33 @@ void main() {
   // contiene las tres gotas); la coordenada v se invierte para que la fila 0
   // de la textura (arriba en la tabla CPU) quede arriba en el lienzo final.
   vec2 local = gl_FragCoord.xy - uOffset;
-  vec2 uv = vec2((local.x + 0.5) / uRes, 1.0 - (local.y + 0.5) / uRes);
+  vec2 uv = vec2(local.x / uRes, 1.0 - local.y / uRes);
+  vec2 pos = uv * 2.0 - 1.0;
   vec4 A = texture(uTexA, uv);
   float dist = A.x;
   float th = A.y;
   float J0v = A.z;
   float grain = A.w;
   float bound = uHalf * uWob;
-  if (dist >= bound) {
-    outColor = vec4(0.0);
-    return;
-  }
-  float soft = clamp01((bound - dist) / uRim);
-
-  // Ondulación: estacionaria + dos viajeras opuestas + nodo de colisión.
-  // Mismo número de onda que la tabla precalculada de la ruta CPU
-  // ((2·TWO_PI·3)/half = 12π/half): las ondas viajeras tienen el MISMO
-  // espaciado en ambas rutas, o el patrón GPU sale con bandas el doble de
-  // anchas y pierde el aspecto cimático.
-  float kRip = 37.69911184307752 / uHalf;
-  float k2 = kRip * 1.6;
-  float ri0 = cos(kRip * dist);
-  float ri1 = cos(k2 * dist);
-  float ri2 = sin(k2 * dist);
-  float ri3 = sin(2.0 * k2 * dist);
-  float ripp = 1.0
-    + uRipA * ri0 * uRipC
-    + uRipT * (ri1 * uCT - ri2 * uST)
-    + uRipN * (ri1 * uCN + ri2 * uSN)
-    + uRipCl * ri3 * uColC;
 
   vec4 B = texture(uTexB, uv);
   vec4 C = texture(uTexC, uv);
   float sum = 0.0;
-  if (uNewW > 0.02) {
+  float secondary = 0.0;
+  if (uAmp > 0.0 && uNewW > 0.02) {
+    secondary = uJ[2] * B.x * cos(uM[0] * th + uPh[1]);
     sum = uJ[0] * J0v
       + uJ[1] * B.x * cos(uM[0] * th + uPh[0])
-      + uJ[2] * B.x * cos(uM[0] * th + uPh[1])
+      + secondary
       + uJ[3] * B.y * cos(uM[1] * th + uPh[2])
       + uJ[4] * B.z * cos(uM[2] * th + uPh[3])
       + uJ[5] * B.w * cos(uM[3] * th + uPh[4])
       + uJ[6] * C.x * cos(uM[4] * th + uPh[5])
       + uJ[7] * C.y * cos(uM[5] * th + uPh[6]);
     sum *= uNewW;
+    secondary *= uNewW;
   }
-  if (uOldW > 0.02) {
+  if (uAmp > 0.0 && uOldW > 0.02) {
     vec4 Bo = texture(uTexBo, uv);
     vec4 Co = texture(uTexCo, uv);
     vec4 Ao = texture(uTexAo, uv);
@@ -391,61 +459,47 @@ void main() {
       + uJo[7] * Co.y * cos(uMo[5] * th + uPho[6]));
   }
 
-  // Pendiente ANGULAR de la flor (∂sum/∂θ), derivada analítica exacta del
-  // mismo sumatorio de arriba (cos→-m·sin por regla de la cadena; el modo
-  // J0·A.z no depende de θ, así que no aporta). ripp no depende de θ (solo
-  // de dist), así que ∂eBase/∂θ = dSum·ripp·uAmp·uSwell·uMEnv sin más
-  // términos — usado más abajo para el reflejo especular (auditoría de luz
-  // 2026-09-02): antes el único "reflejo" era un blob fijo en una esquina,
-  // sin relación con el patrón real. Solo la flor NUEVA aporta (durante un
-  // fundido cruzado el reflejo de la anterior se omite a propósito — se
-  // simplifica, ya se está desvaneciendo).
-  float dSum = 0.0;
-  if (uNewW > 0.02) {
-    dSum = -uJ[1] * B.x * uM[0] * sin(uM[0] * th + uPh[0])
-      - uJ[2] * B.x * uM[0] * sin(uM[0] * th + uPh[1])
-      - uJ[3] * B.y * uM[1] * sin(uM[1] * th + uPh[2])
-      - uJ[4] * B.z * uM[2] * sin(uM[2] * th + uPh[3])
-      - uJ[5] * B.w * uM[3] * sin(uM[3] * th + uPh[4])
-      - uJ[6] * C.x * uM[4] * sin(uM[4] * th + uPh[5])
-      - uJ[7] * C.y * uM[5] * sin(uM[5] * th + uPh[6]);
-    dSum *= uNewW;
+  float eBase = sum * uAmp * uSwell * uMEnv;
+  vec2 fronts = vec2(0.0);
+  if (uWaveLight > 0.0) {
+    vec2 fromA = pos - vec2(${WAVE_A[0]}, ${WAVE_A[1]});
+    vec2 fromB = pos - vec2(${WAVE_B[0]}, ${WAVE_B[1]});
+    vec2 radius = vec2(length(fromA), length(fromB));
+    vec2 phase = radius * vec2(${WAVE_A[2]}, ${WAVE_B[2]}) - uWavePhase;
+    fronts = uRippleGain * cos(phase) / (1.0 + ${WAVE_DAMPING} * radius);
   }
-
-  // Curvatura ANGULAR de la flor (∂²sum/∂θ², segunda derivada analítica del
-  // mismo sumatorio — cos→-m²·cos por regla de la cadena aplicada dos veces).
-  // Cero uniforms/texturas nuevas: reusa exactamente lo que dEdTh ya usa.
-  // Alimenta la CÁUSTICA más abajo — luz que se concentra por refracción
-  // donde la superficie se dobla bruscamente (2ª derivada), a diferencia del
-  // reflejo especular de arriba (pendiente, 1ª derivada): mismo fenómeno que
-  // hace destellar los cruces/colisiones en video de cimática/agua real.
-  // Mismo criterio de fundido cruzado que dSum: solo la flor NUEVA aporta.
-  float d2Sum = 0.0;
-  if (uNewW > 0.02) {
-    d2Sum = -uJ[1] * B.x * uM[0] * uM[0] * cos(uM[0] * th + uPh[0])
-      - uJ[2] * B.x * uM[0] * uM[0] * cos(uM[0] * th + uPh[1])
-      - uJ[3] * B.y * uM[1] * uM[1] * cos(uM[1] * th + uPh[2])
-      - uJ[4] * B.z * uM[2] * uM[2] * cos(uM[2] * th + uPh[3])
-      - uJ[5] * B.w * uM[3] * uM[3] * cos(uM[3] * th + uPh[4])
-      - uJ[6] * C.x * uM[4] * uM[4] * cos(uM[4] * th + uPh[5])
-      - uJ[7] * C.y * uM[5] * uM[5] * cos(uM[5] * th + uPh[6]);
-    d2Sum *= uNewW;
+  // El relieve óptico alterna crestas y valles alrededor de los mismos
+  // nodos. Una onda viajera tenue mantiene movimiento al cruzar por cero.
+  float ripple = ${WAVE_BLEND_A} * fronts.x + ${WAVE_BLEND_B} * fronts.y;
+  float lobeScale = 1.0 + ${LOBE_VIBRATION_GAIN} * uWaterVibration * ripple;
+  float opticalMix = uSurfaceOptics.x;
+  float modeHeight = eBase * mix(1.0, uSurfaceOptics.y * lobeScale, opticalMix);
+  modeHeight += opticalMix * secondary * uAmp * uSwell * uMEnv * (uSurfaceOptics.z - uSurfaceOptics.y * lobeScale);
+  float relief = modeHeight + ${RIPPLE_HEIGHT} * uWaterVibration * ripple;
+  // La normal proviene del campo ya mezclado, incluido el modo saliente.
+  // Las derivadas deben evaluarse antes del descarte no uniforme del borde.
+  vec2 slope = vec2(0.0);
+  if (uWaveLight > 0.0) {
+    slope = vec2(dFdx(relief), -dFdy(relief)) * uHalf * ${WATER_SLOPE_SCALE};
   }
-
-  float eBase = sum * ripp * uAmp * uSwell * uMEnv;
-  float dEdTh = dSum * ripp * uAmp * uSwell * uMEnv;
-  float d2EdTh2 = d2Sum * ripp * uAmp * uSwell * uMEnv;
-  float e = eBase + grain * uGEnv * (0.1 + abs(eBase)) * 0.045 * uAmp;
+  if (dist >= bound) {
+    outColor = vec4(0.0);
+    return;
+  }
+  float soft = clamp01((bound - dist) / uRim);
+  float textureHeight = grain * uGEnv * (0.1 + abs(eBase)) * 0.045 * uAmp;
+  float e = relief + textureHeight;
 
   float sand = 0.0;
-  if (abs(eBase) < 0.11) {
+  if (uAmpPat > 0.0 && abs(eBase) < 0.11) {
     float sandPowder = 1.0 - uTexPow + uTexPow * C.z * uPSh;
     float env = abs(uJ[0] * J0v) + abs(uJ[1] * B.x) + abs(uJ[2] * B.x)
       + abs(uJ[3] * B.y) + abs(uJ[4] * B.z) + abs(uJ[5] * B.w)
       + abs(uJ[6] * C.x) + abs(uJ[7] * C.y);
     float envGate = clamp01((env - 0.05) / 0.25);
     sand = exp(-(eBase * eBase) / (2.0 * uSandSig * uSandSig))
-      * sandPowder * envGate * (0.75 + 0.25 * uAmpPat) * uAmpPat * uPresence;
+      * sandPowder * envGate * (0.75 + 0.25 * uAmpPat) * uAmpPat * uPresence
+      * (uWaveLight > 0.0 ? 0.24 : 1.0);
   }
 
   float eP = (e < 0.0 ? -1.0 : 1.0) * sqrt(abs(e));
@@ -468,47 +522,43 @@ void main() {
     col = mix(col, sandCol, sa);
   }
 
-  // Reflejo especular derivado del patrón real (auditoría de luz
-  // 2026-09-02): brilla donde la pendiente angular es casi nula (una
-  // cresta/valle local — como el brillo del sol justo en la cima de una
-  // ola) y solo sobre elevación POSITIVA (la luz rebota en la cresta, no en
-  // el valle en sombra). uCoherence (modelo neuronal real) afina el
-  // reflejo: coherente = pocos brillos definidos, como agua en calma;
-  // turbulento = disperso en muchos puntos chicos vía el grano capilar
-  // (grain), como agua picada. uVelocity anima cuánto "vive" el brillo.
-  float crestGate = clamp01(e * 4.0);
-  float shininess = mix(2.5, 11.0, clamp01(uCoherence));
-  float flatness = 1.0 / (1.0 + dEdTh * dEdTh * shininess);
-  float scatter = mix(1.0, grain, 1.0 - clamp01(uCoherence));
-  float specular = flatness * crestGate * scatter * soft
-    * (0.3 + 0.35 * uAmpPat) * (0.5 + 0.6 * clamp01(uVelocity)) * uLightGate;
-  col = min(col + vec3(255.0) * specular, vec3(255.0));
+  float bodyAlpha = 0.26 + 0.1 * uAmpPat + 0.54 * v + 0.55 * sand * uAmpPat;
+  if (uClearWater) {
+    // Las crestas reflejan la luz; los valles dejan ver el plato.
+    float crest = smoothstep(0.0, 0.23, relief);
+    float clearWater = uWaveLight > 0.0 ? 1.0 : 0.0;
+    col = mix(col, mix(uPal, uWhite, 0.8), mix(0.64, 0.30, clearWater) * crest);
+    bodyAlpha = 0.125 + 0.055 * uAmpPat + mix(0.42, 0.20, clearWater) * v
+      + mix(0.27, 0.10, clearWater) * crest + 0.46 * sand * uAmpPat;
+  }
+  float alpha = min(bodyAlpha, 1.0);
+  if (uWaveLight > 0.0) {
+    // Cámara cenital: el rayo reflejado por N=(-∇h,1) busca el tubo
+    // curvo a una altura fija. Fresnel da más luz a pendientes oblicuas.
+    float slope2 = dot(slope, slope);
+    vec2 hit = pos - 2.0 * ${LAMP_HEIGHT} * slope / max(0.24, 1.0 - slope2);
+    float strip = (hit.y + ${LAMP_STRIP_SHIFT} - 0.09 * hit.x * hit.x) / ${LAMP_STRIP_WIDTH};
+    float lengthFade = 1.0 - smoothstep(0.55, ${LAMP_HALF_LENGTH}, abs(hit.x - uLampOptics.x));
+    float grazing = 1.0 - inversesqrt(1.0 + slope2);
+    float fresnel = ${WATER_FRESNEL} + (1.0 - ${WATER_FRESNEL}) * pow(grazing, 5.0);
+    float reflection = ${LAMP_REFLECTANCE} * uWaveLight * (fresnel / ${WATER_FRESNEL})
+      * lengthFade * (1.0 - smoothstep(0.56, 1.0, slope2)) / (1.0 + strip * strip);
 
-  // Cáustica por curvatura (auditoría de luz 2026-09-02, "otra iluminación"):
-  // destello disperso e irregular donde la 2ª derivada es alta — los cruces
-  // reales de modos/anillos, no solo la cresta. uCoherence invierte el
-  // sentido respecto al especular: baja coherencia (turbulento) = destellos
-  // MÁS dispersos/frecuentes, como agua picada refractando luz por todos
-  // lados; alta coherencia = pocos y nítidos. Reusa crestGate (mismo criterio
-  // "solo lado iluminado") sin crear un gate nuevo.
-  //
-  // FIX (reportado en vivo: "apagones, destellos, cambios bruscos"): la 2ª
-  // derivada crece con m² (hasta 36 para m=6, el CUÁDRUPLE de sensible que
-  // el especular de 1ª derivada), y clamp01() tiene un codo duro — con la
-  // precesión normal del patrón, la señal cruzaba ese codo muy rápido y se
-  // veía como parpadeo binario (encendido/apagado) en vez de un brillo vivo.
-  // Se comprime igual que ya hace eP = sign(e)·sqrt(|e|) más arriba (mismo
-  // criterio del archivo para evitar contraste duro) y se satura SUAVE
-  // (d/(d+1), sin codo — asíntota a 1, nunca un salto) en vez de clamp01.
-  float d2n = sqrt(abs(d2EdTh2)) * 0.9;
-  float curvNorm = d2n / (d2n + 1.0);
-  float causticMod = mix(1.6, 0.7, clamp01(uCoherence));
-  float caustic = curvNorm * crestGate * causticMod * soft
-    * (0.3 + 0.35 * uAmpPat) * (0.5 + 0.6 * clamp01(uVelocity)) * uLightGate;
-  col = min(col + vec3(255.0) * caustic, vec3(255.0));
-
-  float wa = (0.26 + 0.1 * uAmpPat + 0.54 * v + 0.55 * sand * uAmpPat) * soft;
-  outColor = vec4(col / 255.0, min(wa, 1.0));
+    // La curvatura de los modos Bessel y los frentes aproxima la
+    // convergencia de rayos refractados sobre el fondo poco profundo.
+    float rippleCurvature = -dot(fronts, vec2(${RIPPLE_CURVATURE_A}, ${RIPPLE_CURVATURE_B}));
+    float curvature = -uLampOptics.y * uLampOptics.y * modeHeight
+      + ${RIPPLE_HEIGHT} * uWaterVibration * rippleCurvature;
+    float compression = -${REFRACTION_SCALE} * curvature;
+    float focus = max(0.0, compression) * abs(compression) / (0.30 + compression * compression);
+    col *= 1.0 + 0.28 * uWaveLight * min(0.0, compression) / (1.0 + abs(compression));
+    float transmission = ${CAUSTIC_GAIN} * uWaveLight * focus;
+    alpha += (1.0 - alpha) * transmission;
+    col = mix(col, mix(uPal, uLampTint, 0.66), transmission / max(alpha, 0.0001));
+    alpha += (1.0 - alpha) * reflection;
+    col = mix(col, uLampTint, reflection / max(alpha, 0.0001));
+  }
+  outColor = vec4(col / 255.0, alpha * soft);
 }`;
 
 // Versión GLSL ES 1.00 (WebGL1) derivada de la 300 es para compartir toda la
@@ -525,7 +575,7 @@ function glsl100(src) {
     .replace(/outColor =/g, 'gl_FragColor =');
 }
 const GL_VS_GL1 = glsl100(GL_VS);
-const GL_FS_GL1 = glsl100(GL_FS);
+const GL_FS_GL1 = '#extension GL_OES_standard_derivatives : enable\n' + glsl100(GL_FS);
 
 function compileGLShader(gl, type, src) {
   const sh = gl.createShader(type);
@@ -558,7 +608,7 @@ function initGL() {
   try {
     const canvas = document.createElement('canvas');
     const attrs = {
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: false,
       antialias: false,
       alpha: true,
       premultipliedAlpha: false,
@@ -572,9 +622,8 @@ function initGL() {
     const isGL2 = !!gl;
     if (!gl) gl = canvas.getContext('webgl', attrs) || canvas.getContext('experimental-webgl', attrs);
     if (!gl) return null;
-    // WebGL1 necesita texturas de coma flotante (las tablas radiales); sin
-    // la extensión no se puede rasterizar el patrón y se vuelve al CPU.
-    if (!isGL2 && !gl.getExtension('OES_texture_float')) return null;
+    // En WebGL1 las tablas radiales y las normales requieren extensiones.
+    if (!isGL2 && (!gl.getExtension('OES_texture_float') || !gl.getExtension('OES_standard_derivatives'))) return null;
     const prog = buildGLProgram(gl, isGL2);
     if (!prog) return null;
     const buf = gl.createBuffer();
@@ -594,9 +643,8 @@ function initGL() {
       'uTexA', 'uTexB', 'uTexC', 'uTexBo', 'uTexCo', 'uTexAo', 'uOffset', 'uRes', 'uHalf', 'uRim', 'uWob',
       'uNewW', 'uOldW',
       'uMEnv', 'uPresence', 'uAmpPat', 'uAmp', 'uSwell',
-      'uRipA', 'uRipC', 'uRipT', 'uRipN', 'uRipCl', 'uColC', 'uCT', 'uST', 'uCN', 'uSN',
+      'uWavePhase', 'uSurfaceOptics', 'uLampOptics', 'uRippleGain', 'uLampTint', 'uWaveLight', 'uWaterVibration', 'uClearWater',
       'uGEnv', 'uPSh', 'uTexPow', 'uTexSalt', 'uSandSig', 'uGain', 'uMid', 'uPal', 'uDeep', 'uWhite',
-      'uCoherence', 'uVelocity', 'uLightGate',
     ];
     const u = {};
     for (const nm of names) u[nm] = gl.getUniformLocation(prog, nm);
@@ -712,6 +760,49 @@ function crestColorFor(f) {
   ];
 }
 
+// El máximo cae en el latido. La subida es breve y el brillo tarda
+// más en caer, con pendiente cero al entrar y salir del destello.
+function plateLampPulse(phase) {
+  const cycle = phase / TWO_PI;
+  const envelope = clamp01(cycle < 0.5 ? 1 - cycle / 0.44 : (cycle - 0.80) / 0.20);
+  return envelope * envelope * (3 - 2 * envelope);
+}
+
+function drawPlateLamp(ctx, cx, cy, r, light, sweep, tint) {
+  const radius = r * 1.04;
+  const x = cx + Math.sin(sweep) * radius;
+  const y = cy - Math.cos(sweep) * radius;
+  const falloff = ctx.createRadialGradient(x, y, 0, x, y, r * 0.67);
+  falloff.addColorStop(0, tint ? lampInk(tint, 0.64 * light, 0.5) : `rgba(255,249,228,${0.64 * light})`);
+  falloff.addColorStop(0.17, tint ? lampInk(tint, 0.27 * light, 0.28) : `rgba(202,235,255,${0.27 * light})`);
+  falloff.addColorStop(0.47, tint ? lampInk(tint, 0.08 * light, 0) : `rgba(96,194,251,${0.08 * light})`);
+  falloff.addColorStop(1, tint ? lampInk(tint, 0) : 'rgba(96,194,251,0)');
+
+  ctx.save();
+  ctx.fillStyle = falloff;
+  ctx.fillRect(x - r * 0.67, y - r * 0.67, r * 1.34, r * 1.34);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, -Math.PI * 0.94, -Math.PI * 0.06);
+  ctx.strokeStyle = tint ? lampInk(tint, 0.27 * light, 0) : `rgba(67,192,255,${0.27 * light})`;
+  ctx.lineWidth = r * 0.082;
+  ctx.stroke();
+  ctx.strokeStyle = tint ? lampInk(tint, 0.81 * light, 0.27) : `rgba(188,230,255,${0.81 * light})`;
+  ctx.lineWidth = r * 0.028;
+  ctx.stroke();
+
+  // Un tramo de blanco cálido viaja por el tubo; el arco nunca se apaga
+  // por completo entre pulsos.
+  const hot = ctx.createLinearGradient(x - r * 0.62, y, x + r * 0.62, y);
+  hot.addColorStop(0, tint ? lampInk(tint, 0) : 'rgba(255,250,223,0)');
+  hot.addColorStop(0.5, tint ? lampInk(tint, light, 0.45) : `rgba(255,250,223,${light})`);
+  hot.addColorStop(1, tint ? lampInk(tint, 0) : 'rgba(255,250,223,0)');
+  ctx.strokeStyle = hot;
+  ctx.lineWidth = r * 0.015;
+  ctx.stroke();
+  ctx.restore();
+}
+
 // Granulometría propia de cada plato: cada gota usa su propia mezcla de sal
 // y su propio campo capilar — como tres experimentos de cimática montados
 // con polvos distintos. Frecuencias entre sí irracionales evitan la rejilla
@@ -742,6 +833,10 @@ function shadeDeep(c) {
 }
 
 export class CymaticsRenderer {
+  get usesCpu() {
+    return this._gl === null;
+  }
+
   constructor() {
     // Un buffer por gota: se renderizan aparte (resolución alta) para que
     // los anillos salgan nítidos a cualquier tamaño de pantalla, y el plato
@@ -760,25 +855,6 @@ export class CymaticsRenderer {
     this._lastKey = ['', '', ''];
     this._lastP = [null, null, null];
     this._morph = [null, null, null];
-    // Compuerta de estabilidad para la luz derivada (auditoría P7 2026-09-03
-    // — reportado en vivo: "la cymática se vuelve loca al cambiar de
-    // frecuencia, da saltos como tirones"). CAUSA: el modo dominante (m,n)
-    // se elige por búsqueda de resonancia más cercana — un número ENTERO —
-    // así que aunque la frecuencia suavizada (visBase) cambie de forma
-    // continua, el modo salta en escalones discretos al cruzar un límite de
-    // resonancia. El especular (dEdTh) y la cáustica (d2EdTh2) son derivadas
-    // 1ª y 2ª del patrón, escaladas por m y m² respectivamente — mucho más
-    // sensibles a ese salto discreto que el color base. Si además la
-    // frecuencia sigue cambiando MIENTRAS un fundido cruzado ya está en
-    // curso, el "modo nuevo" del fundido se recalcula en vivo cuadro a
-    // cuadro (para que el fundido no se congele a mitad de camino) y puede
-    // volver a saltar sin arrancar un fundido propio — eso es el "tirón".
-    // FIX: en vez de tocar esa arquitectura de fundido (riesgo alto), se
-    // amortigua la luz derivada específicamente: se apaga al instante en
-    // cuanto el modo cambia (radKey, ver más abajo) y se recupera suave
-    // (~0,6s) una vez que el patrón deja de moverse — la luz derivada solo
-    // vive plena sobre un patrón ya asentado, nunca sobre uno en pleno salto.
-    this._lightGate = [1, 1, 1];
     // Frecuencia "retenida" por gota, específica para la BÚSQUEDA de modo y
     // sus amplitudes de detuning (auditoría P7 2026-09-03 — reportado en
     // vivo: sigue habiendo pestañeos/cambios erráticos en saltos grandes de
@@ -828,7 +904,18 @@ export class CymaticsRenderer {
     // excitación y se calma al cortarla. El patrón de Faraday solo emerge
     // por encima del umbral de aceleración, como en un experimento real.
     this._energy = 0;
+    this._fineRipples = 0;
+    this._lampTint = null;
     this._lastT = 0;
+    this._liquidPhase = 0;
+    this._reflectedPhase = 0;
+    this._lampPhase = 0;
+    this._lampPulse = STATIC_LAMP_PULSE;
+    this._lampSweep = 0;
+    this._lampBeatGroup = null;
+    this._visualPulse = 0.5;
+    this._visualAm = 0.775;
+    this._motionPreference = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
     // Volumen suavizado (Parte B, auditoría 2026-09-08): el volumen real
     // entraba como multiplicador instantáneo de ampPattern (auditoría
     // 2026-08-29) — un salto 0%→100% se reflejaba en el mismo fotograma. Ver
@@ -864,8 +951,8 @@ export class CymaticsRenderer {
     // _physicsState: smoothed version with physical inertia (EMA, τ ≈ 1.5 s).
     // Separating target from smoothed state prevents instant visual jumps when
     // the neural profile changes — fluids have inertia.
-    this._physicsTarget = { coherence: 0.5, velocity: 0.5, complexity: 0.5, baseFrequency: 220, dominantMode: null };
-    this._physicsState  = { coherence: 0.5, velocity: 0.5, complexity: 0.5, baseFrequency: 220, dominantMode: null };
+    this._physicsTarget = { coherence: 0.5, velocity: 0.5, complexity: 0.5, baseFrequency: 220 };
+    this._physicsState  = { coherence: 0.5, velocity: 0.5, complexity: 0.5, baseFrequency: 220 };
 
     // -------------------------------------------------------------------------
     // PHASE 3: Render Mode
@@ -875,8 +962,7 @@ export class CymaticsRenderer {
     // 'scientific' — Only physically-derived layers (Bessel eigenmodes, modal
     //                pattern with detuning). No grain, no mD harmonics, no
     //                evo() modulation, no rotation/precession (rotSpeed()
-    //                returns 0), no radial ripple waves (ripAmp/ripTravel/
-    //                ripIn/ripCol), no shimmer (shim*). Colors are
+    //                returns 0), no traveling wave highlights, no shimmer (shim*). Colors are
     //                monochrome. FIX (auditoría 2026-09-08): before this
     //                fix, ampDom/ampS1/ampS2 had their own breathing sines
     //                OUTSIDE evo() that weren't gated, and rotSpeed()/rip*/
@@ -906,6 +992,22 @@ export class CymaticsRenderer {
       console.warn(`[CymaticsRenderer] Unknown renderMode "${mode}". Use "cinematic" or "scientific".`);
       return;
     }
+    if (mode === this._renderMode) return;
+    if (mode === 'scientific') {
+      // Un fundido iniciado en modo cinematográfico conserva los pesos de
+      // sus capas de detalle. Descártalo antes de mostrar modos propios.
+      for (let i = 0; i < this._drops.length; i++) {
+        this._releaseMorphTex(i);
+        this._morph[i] = null;
+        const drop = this._drops[i];
+        const snapshot = this._lastP[i];
+        this._lastKey[i] = drop.radK;
+        this._lastP[i] = snapshot?.mDom === drop.radM && snapshot?.nDom === drop.radN
+          ? { ...snapshot, amp0: 0, ampS1: 0, ampS2: 0, ampD1: 0, ampD2: 0, ampD3: 0 }
+          : null;
+        drop.pending = null;
+      }
+    }
     this._renderMode = mode;
     console.log(`[CymaticsRenderer] Render mode: ${mode.toUpperCase()}`);
   }
@@ -930,7 +1032,6 @@ export class CymaticsRenderer {
     this._physicsTarget.velocity      = state.velocity      ?? 0.5;
     this._physicsTarget.complexity    = state.complexity    ?? 0.5;
     this._physicsTarget.baseFrequency = state.baseFrequency ?? 220;
-    // dominantMode is computed internally by render(); we never clobber it here.
   }
 
   // (Re)crea el buffer de una gota si cambió su resolución, junto con la
@@ -947,12 +1048,11 @@ export class CymaticsRenderer {
     // (las columnas 9 y 10 quedan sin usar, en 0), grano capilar y moteado
     // del polvo.
     d.rad = new Float32Array(res * res * 13);
-    // Ondas radiales precalculadas (4 columnas por píxel): col 0 cos(k·r)
-    // de la estacionaria, col 1 cos(k'·r) y col 2 sin(k'·r) de las dos
-    // viajeras opuestas, col 3 sin(2k'·r) del nodo de colisión. Estáticas
-    // por resolución: por fotograma solo rotan las fases (barato).
-    d.rip = new Float32Array(res * res * 4);
-    d.ripK = -1;
+    // La ruta CPU construye la tabla de frentes una vez por resolución.
+    d.waves = this._gl ? null : new Float32Array(res * res * WAVE_STRIDE);
+    d.relief = this._gl ? null : new Float32Array(res * res);
+    d.waveRows = 0;
+    d.waveMix = 0;
     d.radK = -1;
     d.radM = null;
     d.radN = null;
@@ -1118,7 +1218,24 @@ export class CymaticsRenderer {
    */
   render(ctx, w, h, params) {
     if (this._gl === undefined) this._gl = initGL();
-    const { base = 220, beat = 6, pulse = 0.5, colors, playing = true, condition = 'binaural', volume = 0.6, wave = 'sine' } = params;
+    if (this._gl?.gl.isContextLost()) {
+      // Los buffers de WebGL ya no son válidos. Reconstruir las gotas en
+      // CPU conserva su fase y hace que el reloj visual siga avanzando.
+      this._gl = null;
+      this._glRes = 0;
+      this._glDrops.length = 0;
+      this._morph.fill(null);
+      this._lastP.fill(null);
+      this._lastKey.fill('');
+      for (const drop of this._drops) {
+        drop.res = 0;
+        drop.pending = null;
+      }
+    }
+    const {
+      base = 220, beat = 6, beatHz = beat, pulse = 0.5, beatSample = null, motionOverride = null,
+      colors, lampColor = null, lampMoving = null, playing = true, condition = 'binaural', volume = 0.6, wave = 'sine',
+    } = params;
     // Condiciones con batido real (binaural/AM): la placa respira con el
     // latido. Las demás (tono puro, ruido, silencio) respiran a ritmo natural.
     const rhythmicCond = () => condition === 'binaural' || condition === 'amplitude-modulation';
@@ -1135,7 +1252,7 @@ export class CymaticsRenderer {
     // Al arrancar, el patrón emerge en ~0,6 s; al cortar, se apaga suave
     // (el agua se calma con su amortiguación).
     if (this._lastT === 0) this._lastT = t;
-    const dt = Math.min(0.1, t - this._lastT);
+    const dt = Math.max(0, Math.min(0.1, t - this._lastT));
     this._lastT = t;
 
     // FIX (2026-09-08, "que la transición sea real" — apagón inicial
@@ -1163,8 +1280,22 @@ export class CymaticsRenderer {
     // SILENCE control: no hay estímulo → la placa no se excita (agua en
     // calma). Las demás condiciones mantienen la energía de vibración.
     const target = playing && condition !== 'none' ? 1 : 0;
-    this._energy += (target - this._energy) * (1 - Math.exp(-dt / 0.7));
-    const env = this._energy;
+    const relaxation = target ? 0.50 : 0.88;
+    this._energy += (target - this._energy) * (1 - Math.exp(-dt / relaxation));
+    const fineRelaxation = target ? relaxation : relaxation / FINE_RIPPLE_DAMPING;
+    this._fineRipples += (target - this._fineRipples) * (1 - Math.exp(-dt / fineRelaxation));
+    // Transición de color del tubo y sus reflejos sobre una misma fuente.
+    const targetTint = lampColor ?? DEFAULT_LAMP_REFLECTION;
+    if (!this._lampTint && lampColor) this._lampTint = DEFAULT_LAMP_REFLECTION.slice();
+    if (this._lampTint) {
+      const tintStep = 1 - Math.exp(-dt / 0.10);
+      for (let c = 0; c < 3; c++) this._lampTint[c] += (targetTint[c] - this._lampTint[c]) * tintStep;
+      if (!lampColor && this._lampTint.every((channel, i) => Math.abs(channel - targetTint[i]) < 0.5)) {
+        this._lampTint = null;
+      }
+    }
+    const lampTint = this._lampTint;
+    const reflectedColor = lampTint ?? DEFAULT_LAMP_REFLECTION;
 
     // --- FIX P5: EMA-smooth physicsState toward physicsTarget (τ = 1.5 s) ---
     // When playing, track the neural model. When not playing, decay toward
@@ -1248,21 +1379,74 @@ export class CymaticsRenderer {
     const coherence = this._physicsState.coherence;
     const velocity  = this._physicsState.velocity;
     const pBase     = this._physicsState.baseFrequency;
+    const reducedMotion = motionOverride === null ? this._motionPreference?.matches : !motionOverride;
+    const movingSurface = !sciMode && condition !== 'none';
+    const movingLamp = movingSurface && (lampMoving ?? !reducedMotion);
+    const env = clamp01(this._energy);
+    const fine = clamp01(this._fineRipples);
+    // El reloj visual da movimiento al agua aunque se interrumpa el latido.
+    if (movingSurface) {
+      if (movingLamp && target && beatSample) {
+        const { cycles, hz, targetHz, epoch } = beatSample;
+        const size = Math.max(1, Math.ceil(Math.max(hz, targetHz) / MAX_LAMP_PULSES_HZ));
+        let group = this._lampBeatGroup;
+        if (!group || group.epoch !== epoch || cycles < group.start) {
+          group = { epoch, start: Math.floor(cycles / size) * size, size };
+        } else if (cycles >= group.start + group.size) {
+          const next = group.start + group.size;
+          group = { epoch, start: next + Math.floor((cycles - next) / size) * size, size };
+        }
+        this._lampBeatGroup = group;
+        this._lampPhase = TWO_PI * (cycles - group.start) / group.size;
+      } else if (movingLamp) {
+        this._lampBeatGroup = null;
+        const visualHz = !target ? IDLE_LAMP_HZ : rhythmicCond()
+          ? beatHz / Math.max(1, Math.ceil(beatHz / MAX_LAMP_PULSES_HZ))
+          : 0.95;
+        this._lampPhase = (this._lampPhase + TWO_PI * visualHz * dt) % TWO_PI;
+      }
+      // Los frentes mantienen su velocidad entre los destellos.
+      // Cámara lenta visual. La relación de velocidades de los frentes
+      // viene de la dispersión gravedad-capilaridad del agua.
+      // Movimiento reducido: suaviza el agua independientemente de la lámpara.
+      const liquidHz = reducedMotion ? 0.18 + 0.12 * env : 0.33 + (0.13 + 0.29 * velocity) * env;
+      const liquidDelta = TWO_PI * liquidHz * dt;
+      this._liquidPhase = (this._liquidPhase + liquidDelta) % TWO_PI;
+      this._reflectedPhase = (this._reflectedPhase + liquidDelta * RIPPLE_RATE_RATIO) % TWO_PI;
+    }
+    // Mismo destello para la lámpara y las crestas; redondeado y sin cortes.
+    const emittedPulse = movingLamp
+      ? 0.43 + (plateLampPulse(this._lampPhase) - 0.43) * (0.35 + 0.65 * env)
+      : STATIC_LAMP_PULSE;
+    this._lampPulse += (emittedPulse - this._lampPulse) * (1 - Math.exp(-dt / 0.045));
+    const lampPulse = this._lampPulse;
+    const sweepTarget = movingLamp ? (0.17 + 0.15 * env) * Math.sin(this._liquidPhase) : 0;
+    this._lampSweep += (sweepTarget - this._lampSweep) * (1 - Math.exp(-dt / 0.10));
+    const lampSweep = this._lampSweep;
+    const pulseTarget = target && Number.isFinite(pulse) ? clamp01(pulse) : 0.5;
+    const pulseK = 1 - Math.exp(-dt / 0.14);
+    this._visualPulse += (pulseTarget - this._visualPulse) * pulseK;
+    const pulseEff = reducedMotion ? 0.5 : this._visualPulse;
     // Blanco de cresta templado por la frecuencia real (ver crestColorFor).
     const crestColor = crestColorFor(pBase);
 
-    // Transición suave 0.18..0.85 (el reposo 0.38 queda a ~22% de amplitud).
+    // La forma pierde amplitud desde el primer fotograma en pausa.
     let pat;
     if (env <= 0.18) pat = 0;
     else if (env >= 0.85) pat = 1;
     else pat = (env - 0.18) / 0.67;
-    let ampPattern = pat * pat * (3 - 2 * pat); // suavizado
+    // El patrón de la frecuencia se disipa hasta cero. La pequeña onda
+    // de reposo se suma aparte al relieve y nunca depende del modo Bessel.
+    let ampPattern = movingSurface ? clamp01((env - 0.05) / 0.95) : pat * pat * (3 - 2 * pat);
     // AMPLITUDE MODULATION: la placa entera respira a la velocidad de la
     // envolvente real — el patrón crece y se retira con la modulación, no
     // solo brilla (la estructura varía con la señal, como en el agua).
     if (condition === 'amplitude-modulation') {
-      const pe = playing ? pulse : 0.5;
-      ampPattern *= 0.55 + 0.45 * (0.5 + 0.5 * Math.cos(TWO_PI * pe));
+      const am = target ? 0.775 + 0.225 * Math.cos(TWO_PI * pulseTarget) : 0.775;
+      this._visualAm += (am - this._visualAm) * pulseK;
+      ampPattern *= reducedMotion ? 0.775 : this._visualAm;
+    } else {
+      this._visualAm = 0.775;
     }
     // Volumen real → intensidad visible del patrón (auditoría 2026-08-29):
     // antes subir/bajar el volumen no cambiaba nada en cimática. No se lleva
@@ -1287,9 +1471,19 @@ export class CymaticsRenderer {
     else this._volState += (volTarget - this._volState) * (1 - Math.exp(-dt / (1 / gammaAt(pBase))));
     ampPattern *= 0.35 + 0.65 * this._volState;
     const alive = 0.12 + 0.88 * env * env;
-    const pulseEff = playing ? pulse : 0.5;
-    const gain = 0.08 + 0.04 * ampPattern;
-    const mid = 0.06 + 0.03 * ampPattern;
+    // Da más relieve a las crestas y deja oscuros los valles.
+    const gain = 0.08 + (sciMode ? 0.04 : 0.057) * ampPattern;
+    const mid = 0.06 + (sciMode ? 0.03 : 0.043) * ampPattern;
+    // Luz visual, posterior al cálculo del modo y sus líneas nodales.
+    const waveLight = movingSurface ? (0.36 + 0.54 * env) * (0.52 + 0.48 * lampPulse) : 0;
+    // La onda corta se disipa primero, dejando las ondulaciones anchas.
+    const rippleStrength = IDLE_RIPPLE + 0.081 * env;
+    const waterVibration = movingSurface ? rippleStrength * (reducedMotion ? 0.62 : 1) : 0;
+    const wideRippleGain = 0.70 + 0.30 * env;
+    const fineRippleGain = 0.12 + 0.88 * fine;
+    const surfaceOptics = movingSurface ? (reducedMotion ? 0.48 : 0.86) : 0;
+    const lampDrive = 0.30 + 0.70 * env;
+    const lampLight = sciMode ? 0 : lampDrive * (0.23 + 0.77 * lampPulse);
 
     // Fondo oscuro de la escena (#0b0d12).
     ctx.fillStyle = '#0b0d12';
@@ -1320,14 +1514,13 @@ export class CymaticsRenderer {
     // bucle "PHASE 8" de más abajo, solo con nMax=6 en vez de
     // MAX_RADIAL_MODE. Extraído a core/plate-field.js:resonantModeForBeat()
     // — misma fórmula, mismo resultado, una sola implementación.
-    const beatMode = resonantModeForBeat(rhythmicCond() ? beat : base, PHYS_A);
+    const centerDrive = Math.max(0, rhythmicCond() ? beat : base);
+    const beatMode = resonantModeForBeat(centerDrive, PHYS_A);
     const m_beat = beatMode.m;
     const n_beat = beatMode.n;
-    const ws_res_beat = beatMode.omega;
     const f_center = beatMode.fCenter; // resonant frequency (Hz) of the mode
 
-    // Store dominant mode for HUD display
-    this._physicsState.dominantMode = { m: m_beat, n: n_beat, omega: ws_res_beat, detuning: beatMode.detuning };
+    this._centerDriveOmega = Math.PI * centerDrive;
 
     const dropR = R * 0.27;
     const step = dropR * 2.2;
@@ -1447,7 +1640,7 @@ export class CymaticsRenderer {
     // bajaban maxM (y por tanto el orden de arranque de la recurrencia de
     // Miller en besselJArray) sin cambiar ningún píxel visible. El stride de
     // la tabla radial se mantiene en 13 columnas (o+9/o+10 quedan en 0, sin
-    // usar) para no tener que tocar fillRipRows/packGL, que indexan por *13.
+    // usar) para no tener que tocar packGL, que indexa por *13.
     const mD1 = new Array(n);
     const mD2 = new Array(n);
     const mD3 = new Array(n);
@@ -1527,12 +1720,7 @@ export class CymaticsRenderer {
       // por vez, como líquido, en vez de perseguir un objetivo que nunca
       // alcanza.
       const bufI = this._drops[i];
-      // FIX (Parte B): reemplaza el fundido de duración fija (`.b`, 1→0 en
-      // ~7s) por relajación exponencial independiente por peso — ya no hay
-      // un final duro, así que "sigue en transición" se mide por lo mismo
-      // que ya usa el shader para decidir si la rama vieja aporta algo
-      // (uOldW > 0.02, ver GL_FS más abajo), no por un contador de progreso.
-      const morphingI = this._morph[i] && this._morph[i].oldW > 0.02;
+      const morphingI = isMorphActive(this._morph[i], sciMode);
       const lockSrc = bufI && (bufI.pending || (morphingI && bufI.radM != null)) ? (bufI.pending || bufI) : null;
       if (lockSrc) {
         m = lockSrc.mDom != null ? lockSrc.mDom : lockSrc.radM;
@@ -1557,8 +1745,8 @@ export class CymaticsRenderer {
         // evitaba originalmente (ver la nota de Parte B en
         // core/plate-field.js, junto a `modeStepToward`, que ya señalaba
         // esto como código potencialmente en desuso).
-        m = Math.min(5, Math.max(2, 1 + Math.floor(df / 8)));
-        nn = Math.min(6, ringsFor(df) + 2);
+        m = sciMode ? m_beat : Math.min(5, Math.max(2, 1 + Math.floor(df / 8)));
+        nn = sciMode ? n_beat : Math.min(6, ringsFor(df) + 2);
         delta = modeOmega(m, nn, PHYS_A) - ws;
       } else {
         // PHASE 8: Improved mode selection for carrier drops. Primary
@@ -1576,7 +1764,9 @@ export class CymaticsRenderer {
         // validador cruzado FDTD↔modal (Parte E). Comportamiento idéntico
         // (incluido el MAX_RADIAL_MODE de la auditoría anterior sobre 963 Hz
         // — ver el comentario en plate-field.js).
-        const found = selectModeWithFallback(ws, PHYS_A, df);
+        const found = selectModeWithFallback(ws, PHYS_A, df, sciMode
+          ? { resonanceWidth: viscousDecayRate(faradayWavenumber(df)) }
+          : undefined);
         // FEATURE (2026-09-08, "hagamos que se interpole" — pedido tras "va
         // bien y luego salta"/"también salta al solo reproducir un
         // preset"): si ya hay un camino de resonancias en cola para esta
@@ -1679,17 +1869,16 @@ export class CymaticsRenderer {
       // estaba gateada a 1 en sciMode; ahora siempre. `coherence` se
       // conserva — responde al estado real de audio/sesión, no es
       // vagabundeo artístico inventado.
-      amp0[i] = 0.8 * 1 * coherence;
+      amp0[i] = sciMode ? 0 : 0.8 * coherence;
       // La flor dominante es la protagonista: peso máximo para que el
       // patrón se lea limpio y definido. Las capas de detalle mandala
       // (2m/3m/4m…) quedan como filigrana sutil dentro de los pétalos, sin
       // recargar el conjunto. Su amplitud respira (la flor crece y se
       // encoge) y los vecinos se mueven en contrafase: la forma varía y
       // oscila continuamente, como ondas que chocan y se reorganizan.
-      // FIX (2026-09-08, "es inestable"): mismo caso que amp0 — esta
-      // respiración senoidal suelta (fuera de evo(), por eso sobrevivía a
-      // su neutralización) ya estaba gateada a 1 en sciMode; ahora siempre.
-      ampDom[i] = 1.0 * evo(240, d.p0 * 1.1) * 1;
+      // La vista científica normaliza la forma para que los nodos sigan
+      // visibles. La respuesta a la excitación se lee por separado en el HUD.
+      ampDom[i] = evo(240, d.p0 * 1.1);
       // Precesión integrada: la fase ya incluye la evolución temporal.
       // NOISE: precesión turbulenta — las flores se agitan sin rumbo fijo
       // (heurística visual, apagada en sciMode igual que rotSpeed()).
@@ -1718,8 +1907,10 @@ export class CymaticsRenderer {
       // FIX (2026-09-08, "es inestable"): mismo caso que ampDom — el factor
       // de contrafase/respiración vivía fuera de evo(), ya gateado a 1 en
       // sciMode; ahora siempre.
-      ampS1[i] = (0.16 + 0.26 * lorentz(d1, df)) * evo(170, d.p0 * 1.6) * 1;
-      ampS2[i] = (0.1 + 0.18 * lorentz(d2, df)) * evo(300, d.p0 * 2.2) * 1;
+      // Estas capas reutilizan la raíz radial del modo principal. Solo
+      // ese modo satisface J'_m(z)=0 con la raíz usada en la tabla.
+      ampS1[i] = sciMode ? 0 : (0.16 + 0.26 * lorentz(d1, df)) * evo(170, d.p0 * 1.6);
+      ampS2[i] = sciMode ? 0 : (0.1 + 0.18 * lorentz(d2, df)) * evo(300, d.p0 * 2.2);
       rotS1[i] = this._rotPhase[i * 9 + 1];
       rotS2[i] = this._rotPhase[i * 9 + 2];
       phaseS1[i] = d.p0 * 1.7;
@@ -1833,15 +2024,8 @@ export class CymaticsRenderer {
       this._rotPhase[L + 8] += -0.5 * rotSpeed(delta, d.p0 * 1.9) * alive * dt;
     }
     this._rotSeeded = true;
-    // Solo las condiciones con batido real (binaural/AM) respiran al ritmo
-    // del latido; las demás respiran a un ritmo natural lento.
-    const visBeat = rhythmicCond() ? beat : 0.09;
-    const wobA = new Array(n);
-    for (let i = 0; i < n; i++) {
-      // El borde de cada gota respira con el latido (la amplitud del patrón
-      // vibra con el pulso real del AudioContext); en pausa queda quieto.
-      wobA[i] = 1 + 0.06 * Math.sin(TWO_PI * visBeat * t + drops[i].p0) * alive;
-    }
+    // La línea de contacto queda fija; el relieve oscila dentro del borde.
+    const waterBoundary = movingSurface ? 0.97 : 1;
     // Oscilación natural: cada modo tiembla a su propio ritmo (shimmer
     // desincronizado, como el batido real entre modos casi degenerados) y
     // las ondas radiales —estacionaria + viajera— hacen ondular los
@@ -1855,18 +2039,7 @@ export class CymaticsRenderer {
     const shimD2 = new Array(n);
     const shimD3 = new Array(n);
     const shimBeat = new Array(n);
-    const ripAmp = new Array(n);
-    const ripCos = new Array(n);
-    const ripTravel = new Array(n);
-    const ripIn = new Array(n);
-    // Nodo de colisión: el patrón de interferencia de las dos ondas
-    // opuestas (el cruce donde la superficie se levanta) respira lento —
-    // los nodos aparecen, se sostienen y se disuelven, como el batido de
-    // dos trenes de ondas reales cruzándose.
-    const ripCol = new Array(n);
-    const cosCol = new Array(n);
     for (let i = 0; i < n; i++) {
-      const d = drops[i];
       // Vibración viva: cada modo tiembla a su propio ritmo con dos
       // frecuencias desincronizadas (las líneas nodales se mueven y el
       // patrón oscila, pero siguen nítidas porque se redibujan cada
@@ -1886,20 +2059,6 @@ export class CymaticsRenderer {
       shimD2[i] = 1;
       shimD3[i] = 1;
       shimBeat[i] = 1;
-      // FIX (2026-09-08, "es inestable"): estas cuatro ondas radiales
-      // (estacionaria, dos viajeras opuestas y nodo de colisión) son
-      // heurísticas visuales puras — ninguna sale de resolver la ecuación
-      // de onda ni de un modo de Bessel (ver el comentario de
-      // fillRipRows()/kRip2 más abajo) — y `surf`/`ripCol` avanzan con `t`
-      // sin ligarse a ningún evento real, así que ondulaban el patrón cada
-      // ~9s indefinidamente aunque nada cambiara. Ya se apagaban en
-      // sciMode; ahora siempre, igual que evo()/shim*.
-      ripAmp[i] = 0;
-      ripCos[i] = Math.cos(TWO_PI * 0.5 * t + d.p0 * 1.1);
-      ripTravel[i] = 0;
-      ripIn[i] = 0;
-      ripCol[i] = 0;
-      cosCol[i] = Math.cos(TWO_PI * 0.07 * t + d.p0 * 1.3);
     }
     // Amplitud general: el patrón brilla con el latido real (pulseEff) y
     // con la energía de la vibración (umbral de Faraday). El suelo se fija
@@ -1933,6 +2092,18 @@ export class CymaticsRenderer {
     ctx.beginPath();
     ctx.arc(cx, cy, R * 0.85, 0, TWO_PI);
     ctx.fill();
+    if (lampLight > 0.02) {
+      const spillX = cx + Math.sin(lampSweep) * R * 0.64;
+      const spillY = cy - 0.77 * R;
+      const spread = ctx.createRadialGradient(spillX, spillY, 0, spillX, spillY, 1.13 * R);
+      spread.addColorStop(0, lampTint ? lampInk(lampTint, 0.25 * lampLight) : `rgba(163,219,255,${0.25 * lampLight})`);
+      spread.addColorStop(0.52, lampTint ? lampInk(lampTint, 0.10 * lampLight) : `rgba(105,173,251,${0.10 * lampLight})`);
+      spread.addColorStop(1, 'rgba(105,173,251,0)');
+      ctx.fillStyle = spread;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, TWO_PI);
+      ctx.fill();
+    }
     ctx.strokeStyle = 'rgba(34, 211, 238, 0.1)';
     ctx.lineWidth = Math.max(1, R * 0.006);
     ctx.beginPath();
@@ -1940,11 +2111,13 @@ export class CymaticsRenderer {
     ctx.stroke();
 
     // ----- Gotas: cada una en su propio buffer de alta resolución --------
-    // En la ruta GPU las tres gotas comparten un lienzo GL de 3·res × res,
+    // En la ruta GPU las tres gotas comparten un lienzo con franjas transparentes,
     // así que todas usan la misma resolución (la mayor que necesiten).
     const buildingDrop = this._drops.some((drop) => drop.pending);
     const transitioning = this._morph.some(Boolean);
     let glResAll = 0;
+    let glStride = 0;
+    let drewAtlas = false;
     if (this._gl) {
       let maxNeed = 0;
       for (let i = 0; i < n; i++) {
@@ -1968,11 +2141,12 @@ export class CymaticsRenderer {
       // se completa solo). Redimensionar acá, ANTES del loop de dibujo, para
       // que el lienzo real SIEMPRE tenga el tamaño que el resto del
       // fotograma va a asumir — nunca vaya por detrás.
+      glStride = Math.round(glResAll * 1.1);
       if (glResAll !== this._glRes) {
         this._glRes = glResAll;
-        this._gl.canvas.width = glResAll * 3;
+        this._gl.canvas.width = glStride * 2 + glResAll;
         this._gl.canvas.height = glResAll;
-        this._gl.gl.viewport(0, 0, glResAll * 3, glResAll);
+
         // FIX (2026-09-12, "sigue pasando en ciertos puntos de la
         // transición" — regresión del fix anterior): al escribir el fix de
         // arriba copié del código viejo de `_uploadDropGL` la costumbre de
@@ -2001,15 +2175,10 @@ export class CymaticsRenderer {
         // ajenas: el shader arma la UV con `uRes` normalizado).
       }
     }
-    // En pausa profunda (sin patrón y sin transición en curso) no hay nada
-    // que calcular píxel a píxel: se dibuja una lente de agua quieta, barata,
-    // y se ahorra toda la CPU del bucle (batería y fluidez del resto de la
-    // página). Al volver a sonar, el patrón emerge desde el agua limpia.
-    // FIX (Parte B): mismo criterio que morphingI/alreadyMorphing — sin
-    // final duro, "en transición" se mide por el mismo umbral que usa el
-    // shader (uOldW > 0.02).
-    const anyMorph = this._morph.some((m) => m && m.oldW > 0.02);
-    if (ampPattern < 0.02 && !anyMorph) {
+    // El silencio experimental y la vista estática pueden llegar al reposo
+    // completo. Una lente quieta basta cuando ya no queda un modo visible.
+    const anyMorph = this._morph.some((morph) => isMorphActive(morph, sciMode));
+    if (!movingSurface && ampPattern < 0.02 && !anyMorph) {
       for (const d of drops) {
         const lg = ctx.createRadialGradient(d.x, cy, 0, d.x, cy, dropR);
         lg.addColorStop(0, `rgba(${d.deep[0]}, ${d.deep[1]}, ${d.deep[2]}, 0.3)`);
@@ -2034,6 +2203,7 @@ export class CymaticsRenderer {
       // comentario ya decía que debía pasar.
       for (let i = 0; i < n; i++) { this._lastKey[i] = ''; this._lastP[i] = null; }
     } else {
+    if (this._gl) this._gl.gl.clear(this._gl.gl.COLOR_BUFFER_BIT);
     for (let i = 0; i < n; i++) {
       const d = drops[i];
       // Resolución de la gota: mayor que antes (≈1,4× el radio dibujado y
@@ -2050,7 +2220,8 @@ export class CymaticsRenderer {
       const buf = this._drops[i];
       const resD = this._gl
         ? glResAll
-        : dropResolution(Math.max(nDom[i] * 16, dropR * 2) * this._resMul, buf.res, buf.pending || this._morph[i]);
+        : Math.min(CPU_DROP_RESOLUTION_LIMIT,
+          dropResolution(Math.max(nDom[i] * 16, dropR * 2) * this._resMul, buf.res, buf.pending || this._morph[i]));
       this._ensureDrop(buf, resD);
       // Si cambió el tamaño del búfer a mitad de una transición (p. ej. al
       // redimensionar la ventana), se descarta la transición: la tabla de la
@@ -2096,15 +2267,10 @@ export class CymaticsRenderer {
       // cruzado), la placa se reordena con una oleada y la nueva se
       // asienta — sin saltos, sin parpadeos ni vacíos.
       if (radKey !== this._lastKey[i]) {
-        // Ver _lightGate en el constructor: se apaga al instante ante
-        // CUALQUIER cambio de modo (incluso si alreadyMorphing impide
-        // arrancar un fundido nuevo abajo) — es justo ese caso, un cambio de
-        // modo sin fundido propio, el que producía el "tirón" reportado.
-        this._lightGate[i] = 0;
         const lp = this._lastP[i];
         // FIX (Parte B): "sigue en transición" ya no es `.b > 0` (duración
         // fija) — ver morphingI arriba, mismo criterio.
-        const alreadyMorphing = this._morph[i] && this._morph[i].oldW > 0.02;
+        const alreadyMorphing = isMorphActive(this._morph[i], sciMode);
         if (lp && lp.res === resD && !alreadyMorphing) {
           const gd = this._gl ? this._glDrops[i] : null;
           // FIX (Parte B): cada flor relaja con SU PROPIO τ, derivado de la
@@ -2123,8 +2289,8 @@ export class CymaticsRenderer {
           // BLOQUEADO todo ese tiempo (ver MAX_MORPH_AGE_S arriba) — de ahí
           // el reporte de transiciones que se sienten congeladas y después
           // saltan de golpe.
-          const fCenterOld = modeOmega(lp.mDom, lp.nDom, PHYS_A) / Math.PI;
-          const fCenterNew = modeOmega(mDom[i], nDom[i], PHYS_A) / Math.PI;
+          const rateOld = morphRate(lp.mDom, lp.nDom, sciMode);
+          const rateNew = morphRate(mDom[i], nDom[i], sciMode);
           // FIX (2026-09-08, "va bien y luego salta" / "se queda pegado y
           // después salta de golpe" — reportado específicamente para saltos
           // GRANDES de frecuencia): el τ de arriba solo depende de la
@@ -2149,8 +2315,8 @@ export class CymaticsRenderer {
           this._morph[i] = {
             oldW: 1,
             newW: 0,
-            tauOld: (MORPH_BLEND_K * distScale) / gammaAt(fCenterOld),
-            tauNew: (MORPH_BLEND_K * distScale) / gammaAt(fCenterNew),
+            tauOld: (MORPH_BLEND_K * distScale) / rateOld,
+            tauNew: (MORPH_BLEND_K * distScale) / rateNew,
             age: 0,
             p: lp,
             radP: buf.rad,
@@ -2165,11 +2331,6 @@ export class CymaticsRenderer {
         }
         this._lastKey[i] = radKey;
       }
-      // Recuperación gradual de _lightGate (~0,6s) hacia 1 — el apagado de
-      // arriba es instantáneo, la vuelta es suave para que el reflejo/
-      // cáustica se "enciendan" gradualmente sobre el patrón ya asentado,
-      // en vez de reaparecer de golpe.
-      this._lightGate[i] += (1 - this._lightGate[i]) * (1 - Math.exp(-dt / 0.6));
       // Instantánea del patrón de este fotograma: si el modo cambia en el
       // próximo, esta instantánea se convierte en la flor que se desvanece.
       // FIX (2026-09-08, "no se ve la metamorfosis"/"corte instantáneo, sin
@@ -2223,7 +2384,6 @@ export class CymaticsRenderer {
         buf.pending = null;
       } else {
         if (!buf.pending || buf.pending.key !== radKey) {
-          const kRip = (2 * TWO_PI * 3) / (resD / 2);
           buf.pending = {
             key: radKey,
             res: resD,
@@ -2236,10 +2396,8 @@ export class CymaticsRenderer {
             mD2: mD2[i],
             mD3: mD3[i],
             tex,
-            kRip,
             rows: 0,
             rad: new Float32Array(resD * resD * 13),
-            rip: new Float32Array(resD * resD * 4),
           };
         }
         const pend = buf.pending;
@@ -2259,8 +2417,6 @@ export class CymaticsRenderer {
           pend.mD3,
           pend.tex
         );
-        // Ondas radiales precalculadas del mismo tramo (usan r de la tabla).
-        fillRipRows(pend.rip, pend.rad, pend.res, pend.rows, y1, pend.kRip);
         pend.rows = y1;
         if (pend.rows >= pend.res) {
           buf.rad = pend.rad;
@@ -2271,12 +2427,16 @@ export class CymaticsRenderer {
           // actualiza — sobrevive a los resets de _ensureDrop porque vive en
           // `this`, no en `buf`.
           this._curMode[i] = { m: pend.mDom, n: pend.nDom };
-          buf.rip = pend.rip;
-          buf.ripK = pend.kRip;
           buf.pending = null;
           if (this._gl) this._uploadDropGL(i, pend);
         }
       }
+      if (waveLight && buf.waves && buf.waveRows < resD) {
+        const y1 = Math.min(resD, buf.waveRows + Math.ceil(resD / 8));
+        fillWaveRows(buf.waves, resD, buf.waveRows, y1);
+        buf.waveRows = y1;
+      }
+      if (buf.waveRows === resD) buf.waveMix = Math.min(1, buf.waveMix + dt * 6);
       const rad = buf.rad;
       // Fases del grano capilar (chisporroteo del agua): cada gota hierve
       // a su propio ritmo, desincronizado de las demás. El grano espacial
@@ -2286,8 +2446,8 @@ export class CymaticsRenderer {
       const gt2 = TWO_PI * 0.9 * t + d.p0 * 6.3;
       const gt3 = TWO_PI * 0.7 * t + d.p0 * 7.1;
       const gt4 = TWO_PI * 1.1 * t + d.p0 * 7.7;
-      const granEnv = 0.55 + 0.45 * Math.cos(gt1 + gt3);
-      const powShimmer = 1 + 0.12 * Math.sin(gt2);
+      const granEnv = reducedMotion ? 0.55 : 0.55 + 0.45 * Math.cos(gt1 + gt3);
+      const powShimmer = reducedMotion ? 1 : 1 + 0.12 * Math.sin(gt2);
 
       // Transición al cambiar de frecuencia (Parte B, auditoría 2026-09-08):
       // SUPERPOSICIÓN física, no fundido cruzado — cada flor (saliente y
@@ -2313,12 +2473,10 @@ export class CymaticsRenderer {
           morph.newW += (1 - morph.newW) * (1 - Math.exp(-dt / morph.tauNew));
           morph.oldW += (0 - morph.oldW) * (1 - Math.exp(-dt / morph.tauOld));
         }
-        // Sin final duro (una exponencial nunca llega a 0): se libera cuando
-        // la saliente ya no aporta nada visible al shader — mismo umbral que
-        // uOldW > 0.02 en GL_FS — o, como respaldo ante un τ degenerado, al
-        // tope MAX_MORPH_AGE_S (ver su comentario: 8× el peor caso natural,
-        // nunca debería dispararse en operación normal).
-        if (!buf.pending && (morph.oldW < 0.02 || morph.age > MAX_MORPH_AGE_S)) {
+        // La vista normal puede responder al siguiente cambio cuando la
+        // saliente ya no se ve. En la científica se asientan ambos pesos.
+        const settled = morph.oldW < 0.02 && (!sciMode || morph.newW > 0.98);
+        if (!buf.pending && (settled || morph.age > MAX_MORPH_AGE_S)) {
           this._releaseMorphTex(i);
           this._morph[i] = null;
           morph = null;
@@ -2348,6 +2506,14 @@ export class CymaticsRenderer {
       const shimD2P = 1;
       const shimD3P = 1;
       const shimBeatP = 1;
+      const phaseA = this._liquidPhase + d.p0 * 1.3;
+      const phaseB = this._reflectedPhase + d.p0 * 1.9 + 0.45;
+      // El segundo modo responde desfasado y mantiene relieve cerca del cruce por cero.
+      const standingPhase = Math.cos(phaseA);
+      const secondaryPhase = Math.sin(phaseA);
+      const reflectedLampX = 1.8 * lampSweep - (d.x - cx) / R;
+      // Acota el enfoque cuando los anillos de alta frecuencia son subpíxel.
+      const opticalWaveNumber = movingSurface ? Math.min(34, zeroFor(mDom[i], nDom[i])) : 0;
 
       // ----- Ruta GPU (WebGL2) -------------------------------------------
       // La GPU evalúa el mismo sumatorio píxel a píxel con las texturas del
@@ -2361,19 +2527,22 @@ export class CymaticsRenderer {
           const gl = GL.gl;
           const sc = GL.scratch;
           gl.useProgram(GL.prog);
-          gl.viewport(i * resD, 0, resD, resD);
+          gl.viewport(i * glStride, 0, resD, resD);
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, gd.texA);
           gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, gd.texB);
           gl.activeTexture(gl.TEXTURE2);
           gl.bindTexture(gl.TEXTURE_2D, gd.texC);
-          gl.activeTexture(gl.TEXTURE3);
-          gl.bindTexture(gl.TEXTURE_2D, morph && morph.texBold ? morph.texBold : GL.blackTex);
-          gl.activeTexture(gl.TEXTURE4);
-          gl.bindTexture(gl.TEXTURE_2D, morph && morph.texCold ? morph.texCold : GL.blackTex);
-          gl.activeTexture(gl.TEXTURE5);
-          gl.bindTexture(gl.TEXTURE_2D, morph && morph.texAold ? morph.texAold : GL.blackTex);
+          const showOld = oldW > 0.02;
+          if (showOld) {
+            gl.activeTexture(gl.TEXTURE3);
+            gl.bindTexture(gl.TEXTURE_2D, morph.texBold ?? GL.blackTex);
+            gl.activeTexture(gl.TEXTURE4);
+            gl.bindTexture(gl.TEXTURE_2D, morph.texCold ?? GL.blackTex);
+            gl.activeTexture(gl.TEXTURE5);
+            gl.bindTexture(gl.TEXTURE_2D, morph.texAold ?? GL.blackTex);
+          }
 
           // Pesos (amplitud·shimmer) y fases (rotación + fase) por modo.
           sc.j[0] = amp0[i] * shim0[i];
@@ -2397,7 +2566,7 @@ export class CymaticsRenderer {
           sc.m[3] = mD1[i];
           sc.m[4] = mD2[i];
           sc.m[5] = mD3[i];
-          if (morph) {
+          if (showOld) {
             const p = pM;
             sc.jo[0] = p.amp0 * shim0P;
             sc.jo[1] = p.ampDom * shimDomP;
@@ -2420,42 +2589,25 @@ export class CymaticsRenderer {
             sc.mo[3] = p.mD1;
             sc.mo[4] = p.mD2;
             sc.mo[5] = p.mD3;
-          } else {
-            sc.jo[0] = sc.jo[1] = sc.jo[2] = sc.jo[3] = 0;
-            sc.jo[4] = sc.jo[5] = sc.jo[6] = sc.jo[7] = 0;
-            sc.pho[0] = sc.pho[1] = sc.pho[2] = sc.pho[3] = 0;
-            sc.pho[4] = sc.pho[5] = sc.pho[6] = 0;
-            sc.mo[0] = 1;
-            sc.mo[1] = 2;
-            sc.mo[2] = 3;
-            sc.mo[3] = 4;
-            sc.mo[4] = 5;
-            sc.mo[5] = 6;
           }
 
-          // Ondas radiales (fases por fotograma; el cos/sin espacial lo
-          // evalúa la GPU con r de la textura).
-          const ripTph = TWO_PI * 0.55 * t + d.p0 * 2.3;
-          const ripNph = TWO_PI * 0.62 * t + d.p0 * 3.1;
-          const cT = Math.cos(ripTph);
-          const sT = Math.sin(ripTph);
-          const cN = Math.cos(ripNph);
-          const sN = Math.sin(ripNph);
           const sandSig = tex.sand * (200 / resD) + 0.012 * ampPattern;
           const presence = morph ? Math.max(oldW, newW) : 1;
 
           const U = GL.u;
-          gl.uniform2f(U.uOffset, i * resD, 0);
+          gl.uniform2f(U.uOffset, i * glStride, 0);
           gl.uniform1f(U.uRes, resD);
           gl.uniform1f(U.uHalf, half);
           gl.uniform1f(U.uRim, rim);
-          gl.uniform1f(U.uWob, wobA[i]);
+          gl.uniform1f(U.uWob, waterBoundary);
           for (let k = 0; k < 8; k++) gl.uniform1f(U.uJ[k], sc.j[k]);
           for (let k = 0; k < 7; k++) gl.uniform1f(U.uPh[k], sc.ph[k]);
           for (let k = 0; k < 6; k++) gl.uniform1f(U.uM[k], sc.m[k]);
-          for (let k = 0; k < 8; k++) gl.uniform1f(U.uJo[k], sc.jo[k]);
-          for (let k = 0; k < 7; k++) gl.uniform1f(U.uPho[k], sc.pho[k]);
-          for (let k = 0; k < 6; k++) gl.uniform1f(U.uMo[k], sc.mo[k]);
+          if (showOld) {
+            for (let k = 0; k < 8; k++) gl.uniform1f(U.uJo[k], sc.jo[k]);
+            for (let k = 0; k < 7; k++) gl.uniform1f(U.uPho[k], sc.pho[k]);
+            for (let k = 0; k < 6; k++) gl.uniform1f(U.uMo[k], sc.mo[k]);
+          }
           // Sin transición la flor actual pesa 1 (newW solo se define dentro
           // del bloque de morph); con transición, cada flor su peso real.
           gl.uniform1f(U.uNewW, morph ? newW : 1);
@@ -2465,16 +2617,14 @@ export class CymaticsRenderer {
           gl.uniform1f(U.uAmpPat, ampPattern);
           gl.uniform1f(U.uAmp, amp);
           gl.uniform1f(U.uSwell, swell);
-          gl.uniform1f(U.uRipA, ripAmp[i]);
-          gl.uniform1f(U.uRipC, ripCos[i]);
-          gl.uniform1f(U.uRipT, ripTravel[i]);
-          gl.uniform1f(U.uRipN, ripIn[i]);
-          gl.uniform1f(U.uRipCl, ripCol[i]);
-          gl.uniform1f(U.uColC, cosCol[i]);
-          gl.uniform1f(U.uCT, cT);
-          gl.uniform1f(U.uST, sT);
-          gl.uniform1f(U.uCN, cN);
-          gl.uniform1f(U.uSN, sN);
+          gl.uniform2f(U.uWavePhase, phaseA, phaseB);
+          gl.uniform3f(U.uSurfaceOptics, surfaceOptics, standingPhase, secondaryPhase);
+          gl.uniform2f(U.uLampOptics, reflectedLampX, opticalWaveNumber);
+          gl.uniform2f(U.uRippleGain, wideRippleGain, fineRippleGain);
+          gl.uniform3fv(U.uLampTint, reflectedColor);
+          gl.uniform1f(U.uWaveLight, waveLight);
+          gl.uniform1f(U.uWaterVibration, waterVibration);
+          gl.uniform1i(U.uClearWater, sciMode ? 0 : 1);
           // PHASE 3: Disable capillary grain overlay in Scientific Mode
           gl.uniform1f(U.uGEnv, sciMode ? 0 : granEnv);
           gl.uniform1f(U.uPSh, powShimmer);
@@ -2486,29 +2636,14 @@ export class CymaticsRenderer {
           gl.uniform3fv(U.uPal, d.pal);
           gl.uniform3fv(U.uDeep, d.deep);
           gl.uniform3fv(U.uWhite, crestColor);
-          gl.uniform1f(U.uCoherence, coherence);
-          gl.uniform1f(U.uVelocity, velocity);
-          gl.uniform1f(U.uLightGate, this._lightGate[i]);
 
           gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(GL.canvas, i * resD, 0, resD, resD, d.x - dropR, cy - dropR, dropR * 2, dropR * 2);
+          drewAtlas = true;
         }
         continue; // esta gota la dibuja la GPU
       }
 
-      // DEUDA DOCUMENTADA (auditoría de luz 2026-09-02): el rasterizador CPU
-      // de acá abajo no tiene ni el especular por pendiente (dEdTh) ni la
-      // cáustica por curvatura (d2EdTh2) que sí tiene el shader GPU (GL_FS,
-      // más arriba) — solo el blob de posición fija más abajo ("Reflejos
-      // especulares en cada gota"). Es la misma brecha ya aceptada esta
-      // sesión para el especular: se prioriza el camino GPU (WebGL2 y
-      // WebGL1, que comparten el mismo GL_FS vía glsl100()), que cubre la
-      // gran mayoría de dispositivos. Portarlo acá es mecánico si hace
-      // falta: mismo patrón que arma `sum` más abajo, con
-      // `-mDom0*mDom0*cos(...)` en vez de `cos(...)` para cada término.
       // Escalares de esta gota en variables locales: el bucle interior los
       // usa en cada píxel, así que sacarlos de los arrays (y los accesos a
       // memoria) acelera el render de forma medible. Las amplitudes ya
@@ -2553,50 +2688,16 @@ export class CymaticsRenderer {
       const rpOld = useOld ? radP : null;
       const mEnv = morphEnv;
       const presence = morph ? Math.max(oldW, newW) : 1;
-      const ripA = ripAmp[i];
-      const ripC = ripCos[i];
-      const ripT = ripTravel[i];
-      const ripN = ripIn[i];
-      const ripCl = ripCol[i];
-      const colC = cosCol[i];
-      const ripPh = d.p0 * 2.3;
-      const ripPhIn = d.p0 * 3.1;
-      // Fases de las ondas radiales (escalares por fotograma; la tabla
-      // precalculada aporta el cos/sin espacial por píxel).
-      const ripTph = TWO_PI * 0.55 * t + ripPh;
-      const ripNph = TWO_PI * 0.62 * t + ripPhIn;
-      const cT = Math.cos(ripTph);
-      const sT = Math.sin(ripTph);
-      const cN = Math.cos(ripNph);
-      // FIX (deuda de verificación externa, hallado al forzar el
-      // rasterizador CPU para depurar "en 2D no parece cimática"): `sN`
-      // solo estaba declarado dentro del bloque GL (más arriba, antes del
-      // `continue` que salta esta rama cuando hay WebGL) pero se USA más
-      // abajo en `ripp` — sin WebGL esto tiraba `ReferenceError: sN is not
-      // defined` en cada frame, igual que `wob` (ver abajo). Mismo criterio
-      // que ya se aplicaba correctamente a cT/sT/cN (duplicados para esta
-      // rama): agregado acá.
-      const sN = Math.sin(ripNph);
-      // FIX (mismo hallazgo): `wob` no existe en ningún lado del archivo —
-      // la ruta GPU pasa `wobA[i]` como uniforme `uWob` (ver más abajo,
-      // `gl.uniform1f(U.uWob, wobA[i])`); esta rama CPU nunca se actualizó
-      // cuando `wobA` pasó a ser un array por gota. Con esto el rasterizador
-      // CPU dejaba de ejecutar CUALQUIER código de esta gota en adelante
-      // (la excepción abortaba el resto de la función) — no solo perdía
-      // efectos visuales menores como documenta el comentario de más abajo
-      // ("DEUDA DOCUMENTADA... sin especular ni cáustica"), sino que no
-      // dibujaba nada de nada. Afecta a cualquier navegador sin WebGL2 ni
-      // WebGL1 (raro, pero real) — nunca antes verificado porque el camino
-      // GPU siempre está disponible en desarrollo.
-      const bound = half * wobA[i];
+      const cosA = Math.cos(phaseA), sinA = Math.sin(phaseA);
+      const cosB = Math.cos(phaseB), sinB = Math.sin(phaseB);
+      const waves = buf.waves;
+      const bound = half * waterBoundary;
       // PHASE 3: Disable capillary grain overlay in Scientific Mode
       const gEnv = sciMode ? 0 : granEnv;
       const pSh = powShimmer;
       const texPow = tex.pow;
       const texSalt = tex.salt;
       const sandSig = tex.sand * (200 / resD) + 0.012 * ampPattern;
-      const res2 = resD * resD;
-      const ripTbl = buf.rip;
       const pal = d.pal;
       const dp = d.deep;
       const cr0 = pal[0];
@@ -2605,6 +2706,16 @@ export class CymaticsRenderer {
       const dr0 = dp[0];
       const dg0 = dp[1];
       const db0 = dp[2];
+      const crestR = cr0 * 0.2 + crestColor[0] * 0.8;
+      const crestG = cg0 * 0.2 + crestColor[1] * 0.8;
+      const crestB = cb0 * 0.2 + crestColor[2] * 0.8;
+      const transmittedR = cr0 * 0.34 + reflectedColor[0] * 0.66;
+      const transmittedG = cg0 * 0.34 + reflectedColor[1] * 0.66;
+      const transmittedB = cb0 * 0.34 + reflectedColor[2] * 0.66;
+      const waveStrength = waveLight * buf.waveMix;
+      const reliefStrength = waterVibration * buf.waveMix;
+      const opticalMix = surfaceOptics * buf.waveMix;
+      const heights = buf.relief;
 
       for (let py = 0; py < resD; py++) {
         const base = py * resD;
@@ -2620,35 +2731,28 @@ export class CymaticsRenderer {
           const soft = clamp01((bound - dist) / rim);
           const th = rad[o + 1];
 
-          // Ondulación del patrón: estacionaria más DOS ondas viajeras
-          // opuestas precalculadas (tabla) — una nace en el centro y viaja
-          // al borde, la otra rebota del borde hacia dentro — que chocan
-          // entre sí: donde se cruzan interfieren y la superficie se
-          // levanta (nodo de colisión que respira), como en un experimento
-          // real. Por fotograma solo rotan las fases (escalares baratos).
-          const ripp =
-            1 +
-            ripA * ripTbl[idx] * ripC +
-            ripT * (ripTbl[res2 + idx] * cT - ripTbl[2 * res2 + idx] * sT) +
-            ripN * (ripTbl[res2 + idx] * cN + ripTbl[2 * res2 + idx] * sN) +
-            ripCl * ripTbl[3 * res2 + idx] * colC;
           // Elevación: la flor actual y, durante un fundido cruzado, la
           // anterior también — cada una con su peso. Al superponerse, los
           // anillos de la flor vieja se deslizan hacia los de la nueva.
           let sum = 0;
-          if (useNew) {
+          let secondary = 0;
+          if (amp > 0 && useNew) {
+            secondary = jBeat * rad[o + 3] * Math.cos(mDom0 * th + phBeat);
             sum =
               j0 * rad[o + 2] +
               jDom * rad[o + 3] * Math.cos(mDom0 * th + phDom) +
-              jBeat * rad[o + 3] * Math.cos(mDom0 * th + phBeat) +
+              secondary +
               jS1 * rad[o + 4] * Math.cos(mS10 * th + phS1) +
               jS2 * rad[o + 5] * Math.cos(mS20 * th + phS2) +
               jD1 * rad[o + 6] * Math.cos(mD10 * th + phD1) +
               jD2 * rad[o + 7] * Math.cos(mD20 * th + phD2) +
               jD3 * rad[o + 8] * Math.cos(mD30 * th + phD3);
-            if (morph) sum *= newW;
+            if (morph) {
+              sum *= newW;
+              secondary *= newW;
+            }
           }
-          if (useOld) {
+          if (amp > 0 && useOld) {
             const p = pOld;
             const rp = rpOld;
             // Las columnas Bessel de la tabla anterior son rp[o+2..o+8]
@@ -2684,12 +2788,27 @@ export class CymaticsRenderer {
           // Envuelta de reafinación y grano capilar (precalculado): el
           // patrón brilla con la energía y el latido, y el chisporroteo del
           // agua tiembla con una envolvente global barata.
-          const eBase = sum * ripp * amp * swell * mEnv;
+          const eBase = sum * amp * swell * mEnv;
+          let frontA = 0, frontB = 0;
+          if (waveStrength > 0) {
+            const waveOffset = idx * WAVE_STRIDE;
+            const spatialCosA = waves[waveOffset];
+            const spatialSinA = waves[waveOffset + 1];
+            const spatialCosB = waves[waveOffset + 2];
+            const spatialSinB = waves[waveOffset + 3];
+            frontA = wideRippleGain * (spatialCosA * cosA + spatialSinA * sinA);
+            frontB = fineRippleGain * (spatialCosB * cosB + spatialSinB * sinB);
+          }
+          const ripple = WAVE_BLEND_A * frontA + WAVE_BLEND_B * frontB;
+          const lobeScale = 1 + LOBE_VIBRATION_GAIN * reliefStrength * ripple;
+          const modeHeight = eBase + opticalMix * (
+            eBase * (standingPhase * lobeScale - 1) +
+            secondary * amp * swell * mEnv * (secondaryPhase - standingPhase * lobeScale)
+          );
+          const relief = modeHeight + RIPPLE_HEIGHT * reliefStrength * ripple;
           const gran = rad[o + 11] * gEnv;
-          const e = eBase + gran * (0.1 + Math.abs(eBase)) * 0.045 * amp;
-          // Arena nodal: el polvo fino se asienta sobre las líneas nodales
-          // (donde la elevación cruza cero), trazando las líneas EXACTAS del
-          // mandala como la sal de Chladni real. La campana es muy estrecha
+          const e = relief + gran * (0.1 + Math.abs(eBase)) * 0.045 * amp;
+          // El polvo marca los nodos del modo. La campana es muy estrecha
           // (σ ≈ 0,02) y su grosor se adapta al tamaño del búfer para que
           // las líneas tengan el MISMO grosor en pantalla a cualquier
           // tamaño — así los patrones pequeños se leen definidos también en
@@ -2698,7 +2817,7 @@ export class CymaticsRenderer {
           // gaussiana solo se evalúa donde puede ser visible (|eBase| bajo):
           // el resto de píxeles se ahorra el exp — la mayor parte del costo.
           let sand = 0;
-          if (Math.abs(eBase) < 0.11) {
+          if (ampPattern > 0 && Math.abs(eBase) < 0.11) {
             const sandPowder = 1 - texPow + texPow * rad[o + 12] * pSh;
             // Actividad local de la onda: la sal solo se asienta donde la
             // superficie vibra de verdad (las zonas muertas cerca del borde
@@ -2719,7 +2838,8 @@ export class CymaticsRenderer {
               envGate *
               (0.75 + 0.25 * ampPattern) *
               ampPattern *
-              presence;
+              presence *
+              (waveStrength > 0 ? 1 - 0.76 * buf.waveMix : 1);
           }
           // Compresión gamma: la amplitud física decae como 1/√r (envelope
           // de Bessel); se comprime el rango con una raíz cuadrada (cámara)
@@ -2757,6 +2877,37 @@ export class CymaticsRenderer {
             cg = cg * (1 - sa) + (245 + (pal[1] - 245) * 0.22) * sa;
             cb = cb * (1 - sa) + (252 + (pal[2] - 252) * 0.22) * sa;
           }
+          let bodyAlpha = 0.26 + 0.1 * ampPattern + 0.54 * v + 0.55 * sand * ampPattern;
+          if (!sciMode) {
+            let crest = clamp01(relief / 0.23);
+            crest = crest * crest * (3 - 2 * crest);
+            const clearWater = waveStrength > 0 ? buf.waveMix : 0;
+            const sheen = (0.64 - 0.34 * clearWater) * crest;
+            cr += (crestR - cr) * sheen;
+            cg += (crestG - cg) * sheen;
+            cb += (crestB - cb) * sheen;
+            bodyAlpha = 0.125 + 0.055 * ampPattern + (0.42 - 0.22 * clearWater) * v
+              + (0.27 - 0.17 * clearWater) * crest + 0.46 * sand * ampPattern;
+          }
+          let alpha = Math.min(bodyAlpha, 1);
+          if (waveStrength > 0) {
+            heights[idx] = relief;
+            const rippleCurvature = -RIPPLE_CURVATURE_A * frontA - RIPPLE_CURVATURE_B * frontB;
+            const curvature = -(opticalWaveNumber ** 2) * modeHeight
+              + RIPPLE_HEIGHT * reliefStrength * rippleCurvature;
+            const compression = -REFRACTION_SCALE * curvature;
+            const focus = Math.max(0, compression) * Math.abs(compression) / (0.30 + compression * compression);
+            const shade = 1 + 0.28 * waveStrength * Math.min(0, compression) / (1 + Math.abs(compression));
+            cr *= shade;
+            cg *= shade;
+            cb *= shade;
+            const transmission = CAUSTIC_GAIN * waveStrength * focus;
+            alpha += (1 - alpha) * transmission;
+            const transmissionMix = transmission / Math.max(alpha, 0.0001);
+            cr += (transmittedR - cr) * transmissionMix;
+            cg += (transmittedG - cg) * transmissionMix;
+            cb += (transmittedB - cb) * transmissionMix;
+          }
           // Transparencia del agua: el agua es translúcida — los valles
           // dejan ver el plato oscuro a través (más transparentes) y las
           // crestas se opacan con la elevación, como el agua real bajo la
@@ -2765,67 +2916,28 @@ export class CymaticsRenderer {
           ddata[o4] = cr > 255 ? 255 : cr;
           ddata[o4 + 1] = cg > 255 ? 255 : cg;
           ddata[o4 + 2] = cb > 255 ? 255 : cb;
-          // Agua con más cuerpo: las líneas de sal se opacan y el resto del
-          // agua queda translúcido y oscuro — el contraste del patrón no se
-          // pierde en translucidez ni se ve lavado.
-          let wa = (0.26 + 0.1 * ampPattern + 0.54 * v + 0.55 * sand * ampPattern) * soft;
-          if (wa > 1) wa = 1;
-          ddata[o4 + 3] = Math.round(255 * wa);
+          ddata[o4 + 3] = Math.round(255 * alpha * soft);
         }
       }
 
+      if (waveStrength > 0) {
+        reflectLampInWater(ddata, heights, resD, bound, rim, reflectedLampX, waveStrength, reflectedColor);
+      }
       buf.ctx.putImageData(buf.img, 0, 0);
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(buf.canvas, d.x - dropR, cy - dropR, dropR * 2, dropR * 2);
     }
+    // Copiar una sola vez, después de completar las tres franjas WebGL.
+    if (drewAtlas) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(this._gl.canvas, drops[0].x - dropR, cy - dropR, 2 * (step + dropR), 2 * dropR);
+    }
     } // else: gotas con patrón
 
-    // ----- Luz de aro cenital (LED) --------------------------------------
-    // El arco superior brilla con la elevación media (pulso del latido) y
-    // la energía de la vibración: al pausar, la luz se apaga con el patrón
-    // (la excitación física es la que ilumina la placa).
-    // FIX (2026-09-12, "sigue titilando"): el aro LED tenía el mayor
-    // contraste pico/valle de todo el render (4.5x, 0.22->1.0) sobre un
-    // trazo brillante cian a hasta ~12.5Hz — lee como estroboscopio, no como
-    // respiración. Bajado a 1.82x (0.55->1.0); pulseEff y su timing exacto
-    // con el audio real no cambian, solo el rango que recorre.
-    const ringA = (0.55 + 0.45 * pulseEff) * ampPattern;
-    ctx.save();
-    ctx.lineCap = 'round';
-    // Halo exterior suave.
-    ctx.strokeStyle = `rgba(34, 211, 238, ${(0.22 * ringA).toFixed(3)})`;
-    ctx.lineWidth = R * 0.09;
-    ctx.beginPath();
-    ctx.arc(cx, cy, R * 1.06, -Math.PI * 0.98, -Math.PI * 0.02);
-    ctx.stroke();
-    // Arco brillante.
-    ctx.strokeStyle = `rgba(190, 240, 255, ${(0.85 * ringA).toFixed(3)})`;
-    ctx.lineWidth = R * 0.03;
-    ctx.beginPath();
-    ctx.arc(cx, cy, R * 1.0, -Math.PI * 0.94, -Math.PI * 0.06);
-    ctx.stroke();
-    ctx.restore();
-
-    // Reflejos especulares en cada gota (luz cenital que reacciona a la
-    // elevación: más brillo en el pulso del latido y con la vibración).
-    for (const d of drops) {
-      // Reflejo mínimo en la esquina: pequeño (radio 0.22·dropR) y de baja
-      // opacidad, para que NO tape la filigrana central del mandala — solo
-      // da un brillo de cristal muy discreto en el borde superior.
-      const hx = d.x - dropR * 0.36;
-      const hy = cy - dropR * 0.44;
-      // FIX (2026-09-12, "sigue titilando"): rango bajado de 2.82x a 1.63x,
-      // mismo criterio que ringA.
-      const sa = (0.19 + 0.12 * pulseEff) * ampPattern;
-      const sg = ctx.createRadialGradient(hx, hy, 0, hx, hy, dropR * 0.22);
-      sg.addColorStop(0, `rgba(255,255,255,${sa.toFixed(3)})`);
-      sg.addColorStop(0.3, `rgba(210,240,255,${(sa * 0.18).toFixed(3)})`);
-      sg.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = sg;
-      ctx.beginPath();
-      ctx.arc(hx, hy, dropR * 0.22, 0, TWO_PI);
-      ctx.fill();
+    if (lampLight > 0.02) {
+      drawPlateLamp(ctx, cx, cy, R, lampLight, lampSweep, lampTint);
     }
 
     // Viñeta sutil para integrar el plato con el fondo oscuro.
@@ -2854,11 +2966,18 @@ export class CymaticsRenderer {
   }
 
   /**
-   * Returns the dominant Bessel eigenmode computed in the last render() call.
+   * Returns the central drop's last completed Bessel mode.
    * Used by simulation.js to surface physically-derived mode data to the HUD.
-   * @returns {{ m: number, n: number, omega: number, detuning: number } | null}
+   * @returns {{ m: number, n: number, omega: number, detuning: number, response: number | null } | null}
    */
   getDominantMode() {
-    return this._physicsState.dominantMode || null;
+    const mode = this._curMode[1];
+    if (!mode) return null;
+    const { m, n } = mode;
+    const omega = modeOmega(m, n, PHYS_A);
+    const response = this._renderMode === 'scientific'
+      ? modalResponse(omega, this._centerDriveOmega, zeroFor(m, n) / PHYS_A)
+      : null;
+    return { m, n, omega, detuning: omega - this._centerDriveOmega, response };
   }
 }

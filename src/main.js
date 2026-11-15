@@ -36,7 +36,7 @@ import { getCachedPushStatus, pushStatus } from './api/push.js';
 // P0 — Separación Core / Platform: el bridge nativo (futura APK Android) y
 // la fusión honesta de capacidades. Sin bridge, todo queda como web pura.
 import { createNativeBridgeAdapter, parseBridgeResponse, pickAlarmSound } from './platform/native-bridge.js';
-import { mergePlatformCapabilities } from './platform/platform-capabilities.js';
+import { detectPlatformKind, mergePlatformCapabilities } from './platform/platform-capabilities.js';
 import { detectNotificationCapabilities, capabilitySummary } from './core/notification-capabilities.js';
 import { mountApkTimePicker, resyncApkTimePicker } from './ui/apk-time-picker.js';
 
@@ -84,6 +84,7 @@ import { createFrequency, listFrequencies } from './api/frequencies.js';
 // Bloqueo Premium del modo Personalizado (aditivo): mismo criterio en el
 // generador y en /cuenta, ver src/ui/premium-gate.js.
 import { isPremiumUser, invalidatePremiumCache, openPremiumRequired } from './ui/premium-gate.js';
+import { initLampColor } from './ui/lamp-color.js';
 // Alarmas en la nube (P6-FEAT-001): la alarma del generador se sincroniza al
 // backend cuando hay sesión, para que el scheduler server-side pueda enviar
 // el Web Push a la hora exacta (app cerrada). Best-effort: un fallo nunca
@@ -149,12 +150,14 @@ const ambient = new AmbientEngine();
 simulation.ambient = ambient; // Link for auditory masking model
 
 // ── Transporte de audio (P0.5) ───────────────────────────────────────────────
-// Pipeline único: AudioContext → master → compressor → analyser →
-// MediaStreamDestination → <audio> real (el que el SO ve como reproducción)
-// en Android/desktop; en iOS (que no reproduce streams de Web Audio en un
-// <audio>) el sonido sale directo por ctx.destination y el ancla muda queda
-// como fallback legacy SOLO para reclamar la MediaSession.
-simulation.audio.transport = new AudioTransport({ isIos: isIos() });
+// En escritorio la señal sale por Web Audio desde el primer Play. Chrome
+// Android conserva el elemento real que expone la sesión al sistema.
+simulation.audio.transport = new AudioTransport({
+  isIos: isIos(),
+  preferDirect: detectPlatformKind({ ua: navigator.userAgent }) === 'desktop' &&
+    !navigator.userAgentData?.mobile && navigator.userAgentData?.platform !== 'Android',
+  onEvent: event => ilog('salida', event),
+});
 
 // R2 — coalescing de comandos de CONFIGURACIÓN nativa (volumen/onda/retune):
 // una ráfaga de cambios (slider de volumen, clicks rápidos de onda/estado)
@@ -640,6 +643,7 @@ function perfTick() {
 // pérdida de audio focus suspenden el contexto sin disparar visibilitychange.
 simulation.audio.onCtxStateChange = (state) => {
   ilog('ctx', state);
+  if (!playing) return;
   lifecycle.transition('ctx', { ctxState: state, visible: !document.hidden, playing });
   if (state === 'suspended') {
     sessionLog.suspend({ reason: 'ctx-suspended' });
@@ -751,7 +755,6 @@ let timerInterval = null;
 // Remanente del temporizador congelado al pausar (lock screen / API): un play
 // posterior reanuda la cuenta donde quedó, como YouTube, en vez de reiniciar.
 let pausedRemainingMs = null;
-let lastPulse = 0;
 let accentColor = STATES[0].color;
 let sessionStartTime = 0;
 let sessionAmbient = []; // ambientes activos al iniciar la sesión (para el resumen)
@@ -797,6 +800,14 @@ function lsSet(key, val) {
     /* almacenamiento no disponible */
   }
 }
+
+let lampColor = null;
+let lampMoving = true;
+initLampColor({
+  onChange: value => { lampColor = value; },
+  onMotionChange: value => { lampMoving = value; },
+  onError: showToast,
+});
 
 // ---------------------------------------------------------------- Portadora
 // La portadora (f1) es ortogonal al estado: el estado define el Δf (latido)
@@ -1237,10 +1248,8 @@ function start({ resume = false, source = 'ui-play' } = {}) {
 // sigue saliendo por el AudioContext; el ancla es silencio.
 let audioAnchor = null;
 function startAnchor() {
-  // Fallback legacy SOLO para el transporte 'direct' (iOS): cuando el audio
-  // real sale por ctx.destination no hay elemento que reclame la MediaSession,
-  // así que el ancla muda lo hace. En modo 'element' el propio <audio> real
-  // es la reproducción: añadir un ancla sería duplicar la vía de medios.
+  // En modo directo el ancla muda mantiene los controles de MediaSession.
+  // En modo 'element' los registra el propio <audio> de la sesión.
   const transport = simulation.audio.transport;
   if (transport && transport.mode === 'element') return;
   if (!audioAnchor) {
@@ -1340,7 +1349,7 @@ function pauseSession(source = 'lock-screen') {
   const prevState = audioState.state;
   const tr = audioState.transition('system_pause', { reason: source });
   traceCausal('PAUSE', source, { from: prevState, to: tr ? tr.to : audioState.state });
-  simulation.stop();
+  simulation.pause();
   ambient.stopAll();
   stopAnchor();
   playing = false;
@@ -1827,10 +1836,12 @@ function setVolume(v) {
   } else {
     simulation.setVolume(volumeLevel);
   }
-  saveSession();
 }
-volume.addEventListener('input', () => {
-  setVolume(volume.value);
+// El audio sigue al gesto. El registro y el almacenamiento se actualizan
+// al terminar de mover el control, fuera de la ráfaga de eventos input.
+volume.addEventListener('input', () => setVolume(volume.value));
+volume.addEventListener('change', () => {
+  saveSession();
   sessionLog.note('volumeChanged', { to: volumeLevel });
 });
 
@@ -1841,6 +1852,7 @@ function setVolumeBy(delta) {
   const next = Math.max(0, Math.min(1, Math.round((volumeLevel + delta) * 100) / 100));
   if (next === volumeLevel) return;
   setVolume(next);
+  saveSession();
   sessionLog.note('volumeChanged', { to: next, source: 'media-session' });
 }
 
@@ -2848,7 +2860,7 @@ function restoreFromBackground() {
   traceCausal('RESTORE', 'background');
   const audio = simulation.audio;
   const ctx = audio.ctx;
-  const wasSuspended = !!(ctx && ctx.state === 'suspended');
+  const wasSuspended = ctx?.state === 'suspended' || ctx?.state === 'interrupted';
   const ts = audio.transport ? audio.transport.getState() : null;
   // Plan de recuperación UNA SOLA VEZ (P0.5.9): decidir qué hay que hacer
   // según el estado real; nunca se reinicia la sesión completa.
@@ -2862,10 +2874,6 @@ function restoreFromBackground() {
   // real a 'running' (ctx.onstatechange) completa la transición a FOREGROUND.
   lifecycle.transition('visibility', { visible: true, ctxState: ctx ? ctx.state : null, playing });
   sessionLog.foreground();
-  // M4 — fija la frecuencia en seco ANTES de reanudar/reafirmar el volumen:
-  // un retune() con una rampa en vuelo justo antes de suspender puede sonar
-  // "acelerado" o batido/doblado al reanudar (ver pinFrequencies en audio.js).
-  audio.pinFrequencies();
   // APK: el sonido lo sostiene el servicio nativo; la web queda muda siempre
   // (si se desmutea al volver, suenan dos motores a la vez).
   const nb = nativeAudio();
@@ -2887,11 +2895,9 @@ function restoreFromBackground() {
       }
     }
   } else if (plan.action === 'recover') {
-    // Reanudación sin clics: ganancia al piso, resume, rampa (recoverFade).
+    // El reloj suspendió también la rampa. Al reanudar conserva su frecuencia
+    // instantánea y continúa hasta el objetivo con el mismo reloj de audio.
     audio.recoverFade(volumeLevel, 0.8);
-  } else if (plan.action !== 'reaffirm-element') {
-    // Contexto siguió corriendo: solo se re-afirma el nivel de la sesión.
-    audio.fadeTo(volumeLevel, 0.4);
   }
   // P5.3 — en la APK la WebView NO ejecuta el protocolo de recuperación de
   // audio web: el transporte y la MediaSession pertenecen al servicio nativo
@@ -2950,15 +2956,18 @@ window.addEventListener('pointerdown', () => {
   const ctx = simulation.audio && simulation.audio.ctx;
   // force=true: el toque posterior es el gesto que iOS exige para reanudar;
   // debe reintentarse aunque un restore anterior esté en la ventana de settle.
-  if (ctx && ctx.state === 'suspended') requestRestore(true);
+  if (ctx?.state === 'suspended' || ctx?.state === 'interrupted') requestRestore(true);
 }, { passive: true });
 
 // Atajos de teclado: Espacio = play/pausa, ←/→ = cambiar de estado.
 window.addEventListener('keydown', (e) => {
-  const t = e.target;
-  if (t && typeof t.matches === 'function' && t.matches('input, select, textarea, [contenteditable="true"]')) return;
+  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+  const target = e.target;
+  // Space y flechas pertenecen al control enfocado y a los diálogos.
+  if (target instanceof Element && target.closest('button, input, select, textarea, a[href], [contenteditable], dialog')) return;
   if (e.code === 'Space') {
     e.preventDefault();
+    if (e.repeat) return;
     if (playing) pauseSession('keyboard');
     else resumeSession('keyboard');
   } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -3780,10 +3789,7 @@ if (permissionsModal) {
   }
 }
 
-// Pantalla táctil (móvil/tableta): el visualizador limita su resolución y
-// cadencia para no saturar el hilo principal. El audio comparte ese hilo:
-// la interferencia al moverse por la app viene de la contención con el
-// render (un teléfono con dpr 3 pinta 9× los píxeles de un dpr 1).
+// El DPR y la cadencia del agua se acotan para limitar el coste visual.
 const IS_TOUCH =
   typeof matchMedia === 'function' && matchMedia('(hover: none) and (pointer: coarse)').matches;
 
@@ -3817,18 +3823,12 @@ function hexToRgb(hex) {
 // (LANE_LEFT_COLOR_RGB, LANE_RIGHT_COLOR_RGB y ACCENT_RGB se declaran arriba,
 // junto al estado de la app, para que el arranque las use.)
 
-// Cadencia adaptativa del visualizador en táctil: en sesión se pintan 3 de
-// cada 4 frames (~45 fps) y en pausa 2 de cada 4 (~30 fps). El latido y los
-// impulsos se anclan al reloj del AudioContext (fase 0 = pulso), así que la
-// sincronía visual con el audio no cambia; lo que baja es la contención del
-// hilo principal (la causa de la interferencia al interactuar en el móvil).
-let vizFrame = 0;
+let nextVizFrame = 0;
 // Frecuencias visuales suavizadas (τ = 1,5 s, el mismo ramp que el audio):
 // cuando la portadora o el latido cambian, el agua y la placa se afinan
 // gradualmente — el cambio de frecuencia SE VE poco a poco, sin saltos de
-// ritmo ni reencuadres bruscos. El pulso de luz sigue anclado al reloj real
-// del AudioContext (getBeatPhase), así que la sincronía con el latido no
-// cambia: solo morfa el ritmo de las ondas y la afinación de la placa.
+// ritmo ni reencuadres bruscos. El tintineo web toma los ciclos del reloj
+// del AudioContext por separado para seguir los picos del latido.
 let visBase = 220;
 let visBeat = 6;
 let lastVizT = 0;
@@ -3874,21 +3874,21 @@ if (typeof IntersectionObserver === 'function') {
   visualizerObserver.observe(canvas);
 }
 
-function drawVisual() {
+function drawVisual(now) {
   requestAnimationFrame(drawVisual);
   // Segundo plano: no hay nada que renderizar. La simulación visual se
   // congela (P21) y, al volver, la fase se reconstruye desde el reloj de
   // audio (AudioClock) — no se repiten frames perdidos ni se quema CPU.
   if (document.hidden || !visualizerInView) return;
+  // Usa intervalos de reloj: el coste no crece con la frecuencia de pantalla
+  // y el rasterizador CPU conserva margen mientras se reproduce audio.
+  if (now + 0.7 < nextVizFrame) return;
+  const interval = 1000 / (cymatics.usesCpu ? 24 : IS_TOUCH || !playing ? 30 : 60);
+  nextVizFrame += interval;
+  if (nextVizFrame <= now) nextVizFrame = now + interval;
   perfTick();
-  if (IS_TOUCH && vizFrame++ % 4 > (playing ? 2 : 1)) return;
-  const dpr = devicePixelRatio;
   const w = canvas.width;
   const h = canvas.height;
-  ctx2d.clearRect(0, 0, w, h);
-
-  const now = performance.now();
-  const t = now / 1000;
   const p = currentParams();
   // Suavizado de la frecuencia visual: EMA con τ = 1,5 s hacia la frecuencia
   // REAL (la del motor). Protección NaN/Infinity por si el input personalizado
@@ -3949,30 +3949,22 @@ function drawVisual() {
   // lugar de pulsar con el latido (el motor de audio devuelve fase nula).
   const cond = expCondition;
   const rhythmic = cond === 'binaural' || cond === 'amplitude-modulation';
-  const isPure = cond === 'pure-tone';
-  const isNoise = cond === 'noise';
-  const isSilence = cond === 'none';
-
-  // ----- Cimática: se dibuja la placa de Faraday. Sincronizada con el
-  // latido real del AudioContext: la fase 0 (el pulso) hace brillar el aro
-  // LED y los modos dominantes de la placa (Gotas eliminado — solo queda
-  // este renderer).
-  const periodMs = Math.max(80, 1000 / beat);
-  let phase;
-  if (playing && simulation.audio.isPlaying && rhythmic) {
-    const ph = simulation.audio.getBeatPhase();
-    phase = ph != null ? ph : Math.min(1, (now - lastPulse) / periodMs);
-  } else {
-    phase = (now % 4000) / 4000;
-  }
+  // En Android el reloj de la WebView es un espejo mudo. El servicio
+  // nativo comparte la frecuencia, pero no la fase de su oscilador.
+  const beatSample = playing && rhythmic && !nativeAudio() ? simulation.audio.getBeatSample() : null;
+  const phase = beatSample ? beatSample.cycles - Math.floor(beatSample.cycles) : 0.25;
   const eased = 0.5 + 0.5 * Math.cos(2 * Math.PI * phase);
   cymatics.render(ctx2d, w, h, {
     // Frecuencias ya suavizadas: la placa se afina gradualmente y sus
     // modos dominantes se reorganizan poco a poco al cambiar el tono.
     base: visBase,
     beat,
+    beatHz: tbt,
     playing,
     pulse: eased,
+    beatSample,
+    lampColor,
+    lampMoving,
     condition: cond,
     // Volumen y forma de onda ya se calculaban en currentParams() pero
     // nunca llegaban al renderer (auditoría 2026-08-29): subir/bajar el

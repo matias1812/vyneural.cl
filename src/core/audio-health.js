@@ -27,7 +27,7 @@ export const RECOVERY = {
  * Se ejecuta UNA SOLA vez al volver; nunca reinicia la sesión completa.
  * @param {object} s
  * @param {boolean} s.wasSuspended   El AudioContext estaba suspendido al volver.
- * @param {string} s.ctxState        'running' | 'suspended' | null
+ * @param {string} s.ctxState        'running' | 'suspended' | 'interrupted' | null
  * @param {string} [s.transportMode] 'element' | 'direct'
  * @param {boolean} [s.elementPaused] ¿El <audio> real está pausado?
  * @returns {{action: string, state: string}}
@@ -38,7 +38,7 @@ export function planRecovery({ wasSuspended, ctxState, transportMode = 'direct',
     // El contexto nunca se suspendió pero el SO pausó el elemento: re-afirmar.
     return { action: 'reaffirm-element', state: RECOVERY.RUNNING };
   }
-  if (wasSuspended && ctxState === 'suspended') {
+  if (wasSuspended && (ctxState === 'suspended' || ctxState === 'interrupted')) {
     return { action: 'recover', state: RECOVERY.REQUIRED };
   }
   if (wasSuspended && ctxState === 'running') {
@@ -50,7 +50,7 @@ export function planRecovery({ wasSuspended, ctxState, transportMode = 'direct',
 /**
  * @param {object} s
  * @param {boolean} s.isPlaying    Is the session supposed to be playing?
- * @param {string|null} s.ctxState 'running' | 'suspended' | null
+ * @param {string|null} s.ctxState 'running' | 'suspended' | 'interrupted' | null
  * @param {number} s.gain          Master gain value (0..1)
  * @param {number|null} s.rms      Analyser RMS (0..1), null if not available
  * @param {number} [s.prevHealth]  Accumulated bad samples from previous call
@@ -63,7 +63,7 @@ export function evaluateAudioHealth({ isPlaying, ctxState, gain, rms, prevHealth
   let health = prevHealth;
 
   // Context suspended by the OS → count consecutive samples, then resume.
-  if (ctxState === 'suspended') {
+  if (ctxState === 'suspended' || ctxState === 'interrupted') {
     health += 1;
     if (health >= HEALTH_THRESHOLD) return { action: 'resume', health: 0 };
     return { action: 'none', health };

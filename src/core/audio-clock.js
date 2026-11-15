@@ -19,6 +19,7 @@ export class AudioClock {
   constructor(getTime = () => 0) {
     this._getTime = getTime;
     this._epoch = null; // instante de audio del inicio de la sesión (fase 0)
+    this._beatRamp = null;
   }
 
   /** Marca el inicio de la sesión en el reloj de audio. */
@@ -40,6 +41,29 @@ export class AudioClock {
   elapsed() {
     if (this._epoch == null) return 0;
     return Math.max(0, this.now() - this._epoch);
+  }
+
+  /** Ancla el contador al inicio de las fuentes o al cambio de estímulo. */
+  resetBeatCycles(time, hz, cycles = 0) {
+    this._beatRamp = { time, cycles, from: hz, to: hz, duration: 0 };
+  }
+
+  /** Ciclos acumulados y frecuencia instantánea durante la rampa del audio. */
+  sampleBeat(time = this.now()) {
+    const ramp = this._beatRamp;
+    if (!ramp) return null;
+    const dt = Math.max(0, time - ramp.time);
+    if (!ramp.duration) return { cycles: ramp.cycles + ramp.to * dt, hz: ramp.to };
+    const t = Math.min(dt, ramp.duration);
+    const hz = ramp.from + (ramp.to - ramp.from) * t / ramp.duration;
+    const cycles = ramp.cycles + (ramp.from + hz) * t / 2 + ramp.to * (dt - t);
+    return { cycles, hz };
+  }
+
+  retuneBeat(time, hz, duration) {
+    const current = this.sampleBeat(time);
+    if (!current) return this.resetBeatCycles(time, hz);
+    this._beatRamp = { time, cycles: current.cycles, from: current.hz, to: hz, duration };
   }
 
   /**

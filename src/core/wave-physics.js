@@ -15,6 +15,13 @@
 // Constantes físicas del agua (~20 °C, unidades SI).
 export const G = 9.81; // gravedad (m/s²)
 export const SIGMA_RHO = 7.29e-5; // tensión superficial / densidad (m³/s²)
+const WATER_KINEMATIC_VISCOSITY = 1e-6; // m²/s, agua a ~20 °C
+
+// Decaimiento lineal de amplitud en agua débilmente viscosa y profunda.
+// Dias, Dyachenko y Zakharov, arXiv:0704.3352, ecuación (1.1).
+export function viscousDecayRate(wavenumber) {
+  return 2 * WATER_KINEMATIC_VISCOSITY * wavenumber ** 2;
+}
 
 // Número de onda de Faraday para una excitación a f Hz. La superficie
 // responde a ω_s = π·f (subarmónica) y k resuelve la dispersión
