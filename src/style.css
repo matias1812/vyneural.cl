@@ -1169,6 +1169,10 @@ body {
 }
 
 .lamp-color-dialog {
+  /* El reset global "* { margin: 0 }" pisa el margin:auto que el navegador
+     usa para centrar un <dialog> nativo (position:fixed; inset:0) — sin
+     esto el modal queda pegado arriba-izquierda en vez de centrado. */
+  margin: auto;
   width: min(330px, calc(100% - 32px));
   padding: 18px;
   border: 1px solid rgba(171, 156, 255, 0.24);
@@ -3513,11 +3517,15 @@ body.immersive .controls {
   /* Fijo: acompaña al usuario al hacer scroll y en pantalla completa, en vez
      de quedarse pegado a la cabecera de la página. */
   position: fixed;
-  top: 12px;
+  /* --safe-top: inyectada por MainActivity.kt::injectSafeAreaCss en la APK
+     (edge-to-edge, targetSdk 36) — sin esto el panel se mete bajo la barra
+     de estado, igual al bug ya resuelto para .site-nav (ver site.css). 0px
+     en web/PWA, donde nunca se sobreescribe. */
+  top: calc(12px + var(--safe-top, 0px));
   left: 12px;
   width: 250px;
   max-width: calc(100vw - 24px);
-  max-height: calc(100dvh - 24px);
+  max-height: calc(100dvh - 24px - var(--safe-top, 0px));
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -3540,11 +3548,11 @@ body.immersive .controls {
 /* En pantallas pequeñas el panel se compacta para no tapar los controles. */
 @media (max-width: 480px) {
   .scientific-hud {
-    top: 10px;
+    top: calc(10px + var(--safe-top, 0px));
     left: 10px;
     width: 225px;
     max-width: calc(100vw - 20px);
-    max-height: calc(100dvh - 20px);
+    max-height: calc(100dvh - 20px - var(--safe-top, 0px));
     padding: 10px;
     font-size: 10px;
     border-radius: 8px;

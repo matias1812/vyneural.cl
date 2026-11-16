@@ -1,6 +1,6 @@
 // src/premium.js
 // Página /premium — planes pagos (Webpay/Transbank, SOLO web). Los presets
-// del generador siguen gratis sin cuenta; esto es aditivo y requiere sesión
+// clásicos se pueden escuchar sin cuenta. Premium requiere una sesión
 // (el plan se ata a un usuario). Ver backvyneural/backend/app/routers/
 // payments.py para el flujo completo del lado del servidor.
 
@@ -84,7 +84,16 @@ const PLAN_ORDER = ['monthly', 'annual', 'lifetime'];
 
 // Ítems cortos a propósito (una sola línea) — el resto ya está explicado en
 // el copy del hero de la página.
-const FEATURES = ['Frecuencias personalizadas', 'Alarmas ilimitadas', 'Elige el color de la luz de la cimática', 'Itinerarios completos', 'Soporte asistido 1 a 1', 'La serie Solfeggio completa (396-963 Hz)', 'Resonancia Schumann y su armónico'];
+const FEATURES = [
+  'Frecuencias personalizadas',
+  'Alarmas ilimitadas',
+  'Elige el color de la luz de la cimática',
+  'Itinerarios completos',
+  'Soporte asistido 1 a 1',
+  'La serie Solfeggio completa (396-963 Hz)',
+  'Resonancia Schumann y su armónico',
+  'Presets inspirados en Gateway y Hemi-Sync',
+];
 
 // Precio mensual equivalente / ahorro — siempre derivado de los precios
 // reales que devuelve el backend (nunca hardcodeado), para que la promesa de

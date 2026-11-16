@@ -11,7 +11,7 @@ const FAQ = {
     },
     {
       q: '¿Es gratis? ¿Hay planes de pago?',
-      a: 'Los 28 presets clásicos del generador son gratis para siempre, sin cuenta y sin registrarte. Los presets especiales (serie Solfeggio completa, Schumann y su armónico…), personalizar tu propia frecuencia a mano y guardarla son parte de Vyneural Premium (opcional, de pago), junto con alarmas e itinerarios para quien quiere integrar la práctica a su rutina diaria. La cuenta gratuita sigue sirviendo para sincronizar tus favoritos y frecuencias entre dispositivos, con o sin Premium.',
+      a: 'Los 26 presets clásicos del generador son gratis para siempre y podés escucharlos sin cuenta. Vyneural Premium incluye la serie Solfeggio completa, Schumann y su armónico, presets inspirados en Gateway y Hemi-Sync, frecuencias personalizadas, alarmas e itinerarios. La cuenta gratuita permite sincronizar tus favoritos y frecuencias entre dispositivos.',
     },
     {
       q: '¿Qué es la portadora y qué es el ritmo?',
